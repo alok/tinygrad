@@ -22,11 +22,8 @@ def _vreg(base: int, cnt: int = 1) -> str: return f"v{base}" if cnt == 1 else f"
 def _fmt_sdst(v: int, cnt: int = 1) -> str:
   """Format SGPR destination with special register names."""
   if v == 124: return "null"
-  if 108 <= v <= 123: return f"ttmp[{v-108}:{v-108+cnt-1}]" if cnt > 1 else f"ttmp{v-108}"
-  if cnt > 1:
-    if v == 126 and cnt == 2: return "exec"
-    if v == 106 and cnt == 2: return "vcc"
-    return _sreg(v, cnt)
+  if 108 <= v <= 123: return f"ttmp[{v-108}:{v-108+cnt-1}]" if cnt == 2 else f"ttmp{v-108}"
+  if cnt == 2: return "exec" if v == 126 else "vcc" if v == 106 else _sreg(v, 2)
   return {126: "exec_lo", 127: "exec_hi", 106: "vcc_lo", 107: "vcc_hi", 125: "m0"}.get(v, f"s{v}")
 
 def _fmt_ssrc(v: int, cnt: int = 1) -> str:
@@ -59,8 +56,7 @@ def decode_waitcnt(val: int) -> tuple[int, int, int]:
   return (val >> 10) & 0x3f, val & 0xf, (val >> 4) & 0x3f  # vmcnt, expcnt, lgkmcnt
 
 # VOP3SD opcodes (shared encoding with VOP3 but different field layout)
-# Note: opcodes 0-255 are VOPC promoted to VOP3 - never treat as VOP3SD
-VOP3SD_OPCODES = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
+VOP3SD_OPCODES = {1, 288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
 # Disassembler
 def disasm(inst: Inst) -> str:
@@ -126,16 +122,14 @@ def disasm(inst: Inst) -> str:
       src0_str = fmt_src(src0)
     vsrc1_str = _vreg(vsrc1, 2) if is_64bit_vsrc1 else f"v{vsrc1 & 0x7f}.{'h' if vsrc1 >= 128 else 'l'}" if is_16bit else f"v{vsrc1}"
     if is_cmpx:
-      return f"{op_name}_e32 {src0_str}, {vsrc1_str}"
+      return f"{op_name} {src0_str}, {vsrc1_str}"
     return f"{op_name}_e32 vcc_lo, {src0_str}, {vsrc1_str}"
 
   # SOPP
   if cls_name == 'SOPP':
     simm16 = unwrap(inst._values.get('simm16', 0))
-    # No-operand instructions (simm16 is ignored)
-    no_imm_ops = ('s_endpgm', 's_barrier', 's_wakeup', 's_icache_inv', 's_ttracedata', 's_ttracedata_imm',
-                  's_wait_idle', 's_endpgm_saved', 's_code_end', 's_endpgm_ordered_ps_done')
-    if op_name in no_imm_ops: return op_name
+    if op_name == 's_endpgm': return 's_endpgm'
+    if op_name == 's_barrier': return 's_barrier'
     if op_name == 's_waitcnt':
       vmcnt, expcnt, lgkmcnt = decode_waitcnt(simm16)
       parts = []
@@ -154,52 +148,14 @@ def disasm(inst: Inst) -> str:
       return f"s_delay_alu {' | '.join(p for p in parts if p)}" if parts else "s_delay_alu 0"
     if op_name.startswith('s_cbranch') or op_name.startswith('s_branch'):
       return f"{op_name} {simm16}"
-    # Most SOPP ops require immediate (s_nop, s_setkill, s_sethalt, s_sleep, s_setprio, s_sendmsg*, etc.)
-    return f"{op_name} 0x{simm16:x}"
+    return f"{op_name} 0x{simm16:x}" if simm16 else op_name
 
   # SMEM
   if cls_name == 'SMEM':
-    # No-operand instructions
-    if op_name in ('s_gl1_inv', 's_dcache_inv'): return op_name
-    sdata, sbase, soffset, offset = unwrap(inst._values['sdata']), unwrap(inst._values['sbase']), unwrap(inst._values['soffset']), unwrap(inst._values.get('offset', 0))
-    glc, dlc = unwrap(inst._values.get('glc', 0)), unwrap(inst._values.get('dlc', 0))
-    # s_atc_probe/s_atc_probe_buffer: sdata is the probe mode (0-7), not a register
-    if op_name in ('s_atc_probe', 's_atc_probe_buffer'):
-      sbase_idx = sbase * 2
-      sbase_cnt = 4 if op_name == 's_atc_probe_buffer' else 2
-      sbase_str = _sreg(sbase_idx, sbase_cnt)
-      if offset and soffset != 124:
-        off_str = f"{decode_src(soffset)} offset:0x{offset:x}"
-      elif offset:
-        off_str = f"0x{offset:x}"
-      else:
-        off_str = decode_src(soffset)
-      return f"{op_name} {sdata}, {sbase_str}, {off_str}"
+    sdata, sbase, soffset, offset = unwrap(inst._values['sdata']), unwrap(inst._values['sbase']), unwrap(inst._values['soffset']), unwrap(inst._values['offset'])
     width = {0:1, 1:2, 2:4, 3:8, 4:16, 8:1, 9:2, 10:4, 11:8, 12:16}.get(op_val, 1)
-    # Offset handling: if offset is set, we need "soffset offset:X" format, otherwise just soffset or imm
-    if offset and soffset != 124:  # both soffset register and offset immediate
-      off_str = f"{decode_src(soffset)} offset:0x{offset:x}"
-    elif offset:  # only offset immediate (soffset=null)
-      off_str = f"0x{offset:x}"
-    elif soffset == 124:  # null
-      off_str = "null"
-    else:  # only soffset register
-      off_str = decode_src(soffset)
-    # sbase is stored as register pair index, multiply by 2 for actual register number
-    # s_buffer_load_* (op 8-12) use 4-reg sbase (buffer descriptor), s_load_* (op 0-4) use 2-reg sbase
-    sbase_idx = sbase * 2
-    sbase_cnt = 4 if 8 <= op_val <= 12 else 2
-    # Format sbase with special register names
-    if sbase_idx == 106 and sbase_cnt == 2: sbase_str = "vcc"
-    elif sbase_idx == 126 and sbase_cnt == 2: sbase_str = "exec"
-    elif 108 <= sbase_idx <= 123: sbase_str = f"ttmp[{sbase_idx-108}:{sbase_idx-108+sbase_cnt-1}]"
-    else: sbase_str = _sreg(sbase_idx, sbase_cnt)
-    # Build modifiers
-    mods = []
-    if glc: mods.append("glc")
-    if dlc: mods.append("dlc")
-    mod_str = " " + " ".join(mods) if mods else ""
-    return f"{op_name} {_fmt_sdst(sdata, width)}, {sbase_str}, {off_str}{mod_str}"
+    off_str = f"0x{offset:x}" if offset else "null" if soffset == 124 else decode_src(soffset)
+    return f"{op_name} {_sreg(sdata, width)}, {_sreg(sbase, 2)}, {off_str}"
 
   # FLAT
   if cls_name == 'FLAT':
@@ -269,15 +225,6 @@ def disasm(inst: Inst) -> str:
     is_shift64 = 'rev' in op_name and '64' in op_name and op_name.startswith('v_')
     # v_ldexp_f64: 64-bit src0 (mantissa), 32-bit src1 (exponent)
     is_ldexp64 = op_name == 'v_ldexp_f64'
-    # v_trig_preop_f64: 64-bit dst/src0, 32-bit src1 (exponent/scale)
-    is_trig_preop = op_name == 'v_trig_preop_f64'
-    # v_readlane_b32: destination is SGPR (despite vdst field)
-    is_readlane = op_name == 'v_readlane_b32'
-    # SAD/QSAD/MQSAD instructions have mixed sizes
-    # v_qsad_pk_u16_u8, v_mqsad_pk_u16_u8: 64-bit dst/src0/src2, 32-bit src1
-    # v_mqsad_u32_u8: 128-bit (4 reg) dst/src2, 64-bit src0, 32-bit src1
-    is_sad64 = any(x in op_name for x in ('qsad_pk', 'mqsad_pk'))
-    is_mqsad_u32 = 'mqsad_u32' in op_name
     # Detect conversion ops: v_cvt_{dst_type}_{src_type} - each side may have different size
     # Also handle v_cvt_pk_* which packs two values into one
     if 'cvt_pk' in op_name:
@@ -285,65 +232,41 @@ def disasm(inst: Inst) -> str:
       # e.g., v_cvt_pk_i16_f32, v_cvt_pk_norm_i16_f32
       is_f16_dst = is_f16_src = is_f16_src2 = False  # dst is 32-bit, srcs depend on op
       is_f16_src = op_name.endswith('16')  # only if final type is 16-bit
-    elif m := re.match(r'v_cvt_([a-z0-9_]+)_([a-z0-9]+)', op_name):
+    elif m := re.match(r'v_cvt_([a-z0-9]+)_([a-z0-9]+)', op_name):
       dst_type, src_type = m.group(1), m.group(2)
-      # Check if dst/src ends with a 16-bit type suffix
-      is_f16_dst = any(dst_type.endswith(x) for x in ('f16', 'i16', 'u16', 'b16'))
-      is_f16_src = is_f16_src2 = any(src_type.endswith(x) for x in ('f16', 'i16', 'u16', 'b16'))
-      # Override is_f64 for conversion ops - check if dst or src is 64-bit
-      is_f64_dst = '64' in dst_type
-      is_f64_src = '64' in src_type
-      is_f64 = False  # Don't use default is_f64 detection for cvt ops
-    elif m := re.match(r'v_frexp_exp_([a-z0-9]+)_([a-z0-9]+)', op_name):
-      # v_frexp_exp_i32_f64: 32-bit dst (exponent), 64-bit src
-      # v_frexp_exp_i16_f16: 16-bit dst, 16-bit src
-      dst_type, src_type = m.group(1), m.group(2)
-      is_f16_dst = any(dst_type.endswith(x) for x in ('f16', 'i16', 'u16', 'b16'))
-      is_f16_src = is_f16_src2 = any(src_type.endswith(x) for x in ('f16', 'i16', 'u16', 'b16'))
-      is_f64_dst = '64' in dst_type
-      is_f64_src = '64' in src_type
-      is_f64 = False
+      is_f16_dst = '16' in dst_type
+      is_f16_src = is_f16_src2 = '16' in src_type
     elif m := re.match(r'v_mad_([iu])32_([iu])16', op_name):
       # v_mad_i32_i16, v_mad_u32_u16: 32-bit dst, 16-bit src0/src1, 32-bit src2
       is_f16_dst = False
       is_f16_src = True  # src0 and src1 are 16-bit
       is_f16_src2 = False  # src2 is 32-bit
-    elif 'pack_b32' in op_name:
-      # v_pack_b32_f16: 32-bit dst, 16-bit sources
-      is_f16_dst = False
-      is_f16_src = is_f16_src2 = True
     else:
-      # 16-bit ops need .h/.l suffix, but packed ops (dot2, pk_, sad, msad, qsad, mqsad) don't
-      is_16bit_op = ('f16' in op_name or 'i16' in op_name or 'u16' in op_name or 'b16' in op_name) and not any(x in op_name for x in ('dot2', 'pk_', 'sad', 'msad', 'qsad', 'mqsad'))
+      # 16-bit ops need .h/.l suffix, but packed ops (dot2, pk) don't
+      is_16bit_op = ('f16' in op_name or 'i16' in op_name or 'u16' in op_name or 'b16' in op_name) and 'dot2' not in op_name
       is_f16_dst = is_f16_src = is_f16_src2 = is_16bit_op
-    def fmt_vop3_src(v, neg_bit, abs_bit, hi_bit=False, reg_cnt=1, is_16=False):
+    def fmt_vop3_src(v, neg_bit, abs_bit, hi_bit=False, force_64=False, is_16=False):
       s = fmt_src(v)
-      # Add register pair/quad for 64/128-bit, or .h suffix for f16 VGPRs with opsel
-      if reg_cnt > 1 and v >= 256: s = _vreg(v - 256, reg_cnt)
-      elif reg_cnt > 1 and v <= 105: s = _sreg(v, reg_cnt)
-      elif reg_cnt == 2 and v == 106: s = "vcc"
-      elif reg_cnt == 2 and v == 126: s = "exec"
-      elif reg_cnt > 1 and 108 <= v <= 123: s = f"ttmp[{v-108}:{v-108+reg_cnt-1}]"
+      # Add register pair for f64, or .h suffix for f16 VGPRs with opsel
+      if force_64 and v >= 256: s = _vreg(v - 256, 2)
+      elif force_64 and v <= 105: s = _sreg(v, 2)
+      elif force_64 and v == 106: s = "vcc"
+      elif force_64 and v == 126: s = "exec"
+      elif force_64 and 108 <= v <= 123: s = f"ttmp[{v-108}:{v-108+1}]"
       elif is_16 and v >= 256: s = f"v{v - 256}.h" if hi_bit else f"v{v - 256}.l"
       if abs_bit: s = f"|{s}|"
       if neg_bit: s = f"-{s}"
       return s
-    # Determine register count for each source (check for cvt-specific 64-bit flags first)
-    is_src0_64 = locals().get('is_f64_src', is_f64 and not is_shift64) or is_sad64 or is_mqsad_u32
-    is_src1_64 = is_f64 and not is_class and not is_ldexp64 and not is_trig_preop
-    src0_cnt = 2 if is_src0_64 else 1
-    src1_cnt = 2 if is_src1_64 else 1
-    src2_cnt = 4 if is_mqsad_u32 else 2 if (is_f64 or is_sad64) else 1
-    src0_str = fmt_vop3_src(src0, neg & 1, abs_ & 1, opsel & 1, src0_cnt, is_f16_src)
-    src1_str = fmt_vop3_src(src1, neg & 2, abs_ & 2, opsel & 2, src1_cnt, is_f16_src)
-    src2_str = fmt_vop3_src(src2, neg & 4, abs_ & 4, opsel & 4, src2_cnt, is_f16_src2)
-    # Format destination - for 16-bit ops, use .h/.l suffix; readlane uses SGPR dest
-    is_dst_64 = locals().get('is_f64_dst', is_f64) or is_sad64
-    dst_cnt = 4 if is_mqsad_u32 else 2 if is_dst_64 else 1
-    if is_readlane:
-      dst_str = _fmt_sdst(vdst, 1)
-    elif dst_cnt > 1:
-      dst_str = _vreg(vdst, dst_cnt)
+    # Determine which sources are 64-bit
+    src0_64 = is_f64 and not is_shift64  # shift ops have 32-bit shift amount
+    src1_64 = is_f64 and not is_class and not is_ldexp64  # class/ldexp ops have 32-bit src1
+    src2_64 = is_f64
+    src0_str = fmt_vop3_src(src0, neg & 1, abs_ & 1, opsel & 1, src0_64, is_f16_src)
+    src1_str = fmt_vop3_src(src1, neg & 2, abs_ & 2, opsel & 2, src1_64, is_f16_src)
+    src2_str = fmt_vop3_src(src2, neg & 4, abs_ & 4, opsel & 4, src2_64, is_f16_src2)
+    # Format destination - for 16-bit ops, use .h/.l suffix
+    if is_f64:
+      dst_str = _vreg(vdst, 2)
     elif is_f16_dst:
       dst_str = f"v{vdst}.h" if (opsel & 8) else f"v{vdst}.l"
     else:
@@ -377,57 +300,31 @@ def disasm(inst: Inst) -> str:
         return f"{op_name}_e64 {src0_str}, {src1_str}"
       return f"{op_name}_e64 {_fmt_sdst(vdst, 1)}, {src0_str}, {src1_str}"
     elif op_val < 384:  # VOP2 promoted
-      # v_cndmask_b32 in VOP3 format has 3 sources (src2 is mask selector)
-      if 'cndmask' in op_name:
-        return f"{op_name}_e64 {dst_str}, {src0_str}, {src1_str}, {src2_str}" + fmt_opsel(3) + clamp_str + omod_str
       return f"{op_name}_e64 {dst_str}, {src0_str}, {src1_str}" + fmt_opsel(2) + clamp_str + omod_str
     elif op_val < 512:  # VOP1 promoted
-      if op_name in ('v_nop', 'v_pipeflush'): return f"{op_name}_e64"
       return f"{op_name}_e64 {dst_str}, {src0_str}" + fmt_opsel(1) + clamp_str + omod_str
     else:  # Native VOP3 - determine 2 vs 3 sources based on instruction name
-      # 3-source ops: fma, mad, min3, max3, med3, div_fixup, div_fmas, sad, msad, qsad, mqsad, lerp, alignbit/byte, cubeid/sc/tc/ma, bfe, bfi, perm_b32, permlane, cndmask
-      # Note: v_writelane_b32 is 2-src (src0, src1 with vdst as 3rd operand - read-modify-write)
+      # 3-source ops: fma, mad, min3, max3, med3, div_fixup, div_fmas, sad, msad, qsad, mqsad, lerp, alignbit/byte, cubeid/sc/tc/ma, bfe, bfi, permlane, cndmask
       is_3src = any(x in op_name for x in ('fma', 'mad', 'min3', 'max3', 'med3', 'div_fix', 'div_fmas', 'sad', 'lerp', 'align', 'cube',
-                                            'bfe', 'bfi', 'perm_b32', 'permlane', 'cndmask', 'xor3', 'or3', 'add3', 'lshl_or', 'and_or', 'lshl_add',
-                                            'add_lshl', 'xad', 'maxmin', 'minmax', 'dot2', 'cvt_pk_u8', 'mullit'))
+                                            'bfe', 'bfi', 'perm', 'cndmask', 'xor3', 'or3', 'add3', 'lshl_or', 'and_or', 'lshl_add',
+                                            'add_lshl', 'xad', 'maxmin', 'minmax', 'dot2', 'cvt_pk_u8', 'writelane', 'mullit'))
       if is_3src:
         return f"{op_name} {dst_str}, {src0_str}, {src1_str}, {src2_str}" + fmt_opsel(3) + clamp_str + omod_str
       return f"{op_name} {dst_str}, {src0_str}, {src1_str}" + fmt_opsel(2) + clamp_str + omod_str
 
-  # VOP3SD: 3-source with scalar destination (v_div_scale_*, v_add_co_u32, v_mad_*64_*32, etc.)
+  # VOP3SD: 3-source with scalar destination (v_div_scale_*)
   if cls_name == 'VOP3SD':
     vdst, sdst = unwrap(inst._values.get('vdst', 0)), unwrap(inst._values.get('sdst', 0))
     src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
     neg = unwrap(inst._values.get('neg', 0))
-    omod = unwrap(inst._values.get('omod', 0))
-    clmp = unwrap(inst._values.get('clmp', 0))
-    is_f64 = 'f64' in op_name
-    is_mad64 = 'mad_i64_i32' in op_name or 'mad_u64_u32' in op_name
-    def fmt_sd_src(v, neg_bit, is_64bit=False):
+    def fmt_vop3_src(v, neg_bit):
       s = fmt_src(v)
-      if is_64bit or is_f64:
-        if v >= 256: s = _vreg(v - 256, 2)
-        elif v <= 105: s = _sreg(v, 2)
-        elif v == 106: s = "vcc"
-        elif v == 126: s = "exec"
-        elif 108 <= v <= 123: s = f"ttmp[{v-108}:{v-108+1}]"
       if neg_bit: s = f"-{s}"
       return s
-    src0_str = fmt_sd_src(src0, neg & 1, False)
-    src1_str = fmt_sd_src(src1, neg & 2, False)
-    src2_str = fmt_sd_src(src2, neg & 4, is_mad64)
-    dst_str = _vreg(vdst, 2) if (is_f64 or is_mad64) else f"v{vdst}"
-    sdst_str = _fmt_sdst(sdst, 1)
-    clamp_str = " clamp" if clmp else ""
-    omod_str = {1: " mul:2", 2: " mul:4", 3: " div:2"}.get(omod, "")
-    # v_add_co_u32, v_sub_co_u32, v_subrev_co_u32 only use 2 sources
-    if op_name in ('v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32'):
-      return f"{op_name}_e64 {dst_str}, {sdst_str}, {src0_str}, {src1_str}" + clamp_str
-    # v_add_co_ci_u32, v_sub_co_ci_u32, v_subrev_co_ci_u32 use 3 sources (src2 is carry-in)
-    if op_name in ('v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'):
-      return f"{op_name}_e64 {dst_str}, {sdst_str}, {src0_str}, {src1_str}, {src2_str}" + clamp_str
-    # v_div_scale, v_mad_*64_*32 use 3 sources
-    return f"{op_name} {dst_str}, {sdst_str}, {src0_str}, {src1_str}, {src2_str}" + clamp_str + omod_str
+    src0_str = fmt_vop3_src(src0, neg & 1)
+    src1_str = fmt_vop3_src(src1, neg & 2)
+    src2_str = fmt_vop3_src(src2, neg & 4)
+    return f"{op_name} v{vdst}, vcc_lo, {src0_str}, {src1_str}, {src2_str}"
 
   # VOPD: dual-issue instructions
   if cls_name == 'VOPD':
@@ -448,97 +345,6 @@ def disasm(inst: Inst) -> str:
     opy_str = f"{opy_name} v{vdsty}, {fmt_src(srcy0)}" if 'mov' in opy_name else f"{opy_name} v{vdsty}, {fmt_src(srcy0)}, v{vsrcy1}"
     return f"{opx_str} :: {opy_str}"
 
-  # VOP3P: packed vector ops
-  if cls_name == 'VOP3P':
-    vdst = unwrap(inst._values.get('vdst', 0))
-    src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
-    neg = unwrap(inst._values.get('neg', 0))  # neg_lo
-    neg_hi = unwrap(inst._values.get('neg_hi', 0))
-    opsel = unwrap(inst._values.get('opsel', 0))
-    opsel_hi = unwrap(inst._values.get('opsel_hi', 0))
-    opsel_hi2 = unwrap(inst._values.get('opsel_hi2', 0))
-    clmp = unwrap(inst._values.get('clmp', 0))
-    # WMMA ops have special register widths
-    is_wmma = 'wmma' in op_name
-    # Determine number of sources (dot ops are 3-src, most are 2-src)
-    is_3src = any(x in op_name for x in ('fma', 'mad', 'dot', 'wmma'))
-    # Format source operands
-    def fmt_vop3p_src(v, reg_cnt=1):
-      if v >= 256: return _vreg(v - 256, reg_cnt)
-      if v <= 105: return _sreg(v, reg_cnt) if reg_cnt > 1 else f"s{v}"
-      if v == 106 and reg_cnt == 2: return "vcc"
-      if v == 126 and reg_cnt == 2: return "exec"
-      return fmt_src(v)
-    # WMMA: f16/bf16 use 8-reg sources, iu8 uses 4-reg, iu4 uses 2-reg; all have 8-reg dst
-    if is_wmma:
-      src_cnt = 2 if 'iu4' in op_name else 4 if 'iu8' in op_name else 8
-      src0_str = _vreg(src0 - 256, src_cnt) if src0 >= 256 else fmt_vop3p_src(src0, src_cnt)
-      src1_str = _vreg(src1 - 256, src_cnt) if src1 >= 256 else fmt_vop3p_src(src1, src_cnt)
-      src2_str = _vreg(src2 - 256, 8) if src2 >= 256 else fmt_vop3p_src(src2, 8)
-      dst_str = _vreg(vdst, 8)
-    else:
-      src0_str = fmt_vop3p_src(src0)
-      src1_str = fmt_vop3p_src(src1)
-      src2_str = fmt_vop3p_src(src2)
-      dst_str = f"v{vdst}"
-    # Build modifiers - VOP3P uses op_sel, op_sel_hi, neg_lo, neg_hi
-    mods = []
-    # op_sel: selects high/low half of each source
-    if opsel:
-      if is_3src:
-        mods.append(f"op_sel:[{opsel & 1},{(opsel >> 1) & 1},{(opsel >> 2) & 1}]")
-      else:
-        mods.append(f"op_sel:[{opsel & 1},{(opsel >> 1) & 1}]")
-    # op_sel_hi: selects high half for upper result lane (default [1,1] or [1,1,1])
-    # opsel_hi is bits 0-1, opsel_hi2 is bit 2 (for src2)
-    full_opsel_hi = opsel_hi | (opsel_hi2 << 2)
-    default_opsel_hi = 0b111 if is_3src else 0b11
-    if full_opsel_hi != default_opsel_hi:
-      if is_3src:
-        mods.append(f"op_sel_hi:[{full_opsel_hi & 1},{(full_opsel_hi >> 1) & 1},{(full_opsel_hi >> 2) & 1}]")
-      else:
-        mods.append(f"op_sel_hi:[{full_opsel_hi & 1},{(full_opsel_hi >> 1) & 1}]")
-    # neg_lo: negate lower half of source
-    if neg:
-      if is_3src:
-        mods.append(f"neg_lo:[{neg & 1},{(neg >> 1) & 1},{(neg >> 2) & 1}]")
-      else:
-        mods.append(f"neg_lo:[{neg & 1},{(neg >> 1) & 1}]")
-    # neg_hi: negate upper half of source
-    if neg_hi:
-      if is_3src:
-        mods.append(f"neg_hi:[{neg_hi & 1},{(neg_hi >> 1) & 1},{(neg_hi >> 2) & 1}]")
-      else:
-        mods.append(f"neg_hi:[{neg_hi & 1},{(neg_hi >> 1) & 1}]")
-    if clmp: mods.append("clamp")
-    mod_str = " " + " ".join(mods) if mods else ""
-    if is_3src:
-      return f"{op_name} {dst_str}, {src0_str}, {src1_str}, {src2_str}{mod_str}"
-    return f"{op_name} {dst_str}, {src0_str}, {src1_str}{mod_str}"
-
-  # VINTERP: interpolation instructions
-  if cls_name == 'VINTERP':
-    vdst = unwrap(inst._values.get('vdst', 0))
-    src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
-    waitexp = unwrap(inst._values.get('waitexp', 0))
-    neg = unwrap(inst._values.get('neg', 0))
-    clmp = unwrap(inst._values.get('clmp', 0))
-    opsel = unwrap(inst._values.get('opsel', 0))
-    def fmt_vi_src(v, neg_bit):
-      s = f"v{v - 256}" if v >= 256 else fmt_src(v)
-      if neg_bit: s = f"-{s}"
-      return s
-    src0_str = fmt_vi_src(src0, neg & 1)
-    src1_str = fmt_vi_src(src1, neg & 2)
-    src2_str = fmt_vi_src(src2, neg & 4)
-    # LLVM doesn't use .l/.h suffix for vinterp dst
-    dst_str = f"v{vdst}"
-    mods = []
-    if waitexp: mods.append(f"wait_exp:{waitexp}")
-    if clmp: mods.append("clamp")
-    mod_str = " " + " ".join(mods) if mods else ""
-    return f"{op_name} {dst_str}, {src0_str}, {src1_str}, {src2_str}{mod_str}"
-
   # MUBUF: buffer load/store
   if cls_name == 'MUBUF':
     vdata, vaddr = unwrap(inst._values.get('vdata', 0)), unwrap(inst._values.get('vaddr', 0))
@@ -546,23 +352,15 @@ def disasm(inst: Inst) -> str:
     offset = unwrap(inst._values.get('offset', 0))
     offen, idxen = unwrap(inst._values.get('offen', 0)), unwrap(inst._values.get('idxen', 0))
     glc, dlc, slc = unwrap(inst._values.get('glc', 0)), unwrap(inst._values.get('dlc', 0)), unwrap(inst._values.get('slc', 0))
-    tfe = unwrap(inst._values.get('tfe', 0))
     # Special ops with no operands
     if op_name in ('buffer_gl0_inv', 'buffer_gl1_inv'): return op_name
     # Determine data width from op name
     # d16 formats: _x and _xy use 1 reg, _xyz and _xyzw use 2 regs
     # regular formats: _x=1, _xy=2, _xyz=3, _xyzw=4
-    # atomic u64 uses 2 regs, cmpswap doubles width (compare + swap)
     if 'd16' in op_name:
       width = 2 if any(x in op_name for x in ('xyz', 'xyzw')) else 1
-    elif 'atomic' in op_name:
-      # cmpswap uses 2 regs for b32, 4 for b64; other atomics use 1 for b32, 2 for b64/u64/i64
-      base_width = 2 if any(x in op_name for x in ('b64', 'u64', 'i64')) else 1
-      width = base_width * 2 if 'cmpswap' in op_name else base_width
     else:
       width = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'b16':1, 'x':1, 'xy':2, 'xyz':3, 'xyzw':4}.get(op_name.split('_')[-1], 1)
-    # tfe adds 1 extra VGPR for texture fault status
-    if tfe: width += 1
     is_store = 'store' in op_name
     # Format vaddr
     if offen and idxen: vaddr_str = f"v[{vaddr}:{vaddr+1}]"
@@ -581,7 +379,6 @@ def disasm(inst: Inst) -> str:
     if glc: mods.append("glc")
     if dlc: mods.append("dlc")
     if slc: mods.append("slc")
-    if tfe: mods.append("tfe")
     mod_str = " " + " ".join(mods) if mods else ""
     if is_store:
       return f"{op_name} {_vreg(vdata, width)}, {vaddr_str}, {srsrc_str}, {soff_str}{mod_str}"
@@ -593,33 +390,18 @@ def disasm(inst: Inst) -> str:
     srsrc, soffset = unwrap(inst._values.get('srsrc', 0)), unwrap(inst._values.get('soffset', 0))
     offset, fmt = unwrap(inst._values.get('offset', 0)), unwrap(inst._values.get('format', 0))
     offen, idxen = unwrap(inst._values.get('offen', 0)), unwrap(inst._values.get('idxen', 0))
-    glc, dlc, slc = unwrap(inst._values.get('glc', 0)), unwrap(inst._values.get('dlc', 0)), unwrap(inst._values.get('slc', 0))
     # Format vaddr
     if offen and idxen: vaddr_str = f"v[{vaddr}:{vaddr+1}]"
     elif offen or idxen: vaddr_str = f"v{vaddr}"
     else: vaddr_str = "off"
-    # Format srsrc (4-aligned SGPR quad, or ttmp)
     srsrc_base = srsrc * 4
-    if 108 <= srsrc_base <= 123:
-      srsrc_str = f"ttmp[{srsrc_base-108}:{srsrc_base-108+3}]"
-    else:
-      srsrc_str = f"s[{srsrc_base}:{srsrc_base+3}]"
-    # Format soffset - use decode_src for proper special register handling
-    soff_str = decode_src(soffset)
-    # Build modifiers - idxen must come before offen for LLVM
+    srsrc_str = f"s[{srsrc_base}:{srsrc_base+3}]"
+    soff_str = f"s{soffset}" if soffset < 106 else str(soffset - 128) if 128 <= soffset <= 192 else f"s{soffset}"
     mods = [f"format:{fmt}"]
-    if idxen: mods.append("idxen")
     if offen: mods.append("offen")
+    if idxen: mods.append("idxen")
     if offset: mods.append(f"offset:{offset}")
-    if glc: mods.append("glc")
-    if dlc: mods.append("dlc")
-    if slc: mods.append("slc")
-    # Determine vdata width: d16 xyz/xyzw use 2 regs, d16 x/xy use 1 reg
-    if 'd16' in op_name:
-      width = 2 if any(x in op_name for x in ('xyz', 'xyzw')) else 1
-    else:
-      width = {'x':1, 'xy':2, 'xyz':3, 'xyzw':4}.get(op_name.split('_')[-1], 1)
-    return f"{op_name} {_vreg(vdata, width)}, {vaddr_str}, {srsrc_str}, {soff_str} {' '.join(mods)}"
+    return f"{op_name} v{vdata}, {vaddr_str}, {srsrc_str}, {soff_str} {' '.join(mods)}"
 
   # SOP1/SOP2/SOPC/SOPK
   if cls_name in ('SOP1', 'SOP2', 'SOPC', 'SOPK'):
@@ -644,27 +426,7 @@ def disasm(inst: Inst) -> str:
     if cls_name == 'SOPK':
       sdst, simm16 = unwrap(inst._values.get('sdst', 0)), unwrap(inst._values.get('simm16', 0))
       if op_name == 's_version': return f"{op_name} 0x{simm16:x}"
-      if op_name in ('s_setreg_b32', 's_getreg_b32'):
-        # Decode hwreg: (size-1) << 11 | offset << 6 | id
-        hwreg_id, hwreg_offset, hwreg_size = simm16 & 0x3f, (simm16 >> 6) & 0x1f, ((simm16 >> 11) & 0x1f) + 1
-        # GFX11+ hwreg names (IDs 16-17 are TBA which are not supported on GFX11, IDs 18-19 are PERF_SNAPSHOT)
-        hwreg_names = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_HW_ID',
-                       5: 'HW_REG_GPR_ALLOC', 6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS',
-                       15: 'HW_REG_SH_MEM_BASES',
-                       18: 'HW_REG_PERF_SNAPSHOT_PC_LO', 19: 'HW_REG_PERF_SNAPSHOT_PC_HI',
-                       20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI', 22: 'HW_REG_XNACK_MASK',
-                       23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER',
-                       28: 'HW_REG_IB_STS2'}
-        # For unsupported registers (TBA_LO/HI, TMA_LO/HI on GFX11), output raw simm16 value
-        if hwreg_id in (16, 17, 18, 19) and hwreg_id not in hwreg_names:
-          # Unsupported on GFX11 - use raw encoding
-          hwreg_str = f"0x{simm16:x}"
-        else:
-          hwreg_name = hwreg_names.get(hwreg_id, str(hwreg_id))
-          hwreg_str = f"hwreg({hwreg_name}, {hwreg_offset}, {hwreg_size})"
-        if op_name == 's_setreg_b32':
-          return f"{op_name} {hwreg_str}, {_fmt_sdst(sdst, 1)}"
-        return f"{op_name} {_fmt_sdst(sdst, 1)}, {hwreg_str}"
+      if op_name == 's_setreg_b32': return f"{op_name} 0x{simm16:x}, {_fmt_sdst(sdst, 1)}"
       return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, 0x{simm16:x}"
 
   # Generic fallback
@@ -697,22 +459,6 @@ def parse_operand(op: str) -> tuple:
   if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_, hi_half)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op):
     return (REG_MAP[m.group(1)](int(m.group(2)), 1, hi_half), neg, abs_, hi_half)
-  # hwreg(name, offset, size) or hwreg(name) -> simm16 encoding
-  if m := re.match(r'^hwreg\((\w+)(?:,\s*(\d+),\s*(\d+))?\)$', op):
-    # GFX11 hwreg names - note IDs 18-19 are PERF_SNAPSHOT on GFX11, not TMA
-    hwreg_names = {'hw_reg_mode': 1, 'hw_reg_status': 2, 'hw_reg_trapsts': 3, 'hw_reg_hw_id': 4,
-                   'hw_reg_gpr_alloc': 5, 'hw_reg_lds_alloc': 6, 'hw_reg_ib_sts': 7,
-                   'hw_reg_sh_mem_bases': 15,
-                   'hw_reg_perf_snapshot_pc_lo': 18, 'hw_reg_perf_snapshot_pc_hi': 19,
-                   'hw_reg_flat_scr_lo': 20, 'hw_reg_flat_scr_hi': 21, 'hw_reg_xnack_mask': 22,
-                   'hw_reg_hw_id1': 23, 'hw_reg_hw_id2': 24, 'hw_reg_pops_packer': 25, 'hw_reg_ib_sts2': 28}
-    name_str = m.group(1).lower()
-    hwreg_id = hwreg_names.get(name_str, int(name_str) if name_str.isdigit() else None)
-    if hwreg_id is None: raise ValueError(f"unknown hwreg name: {name_str}")
-    offset = int(m.group(2)) if m.group(2) else 0
-    size = int(m.group(3)) if m.group(3) else 32
-    simm16 = ((size - 1) << 11) | (offset << 6) | hwreg_id
-    return (simm16, neg, abs_, hi_half)
   raise ValueError(f"cannot parse operand: {op}")
 
 SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b128', 's_load_b256', 's_load_b512',
@@ -733,37 +479,10 @@ def asm(text: str) -> Inst:
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
   mnemonic, op_str = parts[0].lower(), text[len(parts[0]):].strip()
-  # Handle s_waitcnt specially before operand parsing
-  if mnemonic == 's_waitcnt':
-    vmcnt, expcnt, lgkmcnt = 0x3f, 0x7, 0x3f
-    for part in op_str.replace(',', ' ').split():
-      if m := re.match(r'vmcnt\((\d+)\)', part): vmcnt = int(m.group(1))
-      elif m := re.match(r'expcnt\((\d+)\)', part): expcnt = int(m.group(1))
-      elif m := re.match(r'lgkmcnt\((\d+)\)', part): lgkmcnt = int(m.group(1))
-      elif re.match(r'^0x[0-9a-f]+$|^\d+$', part): return autogen.s_waitcnt(simm16=int(part, 0))
-    return autogen.s_waitcnt(simm16=waitcnt(vmcnt, expcnt, lgkmcnt))
-  # Handle VOPD dual-issue instructions: opx dst, src :: opy dst, src
-  if '::' in text:
-    x_part, y_part = text.split('::')
-    x_parts, y_parts = x_part.strip().replace(',', ' ').split(), y_part.strip().replace(',', ' ').split()
-    opx_name, opy_name = x_parts[0].upper(), y_parts[0].upper()
-    opx, opy = autogen.VOPDOp[opx_name], autogen.VOPDOp[opy_name]
-    x_ops, y_ops = [parse_operand(p)[0] for p in x_parts[1:]], [parse_operand(p)[0] for p in y_parts[1:]]
-    vdstx, srcx0 = x_ops[0], x_ops[1] if len(x_ops) > 1 else 0
-    vsrcx1 = x_ops[2] if len(x_ops) > 2 else VGPR(0)
-    vdsty, srcy0 = y_ops[0], y_ops[1] if len(y_ops) > 1 else 0
-    vsrcy1 = y_ops[2] if len(y_ops) > 2 else VGPR(0)
-    # Handle fmaak/fmamk literals (4th operand on x or y side)
-    lit = None
-    if 'fmaak' in opx_name.lower() and len(x_ops) > 3: lit = unwrap(x_ops[3])
-    elif 'fmamk' in opx_name.lower() and len(x_ops) > 3: lit, vsrcx1 = unwrap(x_ops[2]), x_ops[3]
-    elif 'fmaak' in opy_name.lower() and len(y_ops) > 3: lit = unwrap(y_ops[3])
-    elif 'fmamk' in opy_name.lower() and len(y_ops) > 3: lit, vsrcy1 = unwrap(y_ops[2]), y_ops[3]
-    return autogen.VOPD(opx, opy, vdstx=vdstx, vdsty=vdsty, srcx0=srcx0, vsrcx1=vsrcx1, srcy0=srcy0, vsrcy1=vsrcy1, literal=lit)
   operands, current, depth, in_pipe = [], "", 0, False
   for ch in op_str:
-    if ch in '[(': depth += 1
-    elif ch in '])': depth -= 1
+    if ch == '[': depth += 1
+    elif ch == ']': depth -= 1
     elif ch == '|': in_pipe = not in_pipe
     if ch == ',' and depth == 0 and not in_pipe: operands.append(current.strip()); current = ""
     else: current += ch

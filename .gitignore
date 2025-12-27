@@ -64,4 +64,5 @@ profile_stats
 target
 .mypy_cache
 mutants
-.mutmut-cache
+.mutmut-cache.claude/
+lean4/.lake/

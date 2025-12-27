@@ -37,13 +37,14 @@ extern_lib tg4c pkg := do
   pkg.afterBuildCacheAsync do
     let mut oFiles : Array (Job FilePath) := #[]
     for file in (← (pkg.dir / "lean4" / "c").readDir) do
-      -- Compile .c files only (skip .m files - they need system clang)
-      if file.path.extension == some "c" then
+      -- Compile only tg4c_stub.c - other files have issues:
+      -- - tg4_gemm.c has duplicate symbols
+      -- - metal_bench_main.c has stale API signatures
+      -- - .m files need system clang for Metal frameworks
+      if file.path.extension == some "c" && file.fileName == "tg4c_stub.c" then
         let oFile := pkg.buildDir / "c" / ((file.fileName.dropSuffix ".c").toString ++ ".o")
         let srcJob ← inputTextFile file.path
         oFiles := oFiles.push (← buildLeanO oFile srcJob #[] cFlags)
-      -- Note: .m files (Metal FFI) must be compiled separately with system clang:
-      --   clang -framework Metal -framework Foundation -c tg4_metal.m -o tg4_metal.o
     let name := nameToStaticLib "tg4c"
     buildStaticLib (pkg.staticLibDir / name) oFiles
 
@@ -107,3 +108,18 @@ lean_exe gradcheck where
 -- View stack regression tests
 lean_exe viewstack_test where
   root := `TinyGrad4.Test.ViewStackTest
+
+-- Direct Metal FFI benchmark (requires scripts/build_metal.sh first)
+-- Uses moreLinkArgs to link the pre-built Metal FFI and frameworks
+lean_exe metal_direct_bench where
+  root := `TinyGrad4.Benchmark.MetalDirectMain
+  -- Override sysroot and link Metal frameworks
+  moreLinkArgs := #[
+    -- Use macOS SDK for framework linking
+    "-Wl,-syslibroot,/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+    "-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks",
+    "-framework", "Metal",
+    "-framework", "Foundation",
+    "-lobjc",
+    ".lake/build/metal/tg4_metal.o"
+  ]

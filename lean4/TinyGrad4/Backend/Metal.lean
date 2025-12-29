@@ -75,6 +75,38 @@ opaque metalSync : IO Unit
 @[extern "tg4_metal_device_name"]
 opaque metalDeviceName : IO String
 
+/-! ## Byte-Based FFI (dtype-generic) -/
+
+/-- Allocate a Metal buffer with n bytes -/
+@[extern "tg4_metal_alloc_bytes"]
+opaque metalAllocBytes : @& Nat → IO MetalBuffer
+
+/-- Copy raw bytes from host ByteArray to Metal buffer (no conversion) -/
+@[extern "tg4_metal_copy_in_bytes"]
+opaque metalCopyInBytes : @& MetalBuffer → @& ByteArray → IO Unit
+
+/-- Copy raw bytes from Metal buffer to host ByteArray (no conversion) -/
+@[extern "tg4_metal_copy_out_bytes"]
+opaque metalCopyOutBytes : @& MetalBuffer → @& Nat → IO ByteArray
+
+/-- Launch a Metal kernel with 2D grid (for matmul) -/
+@[extern "tg4_metal_launch_2d"]
+opaque metalLaunch2D : @& MetalProgram → @& (Array MetalBuffer) →
+    @& Nat → @& Nat → @& Nat → @& Nat → IO Unit
+    -- gridX, gridY, tgSizeX, tgSizeY
+
+/-! ## Synchronous GPU Matmul (for pure evaluator) -/
+
+/-- Execute matmul on GPU synchronously: C[m,n] = A[m,k] @ B[k,n]
+    Takes float32 ByteArrays, returns float32 ByteArray.
+    Compiles shader, launches kernel, waits for completion.
+    Falls back to zeros on GPU error.
+
+    Note: Declared as pure for compatibility with pure evaluator.
+    GPU side effects are invisible to Lean (referentially transparent). -/
+@[extern "tg4_metal_matmul_sync"]
+opaque metalMatmulSync (a b : @& ByteArray) (m k n : @& Nat) : ByteArray
+
 /-! ## Typeclass Instances -/
 
 instance : Allocator MetalBuffer where
@@ -108,7 +140,7 @@ def metalRenderer : Renderer where
     | some reduceOp => MetalRenderer.renderReduceKernelAuto name reduceOp inner outer
     | none => s!"// Unsupported reduce op: {repr op}"
   renderMatmul m k n :=
-    s!"// TODO: Metal matmul [{m}x{k}] @ [{k}x{n}]"
+    MetalRenderer.renderGemmKernelAuto "matmul" m k n
 
 /-- Complete Metal device configuration -/
 def metalDevice : Device MetalProgram MetalBuffer := {

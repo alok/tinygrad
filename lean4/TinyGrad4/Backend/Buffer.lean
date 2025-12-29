@@ -41,6 +41,9 @@ def toFloatArray (b : RawBuffer) : FloatArray :=
       (Float32.ofBits bits).toFloat
     FloatArray.mk ((Array.range numElems).map readF32)
 
+/-- Alias for toFloatArray (backward compatibility with tests) -/
+abbrev decode := toFloatArray
+
 end RawBuffer
 
 end TinyGrad4

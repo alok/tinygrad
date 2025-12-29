@@ -54,6 +54,10 @@ lean_exe mnist_fusion_bench where
 
 lean_lib StrataExperiments
 
+-- CPU interpreter benchmark (no GPU required)
+lean_exe cpu_bench where
+  root := `TinyGrad4.Test.BenchmarkMain
+
 -- Benchmark CLI (uses subprocess-based Metal runner)
 lean_exe tg4_bench where
   root := `TinyGrad4.Benchmark.Main
@@ -66,6 +70,19 @@ lean_exe metal_direct_bench where
   -- Override sysroot and link Metal frameworks
   moreLinkArgs := #[
     -- Use macOS SDK for framework linking
+    "-Wl,-syslibroot,/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+    "-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks",
+    "-framework", "Metal",
+    "-framework", "Foundation",
+    "-lobjc",
+    ".lake/build/metal/tg4_metal.o"
+  ]
+
+-- Metal GPU matmul test
+-- Requires: ./scripts/build_metal_ffi.sh to be run first
+lean_exe metal_matmul_test where
+  root := `TinyGrad4.Test.MetalMatmulSmoke
+  moreLinkArgs := #[
     "-Wl,-syslibroot,/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
     "-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks",
     "-framework", "Metal",

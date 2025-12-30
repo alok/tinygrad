@@ -216,12 +216,6 @@ def benchRawKernel : IO Unit := do
   let size := 10000
   let n := 100
 
-  -- Pre-generate and cache input data
-  let inputData ← evalTensorCached (runTensorM do
-    Tensor.rand [size] .float32 42)
-  let inputData2 ← evalTensorCached (runTensorM do
-    Tensor.rand [size] .float32 43)
-
   -- Create the graphs just once
   let negGraph := runTensorM do
     let a ← Tensor.buffer [size] .float32
@@ -377,6 +371,80 @@ def benchComposite : IO Unit := do
     forceEval result
   printBench s!"gelu [{size}]" nsGelu (size * 10)
 
+/-! ## Conv2d Benchmarks -/
+
+def benchConv2d : IO Unit := do
+  IO.println "\n=== Convolution Operations ==="
+
+  let seedRef ← IO.mkRef (0 : Nat)
+
+  -- Conv1d 3 kernel on small input
+  let n0 := 100
+  let w0 := 64
+  let outW0 := w0 - 2  -- no padding, kernel 3 -> out = in - 2
+  let flops0 := 1 * 8 * outW0 * 3 * 8 * 2
+
+  let ns0 ← benchmarkN n0 do
+    let seed ← seedRef.modifyGet fun s => (s, s + 1)
+    let result ← evalTensorCached (runTensorM do
+      let x ← Tensor.rand [1, 8, w0] .float32 seed
+      let w ← Tensor.rand [8, 8, 3] .float32 (seed + 1)
+      conv1d x w none 0 1 1)
+    forceEval result
+  printBench s!"conv1d 3 [{w0}]" ns0 flops0
+
+  -- Conv2d 1x1 kernel (pointwise conv) on small input
+  let n1 := 50
+  let h1 := 16
+  let flops1 := 1 * 8 * h1 * h1 * 1 * 1 * 8 * 2  -- batch * out_ch * h * w * k * k * in_ch * 2
+
+  let ns1 ← benchmarkN n1 do
+    let seed ← seedRef.modifyGet fun s => (s, s + 1)
+    let result ← evalTensorCached (runTensorM do
+      let x ← Tensor.rand [1, 8, h1, h1] .float32 seed
+      let w ← Tensor.rand [8, 8, 1, 1] .float32 (seed + 1)
+      conv2d x w none 0 1 1)
+    forceEval result
+  printBench s!"conv2d 1x1 [{h1}x{h1}]" ns1 flops1
+
+  -- Conv2d 3x3 kernel on small input
+  let n2 := 20
+  let h2 := 16
+  let outH2 := h2 - 2  -- no padding, kernel 3x3 -> out = in - 2
+  let flops2 := 1 * 8 * outH2 * outH2 * 3 * 3 * 8 * 2
+
+  let ns2 ← benchmarkN n2 do
+    let seed ← seedRef.modifyGet fun s => (s, s + 1)
+    let result ← evalTensorCached (runTensorM do
+      let x ← Tensor.rand [1, 8, h2, h2] .float32 seed
+      let w ← Tensor.rand [8, 8, 3, 3] .float32 (seed + 1)
+      conv2d x w none 0 1 1)
+    forceEval result
+  printBench s!"conv2d 3x3 [{h2}x{h2}]" ns2 flops2
+
+  -- MaxPool2d 2x2
+  let n3 := 100
+  let h3 := 32
+  let outH3 := h3 / 2
+  let flops3 := 1 * 8 * outH3 * outH3 * 4  -- pool window size = 4 comparisons
+
+  let ns3 ← benchmarkN n3 do
+    let seed ← seedRef.modifyGet fun s => (s, s + 1)
+    let result ← evalTensorCached (runTensorM do
+      let x ← Tensor.rand [1, 8, h3, h3] .float32 seed
+      maxPool2d x 2 2 0)
+    forceEval result
+  printBench s!"maxPool2d 2x2 [{h3}x{h3}]" ns3 flops3
+
+  -- AvgPool2d 2x2
+  let ns4 ← benchmarkN n3 do
+    let seed ← seedRef.modifyGet fun s => (s, s + 1)
+    let result ← evalTensorCached (runTensorM do
+      let x ← Tensor.rand [1, 8, h3, h3] .float32 seed
+      avgPool2d x 2 2 0)
+    forceEval result
+  printBench s!"avgPool2d 2x2 [{h3}x{h3}]" ns4 flops3
+
 /-! ## MLP Forward Pass -/
 
 def benchMLP : IO Unit := do
@@ -411,6 +479,7 @@ def runAll : IO Unit := do
   benchRawKernel
   benchReductions
   benchMatmul
+  benchConv2d
   benchComposite
   benchMLP
 

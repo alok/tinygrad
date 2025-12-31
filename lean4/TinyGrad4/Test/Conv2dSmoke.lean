@@ -792,4 +792,4 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.Conv2dSmoke
 
-#eval! TinyGrad4.Test.Conv2dSmoke.runAll
+def main : IO Unit := TinyGrad4.Test.Conv2dSmoke.runAll

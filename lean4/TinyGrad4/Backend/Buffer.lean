@@ -44,6 +44,13 @@ def toFloatArray (b : RawBuffer) : FloatArray :=
 /-- Alias for toFloatArray (backward compatibility with tests) -/
 abbrev decode := toFloatArray
 
+/-- Empty float32 buffer (for testing) -/
+def emptyFloat32 : RawBuffer := { dtype := .float32, data := ByteArray.empty }
+
+/-- Create float32 buffer with given size (zero-initialized) -/
+def mkFloat32 (numElems : Nat) : RawBuffer :=
+  { dtype := .float32, data := ByteArray.mk (Array.replicate (numElems * 4) 0) }
+
 end RawBuffer
 
 end TinyGrad4

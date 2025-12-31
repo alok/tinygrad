@@ -3,6 +3,7 @@ import TinyGrad4.NN.Conv1d
 import TinyGrad4.NN.Conv2d
 import TinyGrad4.NN.Norm
 import TinyGrad4.NN.Embedding
+import TinyGrad4.NN.Dropout
 
 /-!
 # Neural Network Module
@@ -17,7 +18,9 @@ Provides neural network building blocks mirroring tinygrad's `nn` module.
 - `AvgPool2d`: 2D Average Pooling
 - `RMSNorm`: Root Mean Square Layer Normalization
 - `LayerNorm`: Layer Normalization
+- `BatchNorm1d/2d`: Batch Normalization
 - `Embedding`: Embedding lookup table
+- `Dropout`: Dropout regularization
 
 ## Usage
 

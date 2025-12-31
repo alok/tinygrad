@@ -8,6 +8,9 @@ Smoke tests for new activations, norms, and losses.
 
 namespace TinyGrad4.Test.MathOpsSmoke
 
+-- Disable RawBuffer linter for test files that need Array Float literals
+set_option linter.useRawBuffer false
+
 open TinyGrad4
 open Interpreter
 open StaticTensor

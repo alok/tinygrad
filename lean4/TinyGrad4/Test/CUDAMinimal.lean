@@ -11,10 +11,11 @@ open TinyGrad4.Benchmark
 open TinyGrad4.Benchmark.Cuda
 
 def main : IO UInt32 := do
-  IO.println "Starting minimal test..."
-  IO.println "Module loading worked!"
-  IO.println ""
-  IO.println "Calling runAllBenchmarks..."
-  let _results ← runAllBenchmarks
+  IO.println "Step 1: Starting..."
+
+  IO.println "Step 2: Calling runVectorAdd1M..."
+  let result ← runVectorAdd1M
+  IO.println s!"Step 3: Got result: {result.spec.name}"
+
   IO.println "Done!"
   return 0

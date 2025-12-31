@@ -12,9 +12,11 @@ open TinyGrad4.Benchmark.Cuda
 
 def main : IO UInt32 := do
   IO.println "Step 1: Starting..."
-
-  -- Just reference the kernel source, don't execute anything
   IO.println s!"Kernel source length: {vectorAddSource.length}"
+
+  IO.println "Step 2: Creating kernel (but not running)..."
+  let kernel ← makeVectorAddKernel 1000
+  IO.println s!"Kernel created! Backend: {kernel.backendName}"
 
   IO.println "Done!"
   return 0

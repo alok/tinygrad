@@ -84,54 +84,54 @@ structure VectorAddState where
 /-- Create vector add benchmark kernel for given size -/
 def makeVectorAddKernel (size : Nat) : IO BenchmarkKernel := do
   IO.println s!"  DEBUG: makeVectorAddKernel({size}) - creating IO.Ref..."
-  IO.stdout.flush
+  
   -- Mutable state holder
   let stateRef : IO.Ref (Option VectorAddState) ← IO.mkRef none
   IO.println "  DEBUG: makeVectorAddKernel - IO.Ref created, returning BenchmarkKernel..."
-  IO.stdout.flush
+  
 
   return {
     setup := do
       IO.println "  DEBUG: setup - allocating buffers..."
-      IO.stdout.flush
+      
       -- Allocate buffers (size * 4 bytes for float32)
       let bufA ← cudaAllocBytes (size * 4)
       let bufB ← cudaAllocBytes (size * 4)
       let bufOut ← cudaAllocBytes (size * 4)
       IO.println "  DEBUG: setup - buffers allocated"
-      IO.stdout.flush
+      
 
       -- Initialize host data
       IO.println "  DEBUG: setup - initializing host data..."
-      IO.stdout.flush
+      
       let hostA := FloatArray.mk ((Array.range size).map fun i =>
         (i % 1000).toFloat / 1000.0)
       let hostB := FloatArray.mk ((Array.range size).map fun i =>
         ((i + 500) % 1000).toFloat / 1000.0)
       IO.println "  DEBUG: setup - host data initialized"
-      IO.stdout.flush
+      
 
       -- Copy to GPU
       IO.println "  DEBUG: setup - copying to GPU..."
-      IO.stdout.flush
+      
       cudaCopyInBytes bufA (floatArrayToBytes hostA)
       cudaCopyInBytes bufB (floatArrayToBytes hostB)
       IO.println "  DEBUG: setup - data copied to GPU"
-      IO.stdout.flush
+      
 
       -- Compile kernel
       IO.println "  DEBUG: setup - compiling kernel..."
-      IO.stdout.flush
+      
       let prog ← cudaCompile "bench_add" vectorAddSource
       IO.println "  DEBUG: setup - kernel compiled!"
-      IO.stdout.flush
+      
 
       -- Store state
       IO.println "  DEBUG: setup - storing state..."
-      IO.stdout.flush
+      
       stateRef.set (some { bufA, bufB, bufOut, prog, size, hostA, hostB })
       IO.println "  DEBUG: setup - done!"
-      IO.stdout.flush
+      
 
     runOnce := do
       match ← stateRef.get with
@@ -236,10 +236,10 @@ def makeVectorAddFloat4Kernel (size : Nat)
 /-- Run vector add benchmark with standard spec -/
 def runVectorAdd1M : IO BenchmarkResult := do
   IO.println "  DEBUG: runVectorAdd1M - creating kernel..."
-  IO.stdout.flush
+  
   let kernel ← makeVectorAddKernel 1_000_000
   IO.println "  DEBUG: runVectorAdd1M - kernel created, running benchmark..."
-  IO.stdout.flush
+  
   runBenchmarkKernel vectorAdd1M kernel
 
 /-- Run vectorized (float4) vector add benchmark -/
@@ -265,9 +265,9 @@ def runAllBenchmarks : IO (Array BenchmarkResult) := do
   IO.println ""
 
   IO.println "  DEBUG: About to create kernel..."
-  IO.stdout.flush
+  
   IO.println "  [1/4] vector_add_1m (scalar)..."
-  IO.stdout.flush
+  
   results := results.push (← runVectorAdd1M)
   IO.println s!"        Done: {results[results.size - 1]!.stats.mean.toMicros} μs mean"
 

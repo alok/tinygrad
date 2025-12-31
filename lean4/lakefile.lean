@@ -279,3 +279,7 @@ lean_exe gpu_loader_smoke where
 lean_exe cuda_smoke where
   root := `TinyGrad4.Test.CUDASmoke
   moreLinkArgs := metalLinkArgs
+
+lean_exe cuda_bench where
+  root := `TinyGrad4.Test.CUDABench
+  moreLinkArgs := metalLinkArgs

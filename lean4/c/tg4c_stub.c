@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* View information for strided access with optional masking */
 struct view_info {
@@ -2290,10 +2291,10 @@ LEAN_EXPORT lean_obj_res tg4_fused_reduce_max_all_view_stack_f32(lean_obj_arg in
 }
 
 LEAN_EXPORT lean_obj_res tg4_softmax_last_f32(b_lean_obj_arg a, b_lean_obj_arg outer,
-    b_lean_obj_arg inner, b_lean_obj_arg scaleBits) {
+    b_lean_obj_arg inner, uint32_t scaleBits) {
   size_t outer_n = nat_to_size(outer);
   size_t inner_n = nat_to_size(inner);
-  float scale = f32_from_bits(unbox_u32(scaleBits));
+  float scale = f32_from_bits(scaleBits);
   size_t total = outer_n * inner_n;
   lean_object* out = mk_byte_array(total * 4);
   uint8_t* o = byte_array_cptr(out);
@@ -2320,11 +2321,11 @@ LEAN_EXPORT lean_obj_res tg4_softmax_last_f32(b_lean_obj_arg a, b_lean_obj_arg o
 }
 
 LEAN_EXPORT lean_obj_res tg4_logsoftmax_last_f32(b_lean_obj_arg a, b_lean_obj_arg outer,
-    b_lean_obj_arg inner, b_lean_obj_arg scaleBits, b_lean_obj_arg ln2Bits) {
+    b_lean_obj_arg inner, uint32_t scaleBits, uint32_t ln2Bits) {
   size_t outer_n = nat_to_size(outer);
   size_t inner_n = nat_to_size(inner);
-  float scale = f32_from_bits(unbox_u32(scaleBits));
-  float ln2 = f32_from_bits(unbox_u32(ln2Bits));
+  float scale = f32_from_bits(scaleBits);
+  float ln2 = f32_from_bits(ln2Bits);
   size_t total = outer_n * inner_n;
   lean_object* out = mk_byte_array(total * 4);
   uint8_t* o = byte_array_cptr(out);
@@ -2464,8 +2465,12 @@ LEAN_EXPORT lean_obj_res tg4_permute_f32(b_lean_obj_arg a, b_lean_obj_arg shape,
   size_t* out_idx = malloc(rank * sizeof(size_t));
   size_t* in_idx = malloc(rank * sizeof(size_t));
 
+  // First populate all dims, then compute out_dims
+  // (bug fix: out_dims[i] = dims[perm[i]] requires dims to be fully populated)
   for (size_t i = 0; i < rank; ++i) {
     dims[i] = nat_array_get(shape, i);
+  }
+  for (size_t i = 0; i < rank; ++i) {
     size_t p = nat_array_get(perm, i);
     out_dims[i] = p < rank ? dims[p] : 0;
   }
@@ -2506,8 +2511,12 @@ LEAN_EXPORT lean_obj_res tg4_permute_u8(b_lean_obj_arg a, b_lean_obj_arg shape,
   size_t* out_idx = malloc(rank * sizeof(size_t));
   size_t* in_idx = malloc(rank * sizeof(size_t));
 
+  // First populate all dims, then compute out_dims
+  // (bug fix: out_dims[i] = dims[perm[i]] requires dims to be fully populated)
   for (size_t i = 0; i < rank; ++i) {
     dims[i] = nat_array_get(shape, i);
+  }
+  for (size_t i = 0; i < rank; ++i) {
     size_t p = nat_array_get(perm, i);
     out_dims[i] = p < rank ? dims[p] : 0;
   }
@@ -3433,8 +3442,8 @@ LEAN_EXPORT lean_obj_res tg4_matmul_bias_f32(b_lean_obj_arg a, b_lean_obj_arg b,
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias_scale_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias, b_lean_obj_arg biasShape, b_lean_obj_arg m, b_lean_obj_arg k,
-    b_lean_obj_arg n, b_lean_obj_arg scaleBits) {
-  return matmul_bias_core(a, b, bias, biasShape, m, k, n, 0, 1, unbox_u32(scaleBits));
+    b_lean_obj_arg n, uint32_t scaleBits) {
+  return matmul_bias_core(a, b, bias, biasShape, m, k, n, 0, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3445,8 +3454,8 @@ LEAN_EXPORT lean_obj_res tg4_matmul_bias_relu_f32(b_lean_obj_arg a, b_lean_obj_a
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias_scale_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias, b_lean_obj_arg biasShape, b_lean_obj_arg m, b_lean_obj_arg k,
-    b_lean_obj_arg n, b_lean_obj_arg scaleBits) {
-  return matmul_bias_core(a, b, bias, biasShape, m, k, n, 1, 1, unbox_u32(scaleBits));
+    b_lean_obj_arg n, uint32_t scaleBits) {
+  return matmul_bias_core(a, b, bias, biasShape, m, k, n, 1, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias2_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3457,9 +3466,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_bias2_f32(b_lean_obj_arg a, b_lean_obj_arg b
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias2_scale_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias0, b_lean_obj_arg bias0Shape, b_lean_obj_arg bias1, b_lean_obj_arg bias1Shape,
-    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n, b_lean_obj_arg scaleBits) {
+    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n, uint32_t scaleBits) {
   return matmul_bias2_core(a, b, bias0, bias0Shape, bias1, bias1Shape, m, k, n, 0, 1,
-    unbox_u32(scaleBits));
+    scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias2_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3470,9 +3479,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_bias2_relu_f32(b_lean_obj_arg a, b_lean_obj_
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias2_scale_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias0, b_lean_obj_arg bias0Shape, b_lean_obj_arg bias1, b_lean_obj_arg bias1Shape,
-    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n, b_lean_obj_arg scaleBits) {
+    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n, uint32_t scaleBits) {
   return matmul_bias2_core(a, b, bias0, bias0Shape, bias1, bias1Shape, m, k, n, 1, 1,
-    unbox_u32(scaleBits));
+    scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_view_bias_f32(lean_obj_arg a, lean_obj_arg b, lean_obj_arg bias,
@@ -3490,10 +3499,10 @@ LEAN_EXPORT lean_obj_res tg4_matmul_view_bias_scale_f32(lean_obj_arg a, lean_obj
     lean_obj_arg aMaskEnds, lean_obj_arg bStrides, lean_obj_arg bOffset, lean_obj_arg bMaskStarts,
     lean_obj_arg bMaskEnds, lean_obj_arg biasStrides, lean_obj_arg biasOffset,
     lean_obj_arg biasMaskStarts, lean_obj_arg biasMaskEnds, lean_obj_arg outShape, lean_obj_arg k,
-    lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_view_bias_core(a, b, bias, NULL, aStrides, aOffset, aMaskStarts, aMaskEnds,
     bStrides, bOffset, bMaskStarts, bMaskEnds, biasStrides, biasOffset, biasMaskStarts,
-    biasMaskEnds, NULL, NULL, NULL, NULL, outShape, k, 0, 1, unbox_u32(scaleBits), 0);
+    biasMaskEnds, NULL, NULL, NULL, NULL, outShape, k, 0, 1, scaleBits, 0);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_view_bias_relu_f32(lean_obj_arg a, lean_obj_arg b,
@@ -3511,10 +3520,10 @@ LEAN_EXPORT lean_obj_res tg4_matmul_view_bias_scale_relu_f32(lean_obj_arg a, lea
     lean_obj_arg aMaskEnds, lean_obj_arg bStrides, lean_obj_arg bOffset, lean_obj_arg bMaskStarts,
     lean_obj_arg bMaskEnds, lean_obj_arg biasStrides, lean_obj_arg biasOffset,
     lean_obj_arg biasMaskStarts, lean_obj_arg biasMaskEnds, lean_obj_arg outShape, lean_obj_arg k,
-    lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_view_bias_core(a, b, bias, NULL, aStrides, aOffset, aMaskStarts, aMaskEnds,
     bStrides, bOffset, bMaskStarts, bMaskEnds, biasStrides, biasOffset, biasMaskStarts,
-    biasMaskEnds, NULL, NULL, NULL, NULL, outShape, k, 1, 1, unbox_u32(scaleBits), 0);
+    biasMaskEnds, NULL, NULL, NULL, NULL, outShape, k, 1, 1, scaleBits, 0);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_view_bias2_f32(lean_obj_arg a, lean_obj_arg b, lean_obj_arg bias0,
@@ -3536,11 +3545,11 @@ LEAN_EXPORT lean_obj_res tg4_matmul_view_bias2_scale_f32(lean_obj_arg a, lean_ob
     lean_obj_arg bMaskStarts, lean_obj_arg bMaskEnds, lean_obj_arg bias0Strides,
     lean_obj_arg bias0Offset, lean_obj_arg bias0MaskStarts, lean_obj_arg bias0MaskEnds,
     lean_obj_arg bias1Strides, lean_obj_arg bias1Offset, lean_obj_arg bias1MaskStarts,
-    lean_obj_arg bias1MaskEnds, lean_obj_arg outShape, lean_obj_arg k, lean_obj_arg scaleBits) {
+    lean_obj_arg bias1MaskEnds, lean_obj_arg outShape, lean_obj_arg k, uint32_t scaleBits) {
   return matmul_view_bias_core(a, b, bias0, bias1, aStrides, aOffset, aMaskStarts, aMaskEnds,
     bStrides, bOffset, bMaskStarts, bMaskEnds, bias0Strides, bias0Offset, bias0MaskStarts,
     bias0MaskEnds, bias1Strides, bias1Offset, bias1MaskStarts, bias1MaskEnds, outShape, k, 0, 1,
-    unbox_u32(scaleBits), 1);
+    scaleBits, 1);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_view_bias2_relu_f32(lean_obj_arg a, lean_obj_arg b,
@@ -3562,11 +3571,11 @@ LEAN_EXPORT lean_obj_res tg4_matmul_view_bias2_scale_relu_f32(lean_obj_arg a, le
     lean_obj_arg bMaskStarts, lean_obj_arg bMaskEnds, lean_obj_arg bias0Strides,
     lean_obj_arg bias0Offset, lean_obj_arg bias0MaskStarts, lean_obj_arg bias0MaskEnds,
     lean_obj_arg bias1Strides, lean_obj_arg bias1Offset, lean_obj_arg bias1MaskStarts,
-    lean_obj_arg bias1MaskEnds, lean_obj_arg outShape, lean_obj_arg k, lean_obj_arg scaleBits) {
+    lean_obj_arg bias1MaskEnds, lean_obj_arg outShape, lean_obj_arg k, uint32_t scaleBits) {
   return matmul_view_bias_core(a, b, bias0, bias1, aStrides, aOffset, aMaskStarts, aMaskEnds,
     bStrides, bOffset, bMaskStarts, bMaskEnds, bias0Strides, bias0Offset, bias0MaskStarts,
     bias0MaskEnds, bias1Strides, bias1Offset, bias1MaskStarts, bias1MaskEnds, outShape, k, 1, 1,
-    unbox_u32(scaleBits), 1);
+    scaleBits, 1);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3681,9 +3690,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_f32(b_lean_obj_arg a, b_lean_ob
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_scale_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias, b_lean_obj_arg biasShape, b_lean_obj_arg aStarts, b_lean_obj_arg bStarts,
     b_lean_obj_arg biasStarts, b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n,
-    b_lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_batched_bias_core(a, b, bias, biasShape, aStarts, bStarts, biasStarts, m, k, n,
-    0, 1, unbox_u32(scaleBits));
+    0, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3695,9 +3704,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_relu_f32(b_lean_obj_arg a, b_le
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_scale_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias, b_lean_obj_arg biasShape, b_lean_obj_arg aStarts, b_lean_obj_arg bStarts,
     b_lean_obj_arg biasStarts, b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n,
-    b_lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_batched_bias_core(a, b, bias, biasShape, aStarts, bStarts, biasStarts, m, k, n,
-    1, 1, unbox_u32(scaleBits));
+    1, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias2_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3712,9 +3721,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias2_scale_f32(b_lean_obj_arg a, b_
     b_lean_obj_arg bias0, b_lean_obj_arg bias0Shape, b_lean_obj_arg bias1, b_lean_obj_arg bias1Shape,
     b_lean_obj_arg aStarts, b_lean_obj_arg bStarts, b_lean_obj_arg bias0Starts,
     b_lean_obj_arg bias1Starts, b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n,
-    b_lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_batched_bias2_core(a, b, bias0, bias0Shape, bias1, bias1Shape, aStarts, bStarts,
-    bias0Starts, bias1Starts, m, k, n, 0, 1, unbox_u32(scaleBits));
+    bias0Starts, bias1Starts, m, k, n, 0, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias2_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3729,9 +3738,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias2_scale_relu_f32(b_lean_obj_arg 
     b_lean_obj_arg bias0, b_lean_obj_arg bias0Shape, b_lean_obj_arg bias1, b_lean_obj_arg bias1Shape,
     b_lean_obj_arg aStarts, b_lean_obj_arg bStarts, b_lean_obj_arg bias0Starts,
     b_lean_obj_arg bias1Starts, b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n,
-    b_lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_batched_bias2_core(a, b, bias0, bias0Shape, bias1, bias1Shape, aStarts, bStarts,
-    bias0Starts, bias1Starts, m, k, n, 1, 1, unbox_u32(scaleBits));
+    bias0Starts, bias1Starts, m, k, n, 1, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_f64(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3755,3 +3764,51 @@ LEAN_EXPORT lean_obj_res tg4_matmul_f64(b_lean_obj_arg a, b_lean_obj_arg b,
   }
   return out;
 }
+
+/* ============================================================================
+   CUDA Stubs (for linking on non-CUDA systems)
+   ============================================================================ */
+
+#ifndef TG4_HAS_CUDA
+
+// CUDA buffer type (placeholder)
+LEAN_EXPORT lean_obj_res tg4_cuda_alloc_bytes(b_lean_obj_arg n_obj) {
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_free(b_lean_obj_arg buf) {
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_in_bytes(b_lean_obj_arg buf, b_lean_obj_arg data) {
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_out_bytes(b_lean_obj_arg buf, b_lean_obj_arg size) {
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_compile(b_lean_obj_arg src, b_lean_obj_arg name) {
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_launch_2d(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg bx, b_lean_obj_arg by_) {
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_sync(lean_obj_arg w) {
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_device_name(lean_obj_arg w) {
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_matmul_sync(b_lean_obj_arg a, b_lean_obj_arg b,
+    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n) {
+  // Return empty ByteArray on error
+  return lean_mk_empty_byte_array(lean_box(0));
+}
+
+#endif /* TG4_HAS_CUDA */

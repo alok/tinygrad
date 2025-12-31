@@ -1,0 +1,6 @@
+/data/
+.lake/
+
+# Build artifacts (executables)
+c/matmul_runner
+c/metal_runner

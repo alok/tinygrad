@@ -3856,3 +3856,159 @@ LEAN_EXPORT lean_obj_res tg4_cuda_matmul_sync(b_lean_obj_arg a, b_lean_obj_arg b
 }
 
 #endif /* TG4_HAS_CUDA */
+
+/* ============================================================================
+   Metal Stubs (for linking on non-macOS systems)
+   ============================================================================ */
+
+#ifndef __APPLE__
+
+// Metal stubs for non-macOS builds (signatures must match tg4_metal.m)
+
+LEAN_EXPORT lean_obj_res tg4_metal_alloc(b_lean_obj_arg n, lean_object* world) {
+  (void)n; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_free(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_copy_in(b_lean_obj_arg buf, b_lean_obj_arg arr, lean_object* world) {
+  (void)buf; (void)arr; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_copy_out(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_size(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_compile(b_lean_obj_arg name, b_lean_obj_arg source, lean_object* world) {
+  (void)name; (void)source; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_launch(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg gz,
+    b_lean_obj_arg bx, b_lean_obj_arg by_, b_lean_obj_arg bz, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)gz; (void)bx; (void)by_; (void)bz; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_alloc_bytes(b_lean_obj_arg nbytes, lean_object* world) {
+  (void)nbytes; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_copy_in_bytes(b_lean_obj_arg buf, b_lean_obj_arg data, lean_object* world) {
+  (void)buf; (void)data; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_copy_out_bytes(b_lean_obj_arg buf, b_lean_obj_arg nbytes, lean_object* world) {
+  (void)buf; (void)nbytes; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_launch_2d(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg bx, b_lean_obj_arg by_, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)bx; (void)by_; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_sync(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_device_name(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_cache_hits(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_cache_misses(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_cache_size(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_cache_clear(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_matmul_sync(b_lean_obj_arg a, b_lean_obj_arg b,
+    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n) {
+  (void)a; (void)b;
+  // Return zero-filled ByteArray of correct size
+  size_t M = lean_usize_of_nat(m);
+  size_t N = lean_usize_of_nat(n);
+  size_t out_bytes = M * N * sizeof(float);
+  lean_object* arr = lean_alloc_sarray(1, out_bytes, out_bytes);
+  memset(lean_sarray_cptr(arr), 0, out_bytes);
+  return arr;
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_wrap_bytes_nocopy(b_lean_obj_arg data, lean_object* world) {
+  (void)data; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT uint8_t tg4_metal_is_aligned(b_lean_obj_arg buf) {
+  (void)buf;
+  return 0;
+}
+
+// Shared memory stubs (used by Metal IPC)
+LEAN_EXPORT lean_obj_res tg4_shm_create(b_lean_obj_arg name, b_lean_obj_arg size, lean_object* world) {
+  (void)name; (void)size; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_open(b_lean_obj_arg name, lean_object* world) {
+  (void)name; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_map(b_lean_obj_arg fd, b_lean_obj_arg size, lean_object* world) {
+  (void)fd; (void)size; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_write(b_lean_obj_arg ptr, b_lean_obj_arg data, lean_object* world) {
+  (void)ptr; (void)data; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_read(b_lean_obj_arg ptr, b_lean_obj_arg size, lean_object* world) {
+  (void)ptr; (void)size; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_close(b_lean_obj_arg fd, lean_object* world) {
+  (void)fd; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_unlink(b_lean_obj_arg name, lean_object* world) {
+  (void)name; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+#endif /* not __APPLE__ */

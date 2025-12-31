@@ -23,12 +23,13 @@ def main : IO UInt32 := do
   IO.println ""
 
   for result in results do
-    let gflops := result.spec.operations.toFloat / result.stats.mean / 1e9
-    let bw := result.spec.memoryBytes.toFloat / result.stats.mean / 1e9
+    -- stddev is already a Float in nanoseconds, convert to microseconds
+    let stddevUs := result.stats.stddev / 1000.0
     IO.println s!"  {result.spec.name}:"
-    IO.println s!"    Time: {result.stats.mean.toMicros} μs (±{result.stats.stddev.toMicros} μs)"
-    IO.println s!"    GFLOP/s: {gflops}"
-    IO.println s!"    Memory BW: {bw} GB/s"
+    IO.println s!"    Time: {result.stats.mean.toMicros} μs (±{stddevUs} μs)"
+    IO.println s!"    GFLOP/s: {result.throughput_gflops}"
+    IO.println s!"    Memory BW: {result.bandwidth_gb_s} GB/s"
+    IO.println s!"    Verified: {result.verified}"
     IO.println ""
 
   return 0

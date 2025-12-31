@@ -40,7 +40,8 @@ def metalLinkArgs : Array String :=
       "-framework", "Accelerate",
       "-lobjc"]
   else
-    #[]
+    -- Linux: include CUDA linker args (will be no-ops if CUDA not compiled)
+    #["-L/usr/local/cuda/lib64", "-lcuda", "-lcudart", "-lnvrtc", "-lstdc++"]
 
 -- C files to compile (add new files here)
 def cSourceFiles : Array String := #["tg4c_stub.c", "tg4_accel.c"]
@@ -55,6 +56,16 @@ def accelFlags : Array String :=
     ]
   else
     cFlags
+
+-- CUDA linker flags (Linux with CUDA)
+-- Used when CUDA is detected and compiled
+def cudaLinkArgs : Array String :=
+  #["-L/usr/local/cuda/lib64", "-lcuda", "-lcudart", "-lnvrtc"]
+
+-- Check if nvcc (CUDA compiler) is available
+def checkNvcc : IO Bool := do
+  let out ← IO.Process.output { cmd := "which", args := #["nvcc"] }
+  return out.exitCode == 0
 
 extern_lib tg4c pkg := do
   pkg.afterBuildCacheAsync do
@@ -90,6 +101,30 @@ extern_lib tg4c pkg := do
           IO.eprintln s!"Failed to compile tg4_accel.c: {out.stderr}"
         else
           oFiles := oFiles.push (← inputBinFile oFile)
+    -- Build tg4_cuda.cu with nvcc (Linux with CUDA only)
+    -- On macOS/non-CUDA systems, stubs in tg4c_stub.c provide dummy implementations
+    if !System.Platform.isOSX then
+      let hasCuda ← checkNvcc
+      if hasCuda then
+        let cudaSrc := pkg.dir / "c" / "tg4_cuda.cu"
+        if ← cudaSrc.pathExists then
+          let oFile := pkg.buildDir / "c" / "tg4_cuda.o"
+          IO.FS.createDirAll (pkg.buildDir / "c")
+          let leanInclude := (← getLeanSysroot) / "include"
+          let args := #[
+            "-c", "-O3", "-Xcompiler", "-fPIC",
+            "-DTG4_HAS_CUDA",
+            "-I", leanInclude.toString,
+            "-I", "/usr/local/cuda/include",
+            "-o", oFile.toString,
+            cudaSrc.toString
+          ]
+          let out ← IO.Process.output { cmd := "nvcc", args := args }
+          if out.exitCode != 0 then
+            IO.eprintln s!"Failed to compile tg4_cuda.cu: {out.stderr}"
+          else
+            IO.println s!"Compiled CUDA support: {oFile}"
+            oFiles := oFiles.push (← inputBinFile oFile)
     let name := nameToStaticLib "tg4c"
     buildStaticLib (pkg.staticLibDir / name) oFiles
 
@@ -221,4 +256,8 @@ lean_exe gpu_loader_bench where
 
 lean_exe gpu_loader_smoke where
   root := `TinyGrad4.Test.GPULoaderSmokeTest
+  moreLinkArgs := metalLinkArgs
+
+lean_exe cuda_smoke where
+  root := `TinyGrad4.Test.CUDASmoke
   moreLinkArgs := metalLinkArgs

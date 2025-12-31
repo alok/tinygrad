@@ -34,25 +34,6 @@ def objcFlags : Array String :=
 -- Linker args for Metal + Accelerate FFI (macOS only)
 -- Required for any executable that links libtg4c.a
 -- On non-macOS platforms, these are empty (no Metal/Accelerate support)
--- Find CUDA library path at build time
-def findCudaLibPath : IO String := do
-  -- Check common CUDA installation locations
-  let paths := #[
-    "/usr/local/cuda/lib64",
-    "/usr/lib/x86_64-linux-gnu"
-  ]
-  -- Also check $HOME/cuda-* patterns
-  let home := (← IO.getEnv "HOME").getD ""
-  let homePaths := #[
-    home ++ "/cuda-12.4/lib64",
-    home ++ "/cuda-12/lib64",
-    home ++ "/cuda/lib64"
-  ]
-  for p in paths ++ homePaths do
-    if ← FilePath.pathExists p then
-      return p
-  return "/usr/local/cuda/lib64"  -- fallback
-
 def metalLinkArgs : Array String :=
   if System.Platform.isOSX then
     #["-Wl,-syslibroot,/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
@@ -72,12 +53,6 @@ def metalLinkArgs : Array String :=
       "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
       "-lcuda", "-lnvrtc", "-lstdc++"]
 
--- Script target to find CUDA libs and add to link args
-script cudaLinkArgs do
-  let cudaPath ← findCudaLibPath
-  IO.println s!"-L{cudaPath} -Wl,-rpath,{cudaPath} -lnvrtc"
-  return 0
-
 -- C files to compile (add new files here)
 def cSourceFiles : Array String := #["tg4c_stub.c", "tg4_accel.c"]
 
@@ -91,11 +66,6 @@ def accelFlags : Array String :=
     ]
   else
     cFlags
-
--- CUDA linker flags (Linux with CUDA)
--- Used when CUDA is detected and compiled
-def cudaLinkArgs : Array String :=
-  #["-L/usr/local/cuda/lib64", "-lcuda", "-lcudart", "-lnvrtc"]
 
 -- Check if nvcc (CUDA compiler) is available
 def checkNvcc : IO Bool := do

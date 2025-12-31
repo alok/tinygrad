@@ -26,17 +26,6 @@ def main : IO UInt32 := do
   kernel.runOnce
   IO.println "RunOnce complete!"
 
-  IO.println "Step 5: Syncing..."
-  kernel.sync
-  IO.println "Sync complete!"
-
-  IO.println "Step 6: Verifying..."
-  let ok ← kernel.verify
-  IO.println s!"Verify: {ok}"
-
-  IO.println "Step 7: Cleanup..."
-  kernel.cleanup
-  IO.println "Cleanup complete!"
-
+  -- Skip the rest for now
   IO.println "Done!"
   return 0

@@ -19,7 +19,10 @@ def cFlags : Array String :=
     #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC",
       "-isystem", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include"]
   else
-    #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC"]
+    -- Linux: need system headers (math.h, etc.)
+    #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC",
+      "-isystem", "/usr/include",
+      "-isystem", "/usr/include/x86_64-linux-gnu"]
 
 -- Objective-C flags for Metal FFI (macOS only)
 -- Note: Lake's buildLeanO adds --sysroot to Lean toolchain, so we use -iframework for Metal
@@ -31,6 +34,25 @@ def objcFlags : Array String :=
 -- Linker args for Metal + Accelerate FFI (macOS only)
 -- Required for any executable that links libtg4c.a
 -- On non-macOS platforms, these are empty (no Metal/Accelerate support)
+-- Find CUDA library path at build time
+def findCudaLibPath : IO String := do
+  -- Check common CUDA installation locations
+  let paths := #[
+    "/usr/local/cuda/lib64",
+    "/usr/lib/x86_64-linux-gnu"
+  ]
+  -- Also check $HOME/cuda-* patterns
+  let home := (← IO.getEnv "HOME").getD ""
+  let homePaths := #[
+    home ++ "/cuda-12.4/lib64",
+    home ++ "/cuda-12/lib64",
+    home ++ "/cuda/lib64"
+  ]
+  for p in paths ++ homePaths do
+    if ← FilePath.pathExists p then
+      return p
+  return "/usr/local/cuda/lib64"  -- fallback
+
 def metalLinkArgs : Array String :=
   if System.Platform.isOSX then
     #["-Wl,-syslibroot,/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
@@ -40,8 +62,21 @@ def metalLinkArgs : Array String :=
       "-framework", "Accelerate",
       "-lobjc"]
   else
-    -- Linux: include CUDA linker args (will be no-ops if CUDA not compiled)
-    #["-L/usr/local/cuda/lib64", "-lcuda", "-lcudart", "-lnvrtc", "-lstdc++"]
+    -- Linux: CUDA libs - search multiple common installation paths
+    -- libcuda.so is always in /usr/lib, libnvrtc location varies by install
+    #["-L/usr/lib/x86_64-linux-gnu",
+      "-L/usr/local/cuda/lib64",
+      "-L/home/alok/cuda-12.4/lib64",  -- ww (freja.mit.edu) local install
+      "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
+      "-Wl,-rpath,/usr/local/cuda/lib64",
+      "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
+      "-lcuda", "-lnvrtc", "-lstdc++"]
+
+-- Script target to find CUDA libs and add to link args
+script cudaLinkArgs do
+  let cudaPath ← findCudaLibPath
+  IO.println s!"-L{cudaPath} -Wl,-rpath,{cudaPath} -lnvrtc"
+  return 0
 
 -- C files to compile (add new files here)
 def cSourceFiles : Array String := #["tg4c_stub.c", "tg4_accel.c"]
@@ -70,6 +105,9 @@ def checkNvcc : IO Bool := do
 extern_lib tg4c pkg := do
   pkg.afterBuildCacheAsync do
     let mut oFiles : Array (Job FilePath) := #[]
+    -- Check for CUDA availability first (affects stub compilation)
+    let hasCuda ← if System.Platform.isOSX then pure false else checkNvcc
+    let cFlagsWithCuda := if hasCuda then cFlags ++ #["-DTG4_HAS_CUDA"] else cFlags
     -- Build C files with Lake's clang
     for file in (← (pkg.dir / "c").readDir) do
       if file.path.extension == some "c" && cSourceFiles.contains file.fileName then
@@ -77,7 +115,7 @@ extern_lib tg4c pkg := do
         if file.fileName == "tg4_accel.c" then continue
         let oFile := pkg.buildDir / "c" / ((file.fileName.dropSuffix ".c").toString ++ ".o")
         let srcJob ← inputTextFile file.path
-        oFiles := oFiles.push (← buildLeanO oFile srcJob #[] cFlags)
+        oFiles := oFiles.push (← buildLeanO oFile srcJob #[] cFlagsWithCuda)
     -- Build tg4_metal.m (Objective-C Metal FFI) on macOS
     if System.Platform.isOSX then
       for file in (← (pkg.dir / "c").readDir) do
@@ -103,23 +141,33 @@ extern_lib tg4c pkg := do
           oFiles := oFiles.push (← inputBinFile oFile)
     -- Build tg4_cuda.cu with nvcc (Linux with CUDA only)
     -- On macOS/non-CUDA systems, stubs in tg4c_stub.c provide dummy implementations
-    if !System.Platform.isOSX then
-      let hasCuda ← checkNvcc
-      if hasCuda then
+    if hasCuda then
         let cudaSrc := pkg.dir / "c" / "tg4_cuda.cu"
         if ← cudaSrc.pathExists then
           let oFile := pkg.buildDir / "c" / "tg4_cuda.o"
           IO.FS.createDirAll (pkg.buildDir / "c")
           let leanInclude := (← getLeanSysroot) / "include"
+          -- Find CUDA include path (check common locations)
+          let cudaInclude ← do
+            if ← FilePath.pathExists "/usr/local/cuda/include" then
+              pure "/usr/local/cuda/include"
+            else
+              -- Check $HOME/cuda-12.4 for local installs
+              let home := (← IO.getEnv "HOME").getD ""
+              if ← FilePath.pathExists (home ++ "/cuda-12.4/include") then
+                pure (home ++ "/cuda-12.4/include")
+              else
+                pure "/usr/include"
+          -- Compile with g++ as C++ (Driver API only, no nvcc needed)
           let args := #[
-            "-c", "-O3", "-Xcompiler", "-fPIC",
+            "-c", "-x", "c++", "-O3", "-fPIC",
             "-DTG4_HAS_CUDA",
             "-I", leanInclude.toString,
-            "-I", "/usr/local/cuda/include",
+            "-I", cudaInclude,
             "-o", oFile.toString,
             cudaSrc.toString
           ]
-          let out ← IO.Process.output { cmd := "nvcc", args := args }
+          let out ← IO.Process.output { cmd := "g++", args := args }
           if out.exitCode != 0 then
             IO.eprintln s!"Failed to compile tg4_cuda.cu: {out.stderr}"
           else

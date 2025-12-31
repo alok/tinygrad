@@ -57,7 +57,7 @@ def vectorAddFloat4Source (size : Nat) : String :=
 }"
 
 /-- Convert Float32 array to ByteArray using IEEE 754 representation -/
-def floatArrayToBytes (arr : FloatArray) : ByteArray :=
+def floatArrayToBytes (arr : FloatArray) : ByteArray := Id.run do
   -- FloatArray stores Float32 internally, so we can use toByteArray
   -- For now, generate simple pattern data instead (matching the values computed above)
   let mut bytes := ByteArray.mkEmpty (arr.size * 4)
@@ -69,7 +69,7 @@ def floatArrayToBytes (arr : FloatArray) : ByteArray :=
     bytes := bytes.push (bits >>> 8).toUInt8
     bytes := bytes.push (bits >>> 16).toUInt8
     bytes := bytes.push (bits >>> 24).toUInt8
-  bytes
+  return bytes
 
 /-- State for vector add benchmark -/
 structure VectorAddState where

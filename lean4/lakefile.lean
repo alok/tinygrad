@@ -287,3 +287,7 @@ lean_exe cuda_bench where
 lean_exe cuda_compile_test where
   root := `TinyGrad4.Test.CUDACompileTest
   moreLinkArgs := metalLinkArgs
+
+lean_exe cuda_minimal where
+  root := `TinyGrad4.Test.CUDAMinimal
+  moreLinkArgs := metalLinkArgs

@@ -3771,44 +3771,88 @@ LEAN_EXPORT lean_obj_res tg4_matmul_f64(b_lean_obj_arg a, b_lean_obj_arg b,
 
 #ifndef TG4_HAS_CUDA
 
-// CUDA buffer type (placeholder)
-LEAN_EXPORT lean_obj_res tg4_cuda_alloc_bytes(b_lean_obj_arg n_obj) {
+// CUDA stubs for non-CUDA builds (signatures must match tg4_cuda.cu)
+
+LEAN_EXPORT lean_obj_res tg4_cuda_alloc_bytes(b_lean_obj_arg nbytes_obj, lean_object* world) {
+  (void)nbytes_obj; (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
-LEAN_EXPORT lean_obj_res tg4_cuda_free(b_lean_obj_arg buf) {
+LEAN_EXPORT lean_obj_res tg4_cuda_free(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
-LEAN_EXPORT lean_obj_res tg4_cuda_copy_in_bytes(b_lean_obj_arg buf, b_lean_obj_arg data) {
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_in_bytes(b_lean_obj_arg buf, b_lean_obj_arg data, lean_object* world) {
+  (void)buf; (void)data; (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
-LEAN_EXPORT lean_obj_res tg4_cuda_copy_out_bytes(b_lean_obj_arg buf, b_lean_obj_arg size) {
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_out_bytes(b_lean_obj_arg buf, b_lean_obj_arg nbytes, lean_object* world) {
+  (void)buf; (void)nbytes; (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
-LEAN_EXPORT lean_obj_res tg4_cuda_compile(b_lean_obj_arg src, b_lean_obj_arg name) {
+LEAN_EXPORT lean_obj_res tg4_cuda_compile(b_lean_obj_arg name, b_lean_obj_arg source, lean_object* world) {
+  (void)name; (void)source; (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
 LEAN_EXPORT lean_obj_res tg4_cuda_launch_2d(b_lean_obj_arg prog, b_lean_obj_arg bufs,
-    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg bx, b_lean_obj_arg by_) {
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg bx, b_lean_obj_arg by_, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)bx; (void)by_; (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
-LEAN_EXPORT lean_obj_res tg4_cuda_sync(lean_obj_arg w) {
+LEAN_EXPORT lean_obj_res tg4_cuda_sync(lean_object* world) {
+  (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
-LEAN_EXPORT lean_obj_res tg4_cuda_device_name(lean_obj_arg w) {
+LEAN_EXPORT lean_obj_res tg4_cuda_device_name(lean_object* world) {
+  (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
+// Legacy float-based API stubs (for backward compatibility)
+LEAN_EXPORT lean_obj_res tg4_cuda_alloc(b_lean_obj_arg n, lean_object* world) {
+  (void)n; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_in(b_lean_obj_arg buf, b_lean_obj_arg arr, lean_object* world) {
+  (void)buf; (void)arr; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_out(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_size(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_launch(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg gz,
+    b_lean_obj_arg bx, b_lean_obj_arg by_, b_lean_obj_arg bz, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)gz; (void)bx; (void)by_; (void)bz; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+// Pure API - return empty/zero result instead of error
 LEAN_EXPORT lean_obj_res tg4_cuda_matmul_sync(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n) {
-  // Return empty ByteArray on error
-  return lean_mk_empty_byte_array(lean_box(0));
+  (void)a; (void)b;
+  // Return zero-filled ByteArray of correct size
+  size_t M = lean_usize_of_nat(m);
+  size_t N = lean_usize_of_nat(n);
+  size_t out_bytes = M * N * sizeof(float);
+  lean_object* arr = lean_alloc_sarray(1, out_bytes, out_bytes);
+  memset(lean_sarray_cptr(arr), 0, out_bytes);
+  return arr;
 }
 
 #endif /* TG4_HAS_CUDA */

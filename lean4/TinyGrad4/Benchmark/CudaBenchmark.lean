@@ -60,7 +60,7 @@ def vectorAddFloat4Source (size : Nat) : String :=
 def floatArrayToBytes (arr : FloatArray) : ByteArray := Id.run do
   -- FloatArray stores Float32 internally, so we can use toByteArray
   -- For now, generate simple pattern data instead (matching the values computed above)
-  let mut bytes := ByteArray.mkEmpty (arr.size * 4)
+  let mut bytes := ByteArray.empty
   for i in [:arr.size] do
     let f := arr.get! i
     -- Use Float.toUInt32 to get IEEE 754 bits

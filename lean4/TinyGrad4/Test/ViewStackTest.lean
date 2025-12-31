@@ -9,6 +9,9 @@ These ensure that movement operations compose correctly through the interpreter.
 
 namespace TinyGrad4.Test.ViewStackTest
 
+-- Disable RawBuffer linter for test files that need Array Float literals
+set_option linter.useRawBuffer false
+
 open TinyGrad4
 open StaticTensor
 open Interpreter

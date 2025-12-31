@@ -113,6 +113,7 @@ inductive BenchKernel where
   | addMul    : BenchKernel  -- (a + b) * c (fused)
   | reduceSum : BenchKernel  -- sum(a)
   | reduceMax : BenchKernel  -- max(a)
+  | matmul    : BenchKernel  -- A @ B (matrix multiplication)
   deriving Repr, DecidableEq
 
 def BenchKernel.name : BenchKernel → String
@@ -129,6 +130,7 @@ def BenchKernel.name : BenchKernel → String
   | .addMul => "fused_add_mul"
   | .reduceSum => "reduce_sum"
   | .reduceMax => "reduce_max"
+  | .matmul => "matmul"
 
 /-- Number of input buffers for a kernel -/
 def BenchKernel.numInputs : BenchKernel → Nat
@@ -136,13 +138,15 @@ def BenchKernel.numInputs : BenchKernel → Nat
   | .neg | .exp2 | .sin | .sqrt | .recip => 1
   | .addMul => 3
   | .reduceSum | .reduceMax => 1
+  | .matmul => 2  -- A and B matrices
 
-/-- Number of FLOPs per element -/
+/-- Number of FLOPs per element (for matmul, this is per output element) -/
 def BenchKernel.flopsPerElement : BenchKernel → Nat
   | .add | .mul | .sub | .div | .max | .neg => 1
   | .exp2 | .sin | .sqrt | .recip => 1  -- Counted as 1 for simplicity
   | .addMul => 2  -- 1 add + 1 mul
   | .reduceSum | .reduceMax => 1
+  | .matmul => 2  -- 1 mul + 1 add per K iteration (counted differently in matmul)
 
 /-! ## Shader Generation -/
 
@@ -182,7 +186,7 @@ def generateEwiseShader (kernel : BenchKernel) (size : Nat) : Option String := d
   | .addMul =>
     let (nodes, outId) := mkFusedAddMulGraph
     renderKernelAuto "fused_add_mul" nodes outId size
-  | .reduceSum | .reduceMax => none  -- Use reduce-specific generator
+  | .reduceSum | .reduceMax | .matmul => none  -- Use specific generators
 
 /-- Generate Metal shader for a reduce kernel -/
 def generateReduceShader (kernel : BenchKernel) (innerSize outerSize : Nat) : Option String := do
@@ -191,10 +195,17 @@ def generateReduceShader (kernel : BenchKernel) (innerSize outerSize : Nat) : Op
   | .reduceMax => some (renderReduceKernelAuto "reduce_max" .max innerSize outerSize)
   | _ => none
 
+/-- Generate Metal shader for matmul kernel.
+    For benchmarking, we use square matrices: [size x size] @ [size x size]
+    Total FLOPs = 2 * M * N * K = 2 * size^3 -/
+def generateMatmulShader (size : Nat) : String :=
+  renderGemmKernelAuto "matmul" size size size
+
 /-- Generate Metal shader for any benchmark kernel -/
 def generateShader (kernel : BenchKernel) (size : Nat) : Option String :=
   match kernel with
   | .reduceSum | .reduceMax => generateReduceShader kernel size 1  -- Single reduction
+  | .matmul => some (generateMatmulShader size)
   | k => generateEwiseShader k size
 
 /-! ## Convenience: Print shader for testing -/

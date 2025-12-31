@@ -22,5 +22,21 @@ def main : IO UInt32 := do
   kernel.setup
   IO.println "Setup complete!"
 
+  IO.println "Step 4: Running one iteration..."
+  kernel.runOnce
+  IO.println "RunOnce complete!"
+
+  IO.println "Step 5: Syncing..."
+  kernel.sync
+  IO.println "Sync complete!"
+
+  IO.println "Step 6: Verifying..."
+  let ok ← kernel.verify
+  IO.println s!"Verify: {ok}"
+
+  IO.println "Step 7: Cleanup..."
+  kernel.cleanup
+  IO.println "Cleanup complete!"
+
   IO.println "Done!"
   return 0

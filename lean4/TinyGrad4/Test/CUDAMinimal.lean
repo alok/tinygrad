@@ -14,9 +14,13 @@ def main : IO UInt32 := do
   IO.println "Step 1: Starting..."
   IO.println s!"Kernel source length: {vectorAddSource.length}"
 
-  IO.println "Step 2: Creating kernel (but not running)..."
+  IO.println "Step 2: Creating kernel..."
   let kernel ← makeVectorAddKernel 1000
   IO.println s!"Kernel created! Backend: {kernel.backendName}"
+
+  IO.println "Step 3: Calling setup..."
+  kernel.setup
+  IO.println "Setup complete!"
 
   IO.println "Done!"
   return 0

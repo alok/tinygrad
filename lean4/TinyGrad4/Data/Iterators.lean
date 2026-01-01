@@ -8,6 +8,85 @@ namespace TinyGrad4.Data
 open Std.Iterators
 open GPULoader
 
+/-- Device-tagged batch/element. -/
+structure DeviceBatch (T : Type) where
+  device : DeviceId
+  value : T
+  deriving Repr
+
+/-- Device-tagged pull stream. -/
+structure DeviceStream (T : Type) where
+  nextFn : IO (Option (DeviceBatch T))
+
+namespace DeviceStream
+
+def next (s : DeviceStream T) : IO (Option (DeviceBatch T)) :=
+  s.nextFn
+
+def ofIterator (it : DataIterator T) (device : DeviceId := .cpu) : DeviceStream T :=
+  {
+    nextFn := do
+      match ← DataIterator.next it with
+      | some x => pure (some { device, value := x })
+      | none => pure none
+  }
+
+def ofPrefetcher (p : Prefetcher T) (device : DeviceId := .cpu) : DeviceStream T :=
+  {
+    nextFn := do
+      match ← Prefetcher.next p with
+      | some x => pure (some { device, value := x })
+      | none => pure none
+  }
+
+def ofGPU (loader : GPUDataLoader) : DeviceStream GPUBuffer :=
+  {
+    nextFn := do
+      match ← GPUDataLoader.next loader with
+      | some buf => pure (some { device := loader.device, value := buf })
+      | none => pure none
+  }
+
+def ofMultiAny (pool : MultiGPULoader) : DeviceStream GPUBuffer :=
+  {
+    nextFn := do
+      match ← MultiGPULoader.nextAny pool with
+      | some (device, buf) => pure (some { device, value := buf })
+      | none => pure none
+  }
+
+end DeviceStream
+
+instance : Iterator (DeviceStream T) IO (DeviceBatch T) where
+  IsPlausibleStep _ _ := True
+  step it := do
+    match ← it.internalState.nextFn with
+    | some x =>
+        pure <| Std.Shrink.deflate <| PlausibleIterStep.yield it x (by trivial)
+    | none =>
+        pure <| Std.Shrink.deflate <| PlausibleIterStep.done (by trivial)
+
+instance : IteratorLoop (DeviceStream T) IO IO :=
+  IteratorLoop.defaultImplementation
+
+instance : IteratorCollect (DeviceStream T) IO IO :=
+  IteratorCollect.defaultImplementation
+
+instance : ToIterator (DeviceStream T) IO (DeviceStream T) (DeviceBatch T) :=
+  ToIterator.ofM (DeviceStream T) (fun s => ⟨s⟩)
+
+instance : ForIn IO (DeviceStream T) (DeviceBatch T) where
+  forIn s init f := do
+    let mut acc := init
+    repeat do
+      match ← s.nextFn with
+      | none => break
+      | some x =>
+          match ← f x acc with
+          | .done a => return a
+          | .yield a => acc := a
+    pure acc
+
 namespace DataIterator
 
 /-- Monadic iterator view for `DataIterator`. -/
@@ -109,5 +188,48 @@ instance : IteratorCollect GPUDataLoader IO IO :=
 
 instance : ToIterator GPUDataLoader IO GPUDataLoader GPUBuffer :=
   ToIterator.ofM GPUDataLoader (fun loader => ⟨loader⟩)
+
+namespace MultiGPULoader
+
+/-- Monadic iterator view for `MultiGPULoader` (sync batches). -/
+def iterM (pool : MultiGPULoader) :
+    IterM (α := MultiGPULoader) IO (Array (DeviceBatch GPUBuffer)) :=
+  ⟨pool⟩
+
+end MultiGPULoader
+
+instance : Iterator MultiGPULoader IO (Array (DeviceBatch GPUBuffer)) where
+  IsPlausibleStep _ _ := True
+  step it := do
+    let batches ← MultiGPULoader.nextAll it.internalState
+    if batches.all (fun (_, b) => b.isNone) then
+      pure <| Std.Shrink.deflate <| PlausibleIterStep.done (by trivial)
+    else
+      let actual := batches.filterMap fun (device, buf) =>
+        buf.map fun b => { device, value := b }
+      pure <| Std.Shrink.deflate <| PlausibleIterStep.yield it actual (by trivial)
+
+instance : IteratorLoop MultiGPULoader IO IO :=
+  IteratorLoop.defaultImplementation
+
+instance : IteratorCollect MultiGPULoader IO IO :=
+  IteratorCollect.defaultImplementation
+
+instance : ToIterator MultiGPULoader IO MultiGPULoader (Array (DeviceBatch GPUBuffer)) :=
+  ToIterator.ofM MultiGPULoader (fun pool => ⟨pool⟩)
+
+instance : ForIn IO MultiGPULoader (Array (DeviceBatch GPUBuffer)) where
+  forIn pool init f := do
+    let mut acc := init
+    repeat do
+      let batches ← MultiGPULoader.nextAll pool
+      if batches.all (fun (_, b) => b.isNone) then
+        break
+      let actual := batches.filterMap fun (device, buf) =>
+        buf.map fun b => { device, value := b }
+      match ← f actual acc with
+      | .done a => return a
+      | .yield a => acc := a
+    pure acc
 
 end TinyGrad4.Data

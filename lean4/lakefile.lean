@@ -10,6 +10,7 @@ package TinyGrad4 where
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
 require strata from git "https://github.com/strata-org/Strata" @ "main"
 require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
+require LeanBench from "../LeanBench"
 
 def cFlags : Array String :=
   if System.Platform.isWindows then
@@ -81,8 +82,8 @@ extern_lib tg4c pkg := do
     -- Build C files with Lake's clang
     for file in (← (pkg.dir / "c").readDir) do
       if file.path.extension == some "c" && cSourceFiles.contains file.fileName then
-        -- Skip tg4_accel.c - it needs system clang for Accelerate framework
-        if file.fileName == "tg4_accel.c" then continue
+        -- Skip tg4_accel.c on macOS (needs system clang for Accelerate framework)
+        if file.fileName == "tg4_accel.c" && System.Platform.isOSX then continue
         let oFile := pkg.buildDir / "c" / ((file.fileName.dropSuffix ".c").toString ++ ".o")
         let srcJob ← inputTextFile file.path
         oFiles := oFiles.push (← buildLeanO oFile srcJob #[] cFlagsWithCuda)
@@ -150,8 +151,8 @@ extern_lib tg4c pkg := do
 lean_lib TinyGrad4 where
   precompileModules := true
 
-lean_lib LeanBench where
-  globs := #[`LeanBench.*]
+lean_lib LeanBenchNew where
+  globs := #[`LeanBenchNew.*]
 
 lean_lib Wandb where
   globs := #[`Wandb.*]
@@ -164,6 +165,9 @@ lean_lib TinyGrad4Bench where
 
 lean_exe mnist_fusion_bench where
   root := `TinyGrad4Bench.MNISTFusionBenchMain
+
+lean_exe tg4_leanbench where
+  root := `TinyGrad4Bench.LeanBenchMain
   moreLinkArgs := metalLinkArgs
 
 lean_lib StrataExperiments
@@ -260,6 +264,10 @@ lean_exe dataset_test where
   root := `TinyGrad4.Test.DatasetSmoke
   moreLinkArgs := metalLinkArgs
 
+lean_exe checkpoint_resume_test where
+  root := `TinyGrad4.Test.CheckpointResumeSmoke
+  moreLinkArgs := metalLinkArgs
+
 lean_exe data_loader_bench where
   root := `TinyGrad4.Test.DataLoaderBench
   moreLinkArgs := metalLinkArgs
@@ -278,6 +286,10 @@ lean_exe gpu_loader_bench where
 
 lean_exe gpu_loader_smoke where
   root := `TinyGrad4.Test.GPULoaderSmokeTest
+  moreLinkArgs := metalLinkArgs
+
+lean_exe tpu_loader_smoke where
+  root := `TinyGrad4.Test.TPULoaderSmokeTest
   moreLinkArgs := metalLinkArgs
 
 lean_exe cuda_smoke where

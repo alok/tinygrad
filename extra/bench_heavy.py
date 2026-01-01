@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+"""
+bench_heavy: run real-model tinygrad benchmarks (no toy ops).
+
+Usage:
+  PYTHONPATH=. uv run --no-project --with numpy python extra/bench_heavy.py \
+    --json /tmp/bench_heavy.json --csv /tmp/bench_heavy.csv
+
+Env (subset):
+  RESNET_BS, RESNET_ITERS, RESNET_WARMUP, JITCNT, ASSIGN
+  BERT_BS, BERT_SEQ, BERT_HEADS, BERT_HEAD_DIM, BERT_ITERS, BERT_WARMUP
+  FUSED_SOFTMAX, ACC_DTYPE
+"""
 import argparse, csv, functools, json, subprocess, time
 from pathlib import Path
 
@@ -24,6 +36,7 @@ def _sync(out=None):
     Device[Device.DEFAULT].synchronize()
 
 def _best_of(label, iters, warmup, fn, jitcnt=1):
+  """Run warmup + best-of timing, returning perf counters."""
   for _ in range(warmup):
     fn()
     _sync()
@@ -94,6 +107,7 @@ def _write_csv(path, meta, results):
     writer.writerows(rows)
 
 def bench_resnet50():
+  """ResNet50 train step (forward + backward + optimizer schedule)."""
   bs = getenv("RESNET_BS", getenv("BS", 16))
   iters = getenv("RESNET_ITERS", getenv("ITERS", 5))
   warmup = getenv("RESNET_WARMUP", getenv("WARMUP", 2))
@@ -134,6 +148,7 @@ def bench_resnet50():
   return res
 
 def bench_bert_attention():
+  """BERT attention kernel: QK^T -> softmax -> QK@V."""
   bs = getenv("BERT_BS", getenv("BS", 16))
   seq = getenv("BERT_SEQ", 512)
   heads = getenv("BERT_HEADS", 16)

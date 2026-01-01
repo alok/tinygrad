@@ -10,7 +10,7 @@ package TinyGrad4 where
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
 require strata from git "https://github.com/strata-org/Strata" @ "main"
 require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
-require LeanBench from "../LeanBench"
+require LeanBench from git "https://github.com/alok/leanbench" @ "main"
 
 def cFlags : Array String :=
   if System.Platform.isWindows then
@@ -288,6 +288,10 @@ lean_exe gpu_loader_smoke where
   root := `TinyGrad4.Test.GPULoaderSmokeTest
   moreLinkArgs := metalLinkArgs
 
+lean_exe device_loader_resume_smoke where
+  root := `TinyGrad4.Test.DeviceLoaderResumeSmoke
+  moreLinkArgs := metalLinkArgs
+
 lean_exe tpu_loader_smoke where
   root := `TinyGrad4.Test.TPULoaderSmokeTest
   moreLinkArgs := metalLinkArgs
@@ -310,4 +314,8 @@ lean_exe cuda_minimal where
 
 lean_exe buffer_bench where
   root := `TinyGrad4Bench.BufferProtocolBench
+  moreLinkArgs := metalLinkArgs
+
+lean_exe profiler_bench where
+  root := `TinyGrad4Bench.ProfilerBench
   moreLinkArgs := metalLinkArgs

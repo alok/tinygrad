@@ -145,10 +145,38 @@ private def runPrefetch (cfg : BenchParams) : IO (Array (String × StageStat)) :
     | none => break
   profiler.snapshot
 
+private def runPrefetchItems (cfg : BenchParams) : IO (Array (String × StageStat)) := do
+  let profiler ← Profiler.new
+  let mnist ← getMnist cfg
+  let key := RandKey.new cfg.seed
+  let base := profileDs profiler "base" mnist
+  let ⟨D, inst, ds⟩ := mkShuffled cfg key base
+  let _ : Dataset D MNISTSample := inst
+  let shuffled := profileDs profiler "shuffle" ds
+  let sharded := profileDs profiler "shard" (shardDs 0 1 .interleaved true shuffled)
+  let n := Dataset.len sharded
+  let totalBatches := if cfg.batchSize == 0 then 0 else n / cfg.batchSize
+  let prefetcher ← Prefetcher.create sharded cfg.prefetchBuffer
+  let mut batches := 0
+  while batches < totalBatches do
+    let startBatch ← IO.monoNanosNow
+    let mut taken := 0
+    while taken < cfg.batchSize do
+      match ← profilePrefetcherNext profiler "prefetch_item" prefetcher with
+      | some _ =>
+          taken := taken + 1
+      | none =>
+          taken := cfg.batchSize
+    let stopBatch ← IO.monoNanosNow
+    profiler.recordSample "batch" (stopBatch - startBatch)
+    batches := batches + 1
+  profiler.snapshot
+
 initialize do
   let cfg ← readParams
   let baselineStats ← IO.mkRef (#[] : Array (String × StageStat))
   let prefetchStats ← IO.mkRef (#[] : Array (String × StageStat))
+  let prefetchItemStats ← IO.mkRef (#[] : Array (String × StageStat))
   LeanBench.register {
     name := "dataloader/mnist/baseline"
     action := do
@@ -166,6 +194,15 @@ initialize do
     report? := some do
       extrasJson cfg <$> prefetchStats.get
     config := baseConfig cfg ["data", "mnist", "prefetch"]
+  }
+  LeanBench.register {
+    name := "dataloader/mnist/prefetch-items"
+    action := do
+      let stats ← runPrefetchItems cfg
+      prefetchItemStats.set stats
+    report? := some do
+      extrasJson cfg <$> prefetchItemStats.get
+    config := baseConfig cfg ["data", "mnist", "prefetch", "items"]
   }
 
 end TinyGrad4Bench

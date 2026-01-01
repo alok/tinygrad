@@ -10,7 +10,7 @@ package TinyGrad4 where
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
 require strata from git "https://github.com/strata-org/Strata" @ "main"
 require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
-require LeanBench from git "https://github.com/alok/leanbench" @ "f441733"
+require LeanBench from git "https://github.com/alok/leanbench" @ "879d3cb"
 
 def cFlags : Array String :=
   if System.Platform.isWindows then

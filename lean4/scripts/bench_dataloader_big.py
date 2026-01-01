@@ -187,11 +187,19 @@ def iter_mmap(path: str, chunk_bytes: int, total_bytes: int, iterations: int) ->
 
 
 class MMapDataSource:
-    def __init__(self, path: str, chunk_bytes: int, total_bytes: int, return_bytes: bool = False) -> None:
+    def __init__(
+        self,
+        path: str,
+        chunk_bytes: int,
+        total_bytes: int,
+        return_bytes: bool = False,
+        return_numpy: bool = False,
+    ) -> None:
         self.path = path
         self.chunk_bytes = chunk_bytes
         self.total_bytes = total_bytes
         self.return_bytes = return_bytes
+        self.return_numpy = return_numpy
         self._open()
 
     def _open(self) -> None:
@@ -204,6 +212,7 @@ class MMapDataSource:
             "chunk_bytes": self.chunk_bytes,
             "total_bytes": self.total_bytes,
             "return_bytes": self.return_bytes,
+            "return_numpy": self.return_numpy,
         }
 
     def __setstate__(self, state):
@@ -211,14 +220,17 @@ class MMapDataSource:
         self.chunk_bytes = state["chunk_bytes"]
         self.total_bytes = state["total_bytes"]
         self.return_bytes = state.get("return_bytes", False)
+        self.return_numpy = state.get("return_numpy", False)
         self._open()
 
     def __len__(self) -> int:
         return self.total_bytes // self.chunk_bytes
 
-    def __getitem__(self, idx: int) -> memoryview:
+    def __getitem__(self, idx: int):
         start = idx * self.chunk_bytes
         end = min(start + self.chunk_bytes, self.total_bytes)
+        if self.return_numpy:
+            return np.frombuffer(self._mm, dtype=np.uint8, count=end - start, offset=start)
         if self.return_bytes:
             return self._mm[start:end]
         return memoryview(self._mm)[start:end]
@@ -233,6 +245,7 @@ def bench_grain(
     worker_buffer_size: int,
     read_threads: Optional[int],
     read_buffer_size: Optional[int],
+    return_numpy: bool,
     shuffle: bool,
 ) -> Optional[BenchResult]:
     try:
@@ -241,7 +254,13 @@ def bench_grain(
     except Exception:
         return None
 
-    ds = MMapDataSource(path, chunk_bytes, total_bytes, return_bytes=worker_count > 0)
+    ds = MMapDataSource(
+        path,
+        chunk_bytes,
+        total_bytes,
+        return_bytes=(worker_count > 0 and not return_numpy),
+        return_numpy=return_numpy,
+    )
     read_options = None
     if read_threads is not None or read_buffer_size is not None:
         defaults = grain.ReadOptions()
@@ -271,8 +290,12 @@ def bench_grain(
         for item in loader:
             yield item
 
+    name = f"grain(w={worker_count},buf={worker_buffer_size},shuffle={int(shuffle)}"
+    if return_numpy:
+        name += ",np=1"
+    name += ")"
     return run_loop(
-        name=f"grain(w={worker_count},buf={worker_buffer_size},shuffle={int(shuffle)})",
+        name=name,
         batches=batches(),
         mode=mode,
     )
@@ -424,6 +447,7 @@ def main() -> None:
     ap.add_argument("--jax-device", choices=["cpu", "gpu", "tpu"], default="cpu")
     ap.add_argument("--workers", type=int, default=0)
     ap.add_argument("--buffer", type=int, default=4)
+    ap.add_argument("--grain-numpy", action="store_true")
     ap.add_argument("--read-threads", type=int, default=None)
     ap.add_argument("--read-buffer", type=int, default=None)
     ap.add_argument("--prefetch", type=int, default=2)
@@ -467,6 +491,7 @@ def main() -> None:
             worker_buffer_size=args.buffer,
             read_threads=args.read_threads,
             read_buffer_size=args.read_buffer,
+            return_numpy=args.grain_numpy,
             shuffle=args.shuffle,
         )
         if r is None:

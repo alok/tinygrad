@@ -13,7 +13,7 @@ from examples.mlperf.initializers import Conv2dHeNormal, Linear
 from extra.models import resnet
 from test.test_softmax_fusion import single_kernel_softmax
 
-# ultrathik: "real" benches that reuse existing tinygrad models/kernels (no toy ops)
+# bench_heavy: "real" benches that reuse existing tinygrad models/kernels (no toy ops)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -127,7 +127,7 @@ def bench_resnet50():
       run_schedule(list(sched))
 
   x = Tensor.randn(bs, 3, 224, 224, requires_grad=True).realize()
-  print(f"ultrathik/resnet50: bs={bs} iters={iters} warmup={warmup} jitcnt={jitcnt} device={Device.DEFAULT}")
+  print(f"bench_heavy/resnet50: bs={bs} iters={iters} warmup={warmup} jitcnt={jitcnt} device={Device.DEFAULT}")
   res = _best_of("resnet50_train_step", iters, warmup, lambda: step(x), jitcnt=jitcnt)
   if res is None: return None
   res.update({"bs": bs, "iters": iters, "warmup": warmup, "jitcnt": jitcnt})
@@ -156,7 +156,7 @@ def bench_bert_attention():
       probs = scores.softmax(-1, dtype=acc_dtype)
     return probs @ v
 
-  print(f"ultrathik/bert_attention: bs={bs} seq={seq} heads={heads} head_dim={head_dim} "
+  print(f"bench_heavy/bert_attention: bs={bs} seq={seq} heads={heads} head_dim={head_dim} "
         f"iters={iters} warmup={warmup} fused={use_fused} device={Device.DEFAULT}")
   res = _best_of("bert_attention", iters, warmup, lambda: attn(q, k, v))
   if res is None: return None
@@ -172,7 +172,7 @@ def bench_bert_attention():
   return res
 
 def main():
-  parser = argparse.ArgumentParser(description="ultrathik tinygrad benches (real models, no toy ops)")
+  parser = argparse.ArgumentParser(description="bench_heavy tinygrad benches (real models, no toy ops)")
   parser.add_argument("--bench", action="append", choices=["resnet", "bert"], help="bench to run (can repeat)")
   parser.add_argument("--device", help="override Device.DEFAULT (e.g. METAL, CUDA, CPU)")
   parser.add_argument("--json", dest="json_path", help="write results to JSON file")

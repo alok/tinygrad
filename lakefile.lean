@@ -15,6 +15,7 @@ package TinyGrad4 where
 
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
 require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
+require LeanBench from "../LeanBench"
 
 def cFlags : Array String :=
   if System.Platform.isWindows then
@@ -52,8 +53,8 @@ extern_lib tg4c pkg := do
 lean_lib TinyGrad4 where
   precompileModules := false
 
-lean_lib LeanBench where
-  globs := #[`LeanBench.*]
+lean_lib LeanBenchNew where
+  globs := #[`LeanBenchNew.*]
 
 lean_lib Wandb where
   globs := #[`Wandb.*]
@@ -66,6 +67,9 @@ lean_lib TinyGrad4Bench where
 
 lean_exe mnist_fusion_bench where
   root := `TinyGrad4Bench.MNISTFusionBenchMain
+
+lean_exe tg4_leanbench where
+  root := `TinyGrad4Bench.LeanBenchMain
 
 lean_exe benchmark where
   root := `TinyGrad4.Test.BenchmarkMain

@@ -268,6 +268,10 @@ lean_exe zero_copy_bench where
   root := `TinyGrad4.Test.ZeroCopyBench
   moreLinkArgs := metalLinkArgs
 
+lean_exe raw_file_bench where
+  root := `TinyGrad4.Test.RawFileBench
+  moreLinkArgs := metalLinkArgs
+
 lean_exe gpu_loader_bench where
   root := `TinyGrad4.Test.GPULoaderBench
   moreLinkArgs := metalLinkArgs
@@ -290,4 +294,8 @@ lean_exe cuda_compile_test where
 
 lean_exe cuda_minimal where
   root := `TinyGrad4.Test.CUDAMinimal
+  moreLinkArgs := metalLinkArgs
+
+lean_exe buffer_bench where
+  root := `TinyGrad4Bench.BufferProtocolBench
   moreLinkArgs := metalLinkArgs

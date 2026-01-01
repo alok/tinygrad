@@ -17,7 +17,7 @@ bench_suite "buffer"
 bench_suite "data"
 
 bench "buffer/computeCStrides-4d" (mkCfg "buffer" ["buffer", "strides"]) do
-  let strides := BufferDescriptor.computeCStrides #[32, 3, 224, 224]
+  let strides := RawBuffer.computeCStrides #[32, 3, 224, 224]
   if strides.size == 0 then
     IO.println ""
 

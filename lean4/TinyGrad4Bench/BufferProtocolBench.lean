@@ -1,6 +1,6 @@
 import TinyGrad4.Data.Buffer
 import TinyGrad4.Data.IndexTransform
-import LeanBenchNew.Benchmark
+import TinyGrad4Bench.BenchUtil
 
 /-!
 # Buffer Protocol Benchmarks
@@ -8,7 +8,7 @@ import LeanBenchNew.Benchmark
 Measures overhead of buffer protocol operations.
 
 ## Targets (from design plan)
-- `toDescriptor` overhead: < 50ns
+- `toRaw` overhead: < 50ns
 - Shuffle construction (60K elements): < 1ms
 - computeCStrides: O(n) but low constant factor
 - Registry operations: < 100ns per op
@@ -16,20 +16,7 @@ Measures overhead of buffer protocol operations.
 
 open TinyGrad4.Data
 open LeanBenchNew
-
-/-! ## Benchmark Configuration -/
-
-def microBenchConfig : Config := {
-  warmupIterations := 10
-  timedIterations := 100
-  printProgress := false
-}
-
-def mediumBenchConfig : Config := {
-  warmupIterations := 5
-  timedIterations := 50
-  printProgress := false
-}
+open TinyGrad4Bench
 
 /-! ## computeCStrides Benchmarks -/
 
@@ -38,17 +25,17 @@ def benchComputeStrides : IO (Array Result) := do
 
   -- Small shape (common case: 3D tensor)
   let r1 ← runPure "computeCStrides [2,3,4]" microBenchConfig fun () =>
-    BufferDescriptor.computeCStrides #[2, 3, 4]
+    RawBuffer.computeCStrides #[2, 3, 4]
   results := results.push r1
 
   -- Medium shape (4D tensor, typical for images)
   let r2 ← runPure "computeCStrides [32,3,224,224]" microBenchConfig fun () =>
-    BufferDescriptor.computeCStrides #[32, 3, 224, 224]
+    RawBuffer.computeCStrides #[32, 3, 224, 224]
   results := results.push r2
 
   -- Large shape (6D tensor, edge case)
   let r3 ← runPure "computeCStrides [2,3,4,5,6,7]" microBenchConfig fun () =>
-    BufferDescriptor.computeCStrides #[2, 3, 4, 5, 6, 7]
+    RawBuffer.computeCStrides #[2, 3, 4, 5, 6, 7]
   results := results.push r3
 
   pure results
@@ -149,19 +136,19 @@ def benchTrackedBuffer : IO (Array Result) := do
 
   -- Allocation
   let r1 ← run "TrackedBuffer.alloc" microBenchConfig fun () => do
-    let _ ← TrackedBuffer.alloc reg 1024 .float32 .cpu
+    let _ ← TrackedBuffer.alloc reg [1024] .float32 .cpu
     pure ()
   results := results.push r1
 
   -- withBorrowed pattern
-  let buf ← TrackedBuffer.alloc reg 1024 .float32 .cpu
+  let buf ← TrackedBuffer.alloc reg [1024] .float32 .cpu
   let r2 ← run "withBorrowed (single)" microBenchConfig fun () => do
     withBorrowed buf fun _ => pure ()
   results := results.push r2
 
   -- withBorrowedAll pattern (5 buffers)
   let bufs ← (List.range 5).mapM fun _ =>
-    TrackedBuffer.alloc reg 1024 .float32 .cpu
+    TrackedBuffer.alloc reg [1024] .float32 .cpu
   let bufsArr := bufs.toArray
   let r3 ← run "withBorrowedAll (5 bufs)" microBenchConfig fun () => do
     withBorrowedAll bufsArr fun _ => pure ()
@@ -169,12 +156,12 @@ def benchTrackedBuffer : IO (Array Result) := do
 
   pure results
 
-/-! ## BufferDescriptor Operations -/
+/-! ## RawBuffer Operations -/
 
 def benchDescriptorOps : IO (Array Result) := do
   let mut results := #[]
 
-  let desc : BufferDescriptor := {
+  let desc : RawBuffer := {
     handle := { ptr := 0x1000, device := .cpu }
     dtype := .float32
     shape := #[32, 3, 224, 224]
@@ -183,22 +170,22 @@ def benchDescriptorOps : IO (Array Result) := do
   }
 
   -- numel computation
-  let r1 ← runPure "BufferDescriptor.numel" microBenchConfig fun () =>
+  let r1 ← runPure "RawBuffer.numel" microBenchConfig fun () =>
     desc.numel
   results := results.push r1
 
   -- bytes computation
-  let r2 ← runPure "BufferDescriptor.bytes" microBenchConfig fun () =>
+  let r2 ← runPure "RawBuffer.bytes" microBenchConfig fun () =>
     desc.bytes
   results := results.push r2
 
   -- isContiguous check
-  let r3 ← runPure "BufferDescriptor.isContiguous" microBenchConfig fun () =>
+  let r3 ← runPure "RawBuffer.isContiguous" microBenchConfig fun () =>
     desc.isContiguous
   results := results.push r3
 
   -- slice operation
-  let r4 ← runPure "BufferDescriptor.slice" microBenchConfig fun () =>
+  let r4 ← runPure "RawBuffer.slice" microBenchConfig fun () =>
     desc.slice 100 #[16, 3, 224, 224]
   results := results.push r4
 
@@ -210,19 +197,19 @@ def benchBufferExchange : IO (Array Result) := do
   let mut results := #[]
   let reg ← BufferRegistry.new
 
-  let buf ← TrackedBuffer.alloc reg 1024 .float32 .cpu
+  let buf ← TrackedBuffer.alloc reg [1024] .float32 .cpu
 
-  -- toDescriptor (TrackedBuffer → BufferDescriptor)
-  let r1 ← run "BufferExport.toDescriptor" microBenchConfig fun () => do
-    let _ ← BufferExport.toDescriptor buf
+  -- toRaw (TrackedBuffer → RawBuffer)
+  let r1 ← run "BufferExport.toRaw" microBenchConfig fun () => do
+    let _ ← BufferExport.toRaw buf
     pure ()
   results := results.push r1
 
-  let desc := buf.descriptor
+  let desc := buf.toRaw
 
-  -- fromDescriptor (BufferDescriptor + registry → TrackedBuffer)
-  let r2 ← run "BufferImport.fromDescriptor" microBenchConfig fun () => do
-    let _ ← (BufferImport.fromDescriptor reg desc : IO TrackedBuffer)
+  -- fromRaw (RawBuffer + registry → TrackedBuffer)
+  let r2 ← run "BufferImport.fromRaw" microBenchConfig fun () => do
+    let _ ← (BufferImport.fromRaw reg desc : IO (TrackedBuffer [1024] .float32))
     pure ()
   results := results.push r2
 
@@ -246,7 +233,7 @@ def benchDataLoadingPattern : IO (Array Result) := do
       -- Safe since i < batchSize (64) < 60000
       if h : i < shuffle.outputLen then
         let _idx := shuffle.map ⟨i, h⟩
-        let _buf ← TrackedBuffer.alloc reg 784 .float32 .cpu  -- MNIST image
+        let _buf ← TrackedBuffer.alloc reg [784] .float32 .cpu  -- MNIST image
         pure ()
   results := results.push r1
 
@@ -312,18 +299,18 @@ def main : IO Unit := do
   IO.println ""
 
   -- Descriptor ops
-  IO.println "▶ BufferDescriptor Operations"
-  IO.println "─────────────────────────────"
+  IO.println "▶ RawBuffer Operations"
+  IO.println "──────────────────────"
   let descResults ← benchDescriptorOps
   printComparison descResults
   IO.println ""
 
   -- Buffer exchange
-  IO.println "▶ BufferExport/Import (target: toDescriptor < 50ns)"
+  IO.println "▶ BufferExport/Import (target: toRaw < 50ns)"
   IO.println "────────────────────────────────────────────────────"
   let exchangeResults ← benchBufferExchange
   printComparison exchangeResults
-  -- Check toDescriptor (index 0)
+  -- Check toRaw (index 0)
   if let some r := exchangeResults[0]? then
     if r.avgTimeNs < 50 then
       IO.println s!"  ✓ {r.name}: {r.avgTimeNs}ns < 50ns target"

@@ -310,7 +310,6 @@ def bench_torch(
     prefetch: int,
 ) -> Optional[BenchResult]:
     try:
-        import torch  # type: ignore
         from torch.utils.data import DataLoader, Dataset  # type: ignore
     except Exception:
         return None
@@ -373,6 +372,7 @@ def bench_ray(
         import ray  # type: ignore
     except Exception:
         return None
+    _ = ray
     try:
         import ray.data as rd  # type: ignore
     except Exception:

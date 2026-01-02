@@ -1,3 +1,4 @@
+import TinyGrad4.Shape
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.GPULoader
@@ -15,6 +16,8 @@ namespace TinyGrad4.Test.DeviceLoaderResumeSmoke
 open TinyGrad4.Data
 open TinyGrad4.Data.GPULoader
 open TinyGrad4.Data.TPULoader
+
+def itemShape : Shape := [4]
 
 /-- Assert condition with message. -/
 def assert (cond : Bool) (msg : String) : IO Unit := do
@@ -101,13 +104,15 @@ def buildCfg (n epochs : Nat) (key : RandKey) :
 def collectGPU (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
     (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO (Array UInt64) := do
   let loader ← match prefetchSize? with
-    | some p => GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
-    | none => GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    | some p =>
+        GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize itemShape
+          (prefetchSize := p) (dtype := .uint8) (bufferSize := 2)
+    | none =>
+        GPUDataLoader.createFromIteratorCfg cfg device batchSize itemShape (dtype := .uint8) (bufferSize := 2)
   let mut out := #[]
-  for buf in loader do
-    let bytes ← buf.copyOut
+  for lease in loader do
+    let bytes ← lease.value.copyOut
     out := out.push (checksum bytes)
-    buf.free
   loader.stop
   loader.drain
   pure out
@@ -120,22 +125,23 @@ def collectMultiGPU (cfg : IteratorConfig D) (devices : Array DeviceId) (batchSi
     [Dataset D ByteArray] : IO (Array UInt64) := do
   let pool ← match prefetchSize? with
     | some p =>
-        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize p (bufferSize := 2) (dtype := .uint8)
+        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize itemShape
+          (prefetchSize := p) (dtype := .uint8) (bufferSize := 2)
           (world? := world?) (states? := states?)
     | none =>
-        MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
-          (world? := world?) (states? := states?)
+        MultiGPULoader.createFromIteratorCfg cfg devices batchSize itemShape
+          (dtype := .uint8) (bufferSize := 2) (world? := world?) (states? := states?)
   let mut out := #[]
   repeat do
     let batches ← pool.nextAll
     if batches.all (fun (_, b) => b.isNone) then
       break
-    for (_, buf?) in batches do
-      match buf? with
-      | some buf =>
-          let bytes ← buf.copyOut
+    for (_, lease?) in batches do
+      match lease? with
+      | some lease =>
+          let bytes ← lease.value.copyOut
           out := out.push (checksum bytes)
-          buf.free
+          lease.release
       | none => pure ()
   pool.stop
   pool.drain
@@ -145,8 +151,11 @@ def collectMultiGPU (cfg : IteratorConfig D) (devices : Array DeviceId) (batchSi
 def collectTPU (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
     (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO (Array UInt64) := do
   let loader ← match prefetchSize? with
-    | some p => TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
-    | none => TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    | some p =>
+        TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize itemShape p
+          (bufferSize := 2) (dtype := .uint8)
+    | none =>
+        TPUDataLoader.createFromIteratorCfg cfg device batchSize itemShape (bufferSize := 2) (dtype := .uint8)
   let mut out := #[]
   for buf in loader do
     out := out.push (checksum buf.data)
@@ -159,16 +168,19 @@ def resumeGPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize : N
     (baseline : Array UInt64) (split : Nat) (prefetchSize? : Option Nat := none)
     [Dataset D ByteArray] : IO Unit := do
   let loader ← match prefetchSize? with
-    | some p => GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
-    | none => GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    | some p =>
+        GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize itemShape
+          (prefetchSize := p) (dtype := .uint8) (bufferSize := 2)
+    | none =>
+        GPUDataLoader.createFromIteratorCfg cfg device batchSize itemShape (dtype := .uint8) (bufferSize := 2)
   let mut seen := (#[] : Array UInt64)
   let mut count := 0
   while count < split do
     match ← loader.next with
-    | some buf =>
-        let bytes ← buf.copyOut
+    | some lease =>
+        let bytes ← lease.value.copyOut
         seen := seen.push (checksum bytes)
-        buf.free
+        lease.release
         count := count + 1
     | none => break
 
@@ -194,16 +206,19 @@ def interruptGPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize 
     (baseline : Array UInt64) (split : Nat) (interruptDelayMs : Nat := 5)
     (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO Unit := do
   let loader ← match prefetchSize? with
-    | some p => GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
-    | none => GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    | some p =>
+        GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize itemShape
+          (prefetchSize := p) (dtype := .uint8) (bufferSize := 2)
+    | none =>
+        GPUDataLoader.createFromIteratorCfg cfg device batchSize itemShape (dtype := .uint8) (bufferSize := 2)
   let mut seen := (#[] : Array UInt64)
   let mut count := 0
   while count < split do
     match ← loader.next with
-    | some buf =>
-        let bytes ← buf.copyOut
+    | some lease =>
+        let bytes ← lease.value.copyOut
         seen := seen.push (checksum bytes)
-        buf.free
+        lease.release
         count := count + 1
     | none => break
 
@@ -232,8 +247,11 @@ def resumeTPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize : N
     (baseline : Array UInt64) (split : Nat) (prefetchSize? : Option Nat := none)
     [Dataset D ByteArray] : IO Unit := do
   let loader ← match prefetchSize? with
-    | some p => TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
-    | none => TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    | some p =>
+        TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize itemShape p
+          (bufferSize := 2) (dtype := .uint8)
+    | none =>
+        TPUDataLoader.createFromIteratorCfg cfg device batchSize itemShape (bufferSize := 2) (dtype := .uint8)
   let mut seen := (#[] : Array UInt64)
   let mut count := 0
   while count < split do
@@ -265,8 +283,11 @@ def interruptTPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize 
     (baseline : Array UInt64) (split : Nat) (interruptDelayMs : Nat := 5)
     (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO Unit := do
   let loader ← match prefetchSize? with
-    | some p => TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
-    | none => TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    | some p =>
+        TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize itemShape p
+          (bufferSize := 2) (dtype := .uint8)
+    | none =>
+        TPUDataLoader.createFromIteratorCfg cfg device batchSize itemShape (bufferSize := 2) (dtype := .uint8)
   let mut seen := (#[] : Array UInt64)
   let mut count := 0
   while count < split do
@@ -301,23 +322,23 @@ def resumeMultiGPUAtSplit (cfg : IteratorConfig D) (devices : Array DeviceId) (b
     (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO Unit := do
   let pool ← match prefetchSize? with
     | some p =>
-        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize p (bufferSize := 2) (dtype := .uint8)
-          (world? := world?)
+        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize itemShape
+          (prefetchSize := p) (dtype := .uint8) (bufferSize := 2) (world? := world?)
     | none =>
-        MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
-          (world? := world?)
+        MultiGPULoader.createFromIteratorCfg cfg devices batchSize itemShape
+          (dtype := .uint8) (bufferSize := 2) (world? := world?)
   let mut seen := (#[] : Array UInt64)
   let mut rounds := 0
   while rounds < split do
     let batches ← pool.nextAll
     if batches.all (fun (_, b) => b.isNone) then
       break
-    for (_, buf?) in batches do
-      match buf? with
-      | some buf =>
-          let bytes ← buf.copyOut
+    for (_, lease?) in batches do
+      match lease? with
+      | some lease =>
+          let bytes ← lease.value.copyOut
           seen := seen.push (checksum bytes)
-          buf.free
+          lease.release
       | none => pure ()
     rounds := rounds + 1
 
@@ -339,23 +360,23 @@ def interruptMultiGPUAtSplit (cfg : IteratorConfig D) (devices : Array DeviceId)
     [Dataset D ByteArray] : IO Unit := do
   let pool ← match prefetchSize? with
     | some p =>
-        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize p (bufferSize := 2) (dtype := .uint8)
-          (world? := world?)
+        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize itemShape
+          (prefetchSize := p) (dtype := .uint8) (bufferSize := 2) (world? := world?)
     | none =>
-        MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
-          (world? := world?)
+        MultiGPULoader.createFromIteratorCfg cfg devices batchSize itemShape
+          (dtype := .uint8) (bufferSize := 2) (world? := world?)
   let mut seen := (#[] : Array UInt64)
   let mut rounds := 0
   while rounds < split do
     let batches ← pool.nextAll
     if batches.all (fun (_, b) => b.isNone) then
       break
-    for (_, buf?) in batches do
-      match buf? with
-      | some buf =>
-          let bytes ← buf.copyOut
+    for (_, lease?) in batches do
+      match lease? with
+      | some lease =>
+          let bytes ← lease.value.copyOut
           seen := seen.push (checksum bytes)
-          buf.free
+          lease.release
       | none => pure ()
     rounds := rounds + 1
 

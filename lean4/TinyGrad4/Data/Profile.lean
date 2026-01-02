@@ -348,7 +348,8 @@ def profileBatchPrefetcherNext (profiler : Profiler) (name : String)
 
 /-- Profile a GPU loader's `next` with wait time attribution. -/
 def profileGPULoaderNext (profiler : Profiler) (name : String)
-    (loader : GPULoader.GPUDataLoader) : IO (Option GPULoader.GPUBuffer) := do
+    (loader : GPULoader.GPUDataLoader batch itemShape dtype) :
+    IO (Option (GPULoader.GPULease (batch :: itemShape) dtype)) := do
   let start ← IO.monoNanosNow
   let (result, waitNs) ← loader.nextWithWait
   let stop ← IO.monoNanosNow
@@ -357,7 +358,8 @@ def profileGPULoaderNext (profiler : Profiler) (name : String)
 
 /-- Profile a TPU loader's `next` with wait time attribution. -/
 def profileTPULoaderNext (profiler : Profiler) (name : String)
-    (loader : TPULoader.TPUDataLoader) : IO (Option TPULoader.TPUBuffer) := do
+    (loader : TPULoader.TPUDataLoader batch itemShape dtype) :
+    IO (Option (TPULoader.TPUBuffer (batch :: itemShape) dtype)) := do
   let start ← IO.monoNanosNow
   let (result, waitNs) ← loader.nextWithWait
   let stop ← IO.monoNanosNow
@@ -366,8 +368,8 @@ def profileTPULoaderNext (profiler : Profiler) (name : String)
 
 /-- Profile a MultiGPULoader `nextAll` with aggregated wait time attribution. -/
 def profileMultiGPUNextAll (profiler : Profiler) (name : String)
-    (pool : GPULoader.MultiGPULoader) :
-    IO (Array (GPULoader.DeviceId × Option GPULoader.GPUBuffer)) := do
+    (pool : GPULoader.MultiGPULoader batch itemShape dtype) :
+    IO (Array (GPULoader.DeviceId × Option (GPULoader.GPULease (batch :: itemShape) dtype))) := do
   let start ← IO.monoNanosNow
   let (result, waitNs) ← pool.nextAllWithWait
   let stop ← IO.monoNanosNow

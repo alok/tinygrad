@@ -81,14 +81,14 @@ def benchBufferAlloc (device : DeviceId) (sizes : Array Nat) (iters : Nat := 100
 
     -- Warm up
     for _ in [:5] do
-      let buf ← GPUBuffer.alloc device size
+      let buf ← GPUBuffer.alloc device [size] .uint8
       buf.copyIn data
       buf.free
 
     -- Measure allocation + copy
     let (allocMs, _) ← timeMs do
       for _ in [:iters] do
-        let buf ← GPUBuffer.alloc device size
+        let buf ← GPUBuffer.alloc device [size] .uint8
         buf.copyIn data
         buf.free
 
@@ -122,7 +122,7 @@ def benchZeroCopy (device : DeviceId) (imageData : ByteArray) (batchSize : Nat :
     for i in [:testCount] do
       if h : i < slices.size then
         let slice := slices[i]
-        let buf ← ByteSlice.toGPUBuffer slice device .uint8
+        let buf ← ByteSlice.toGPUBuffer slice device [batchSize, 784] .uint8
         buf.free
 
   let copyBatchPerSec := testCount.toFloat * 1000.0 / copyMs
@@ -136,7 +136,7 @@ def benchZeroCopy (device : DeviceId) (imageData : ByteArray) (batchSize : Nat :
     for i in [:testCount] do
       if h : i < slices.size then
         let slice := slices[i]
-        let buf ← ByteSlice.toGPUBufferZeroCopy slice device .uint8
+        let buf ← ByteSlice.toGPUBufferZeroCopy slice device [batchSize, 784] .uint8
         buf.free
 
   let zcBatchPerSec := testCount.toFloat * 1000.0 / zcMs
@@ -172,8 +172,8 @@ instance : Dataset ByteImageDataset ByteArray where
 
 /-- Benchmark GPUDataLoader throughput -/
 def benchGPULoader (device : DeviceId) (imageData : ByteArray) (batchSize : Nat := 64) (bufferSize : Nat := 4)
-    (world? : Option WorldConfig := none) : IO Unit := do
-  IO.println s!"=== GPUDataLoader Throughput (batch={batchSize}, buffer={bufferSize}) ==="
+    (poolSlots : Nat := 0) (world? : Option WorldConfig := none) : IO Unit := do
+  IO.println s!"=== GPUDataLoader Throughput (batch={batchSize}, buffer={bufferSize}, pool={poolSlots}) ==="
 
   let numImages := imageData.size / 784
   let batchBytes := batchSize * 784
@@ -187,11 +187,10 @@ def benchGPULoader (device : DeviceId) (imageData : ByteArray) (batchSize : Nat 
 
   -- Create loader and consume all batches
   let (totalMs, totalBatches) ← timeMs do
-    let loader ← GPUDataLoader.create ds device batchSize bufferSize .uint8
+    let loader ← GPUDataLoader.create ds device batchSize [784] .uint8 bufferSize poolSlots
     let mut count := 0
-    for buf in loader do
+    for _lease in loader do
       count := count + 1
-      buf.free
     pure count
 
   let batchPerSec := totalBatches.toFloat * 1000.0 / totalMs
@@ -202,8 +201,9 @@ def benchGPULoader (device : DeviceId) (imageData : ByteArray) (batchSize : Nat 
 
 /-- Benchmark GPUDataLoader throughput with batch prefetching. -/
 def benchGPULoaderPrefetch (device : DeviceId) (imageData : ByteArray) (batchSize : Nat := 64)
-    (prefetchSize : Nat := 8) (bufferSize : Nat := 4) (world? : Option WorldConfig := none) : IO Unit := do
-  IO.println s!"=== GPUDataLoader Prefetch Throughput (batch={batchSize}, prefetch={prefetchSize}, buffer={bufferSize}) ==="
+    (prefetchSize : Nat := 8) (bufferSize : Nat := 4) (poolSlots : Nat := 0)
+    (world? : Option WorldConfig := none) : IO Unit := do
+  IO.println s!"=== GPUDataLoader Prefetch Throughput (batch={batchSize}, prefetch={prefetchSize}, buffer={bufferSize}, pool={poolSlots}) ==="
 
   let numImages := imageData.size / 784
   let batchBytes := batchSize * 784
@@ -216,11 +216,11 @@ def benchGPULoaderPrefetch (device : DeviceId) (imageData : ByteArray) (batchSiz
   let iterCfg : IteratorConfig (ShardedDataset ByteImageDataset ByteArray) := { base := ds }
 
   let (totalMs, totalBatches) ← timeMs do
-    let loader ← GPUDataLoader.createFromIteratorCfgPrefetch iterCfg device batchSize prefetchSize bufferSize .uint8
+    let loader ← GPUDataLoader.createFromIteratorCfgPrefetch iterCfg device batchSize [784]
+      prefetchSize .uint8 bufferSize poolSlots
     let mut count := 0
-    for buf in loader do
+    for _lease in loader do
       count := count + 1
-      buf.free
     pure count
 
   let batchPerSec := totalBatches.toFloat * 1000.0 / totalMs
@@ -249,11 +249,10 @@ def benchSliceLoader (device : DeviceId) (imageData : ByteArray) (batchSize : Na
 
   -- Create loader and consume all batches
   let (totalMs, _) ← timeMs do
-    let loader ← GPUDataLoader.fromSlices slices device bufferSize .uint8
+    let loader ← GPUDataLoader.fromSlices slices device batchSize [784] .uint8 bufferSize
     let mut count := 0
-    for buf in loader do
+    for _lease in loader do
       count := count + 1
-      buf.free
     pure count
 
   let sliceCount := slices.size
@@ -265,20 +264,21 @@ def benchSliceLoader (device : DeviceId) (imageData : ByteArray) (batchSize : Na
 
 /-- Benchmark MultiGPULoader throughput across devices. -/
 def benchMultiGPULoader (devices : Array DeviceId) (imageData : ByteArray)
-    (imageSize : Nat) (batchSize : Nat) (bufferSize : Nat)
+    (imageSize : Nat) (batchSize : Nat) (bufferSize : Nat) (poolSlots : Nat)
     (world? : Option WorldConfig := none) : IO Unit := do
   if devices.size < 2 then
     IO.println "MultiGPULoader: need at least 2 devices"
     return
 
-  IO.println s!"=== MultiGPULoader Throughput (devices={devices.size}, batch={batchSize}, buffer={bufferSize}) ==="
+  IO.println s!"=== MultiGPULoader Throughput (devices={devices.size}, batch={batchSize}, buffer={bufferSize}, pool={poolSlots}) ==="
 
   let numImages := imageData.size / imageSize
   let baseDs : ByteImageDataset := { data := imageData, imageSize, numImages }
   let batchBytes := batchSize * imageSize
 
   let (totalMs, totalBatches) ← timeMs do
-    let pool ← MultiGPULoader.create baseDs devices batchSize bufferSize .uint8 world?
+    let pool ← MultiGPULoader.create baseDs devices batchSize [imageSize] .uint8 bufferSize poolSlots
+      (world? := world?)
     let rounds := pool.numBatchesPerDevice
     let mut count := 0
     if rounds == 0 then
@@ -287,11 +287,11 @@ def benchMultiGPULoader (devices : Array DeviceId) (imageData : ByteArray)
     else
       for _ in [:rounds] do
         let batches ← pool.nextAll
-        for (_, buf?) in batches do
-          match buf? with
-          | some buf =>
+        for (_, lease?) in batches do
+          match lease? with
+          | some lease =>
               count := count + 1
-              buf.free
+              lease.release
           | none => pure ()
       pool.stop
       pure count
@@ -353,6 +353,7 @@ def main : IO Unit := do
   let imageSize ← getEnvNat "TG4_GPU_IMAGE_SIZE" 784
   let batchSize ← getEnvNat "TG4_GPU_BATCH" defaultBatch
   let bufferSize ← getEnvNat "TG4_GPU_BUFFER" defaultBuffer
+  let poolSlots ← getEnvNat "TG4_GPU_POOL_SLOTS" 0
   let iters ← getEnvNat "TG4_GPU_ITERS" defaultIters
   if numImages < batchSize then
     throw (IO.userError s!"TG4_GPU_NUM_IMAGES={numImages} must be >= batch size {batchSize}")
@@ -365,8 +366,8 @@ def main : IO Unit := do
   -- Run benchmarks
   benchBufferAlloc device #[1024, 4096, 16384, 65536, 262144] iters
   benchZeroCopy device imageData batchSize iters
-  benchGPULoader device imageData batchSize bufferSize worldShard
-  benchGPULoaderPrefetch device imageData batchSize 8 bufferSize worldShard
+  benchGPULoader device imageData batchSize bufferSize poolSlots worldShard
+  benchGPULoaderPrefetch device imageData batchSize 8 bufferSize poolSlots worldShard
   benchSliceLoader device imageData batchSize bufferSize worldShard
 
   let multiEnabled ← getEnvBool "TG4_GPU_MULTI" true
@@ -376,7 +377,7 @@ def main : IO Unit := do
     | .metal => true
     | _ => false
   if multiEnabled && multiDevices.size >= 2 then
-    benchMultiGPULoader multiDevices imageData imageSize batchSize bufferSize worldShard
+    benchMultiGPULoader multiDevices imageData imageSize batchSize bufferSize poolSlots worldShard
 
   -- Larger batch sizes
   IO.println "=== Batch Size Scaling ==="
@@ -388,9 +389,9 @@ def main : IO Unit := do
       ByteSlice.mk' imageData (i * batchBytes) batchBytes
 
     let (ms, _) ← timeMs do
-      let loader ← GPUDataLoader.fromSlices slices device bufferSize .uint8
-      for buf in loader do
-        buf.free
+      let loader ← GPUDataLoader.fromSlices slices device batchSize [imageSize] .uint8 bufferSize
+      for _lease in loader do
+        pure ()
 
     let batchPerSec := numBatches.toFloat * 1000.0 / ms
     IO.println s!"  batch={bs}: {batchPerSec.toString.take 6} batch/s ({numBatches} batches in {ms.toString.take 5}ms)"

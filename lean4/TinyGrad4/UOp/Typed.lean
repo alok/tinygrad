@@ -60,6 +60,10 @@ def constInt (dtype : DType) (value : Int) : TUOpM (TUOp .CONST [] (rankOf []) d
   let raw ← UOp.constInt dtype value
   pure (mkUnsafe raw)
 
+def constNat (dtype : DType) (value : Nat) : TUOpM (TUOp .CONST [] (rankOf []) dtype) := do
+  let raw ← UOp.constNat dtype value
+  pure (mkUnsafe raw)
+
 def constBool (value : Bool) : TUOpM (TUOp .CONST [] (rankOf []) .bool) := do
   let raw ← UOp.constBool value
   pure (mkUnsafe raw)

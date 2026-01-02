@@ -448,11 +448,13 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
 
   -- 7/8. Zero-copy + shared memory benchmarks (Metal only)
   let metalAvailable ← TinyGrad4.Backend.Metal.isAvailable
-  if !metalAvailable then
-    IO.println ""
-    IO.println "  Zero-copy benchmarks: skipped (Metal unavailable)"
-    IO.println "  Shared memory benchmarks: skipped (Metal unavailable)"
-  else
+  let (zeroCopyMedian?, shmThroughputWrite?, shmThroughputRead?) ←
+    if !metalAvailable then
+      IO.println ""
+      IO.println "  Zero-copy benchmarks: skipped (Metal unavailable)"
+      IO.println "  Shared memory benchmarks: skipped (Metal unavailable)"
+      pure (none, none, none)
+    else
     -- Zero-copy Metal buffer benchmark
     IO.println ""
     IO.println "  Zero-copy benchmarks:"
@@ -511,6 +513,7 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
 
     IO.println s!"  SharedMem write: {shmWriteMedian} ms ({shmThroughputWrite} GB/s)"
     IO.println s!"  SharedMem read:  {shmReadMedian} ms ({shmThroughputRead} GB/s)"
+    pure (some zeroCopyMedian, some shmThroughputWrite, some shmThroughputRead)
 
   IO.println ""
   IO.println "============================================================"
@@ -525,11 +528,19 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   IO.println s!"Accel SIMD checksum                 {accelChecksumMedian}    {numBatches.toFloat * 1000.0 / accelChecksumMedian}"
   IO.println s!"Accel SIMD normalize+sum            {accelNormMedian}    {numBatches.toFloat * 1000.0 / accelNormMedian}"
   IO.println s!"Metal GPU normalize+matmul          {metalMedian}    {numBatches.toFloat * 1000.0 / metalMedian}"
-  IO.println s!"Zero-copy buffer create             {zeroCopyMedian}    {numBatches.toFloat * 1000.0 / zeroCopyMedian}"
+  match zeroCopyMedian? with
+  | some zeroCopyMedian =>
+      IO.println s!"Zero-copy buffer create             {zeroCopyMedian}    {numBatches.toFloat * 1000.0 / zeroCopyMedian}"
+  | none =>
+      IO.println "Zero-copy buffer create             skipped"
   IO.println ""
-  IO.println s!"Shared memory throughput:"
-  IO.println s!"  Write: {shmThroughputWrite} GB/s"
-  IO.println s!"  Read:  {shmThroughputRead} GB/s"
+  match shmThroughputWrite?, shmThroughputRead? with
+  | some shmThroughputWrite, some shmThroughputRead =>
+      IO.println s!"Shared memory throughput:"
+      IO.println s!"  Write: {shmThroughputWrite} GB/s"
+      IO.println s!"  Read:  {shmThroughputRead} GB/s"
+  | _, _ =>
+      IO.println "Shared memory throughput: skipped"
   IO.println ""
   IO.println "============================================================"
   IO.println "Run Python: uv run lean4/scripts/bench_data_loading.py"

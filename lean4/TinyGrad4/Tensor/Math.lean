@@ -103,7 +103,7 @@ def cat {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTens
 
 def catList {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
     : TensorM (StaticTensor (Shape.concatOutList shapes axis) d) := do
-  let out ← TUOp.catList (d := d) (TensorList.toUOps ts) (Shape.concatOutList shapes axis) axis
+  let out ← TUOp.catList (d := d) (TensorList.toTUOpList ts) (axis := axis)
   let reqGrad := TensorList.anyRequiresGrad ts
   pure (ofTU out reqGrad)
 

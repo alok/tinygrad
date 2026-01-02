@@ -292,6 +292,25 @@ def testPrefetcher : IO Unit := do
 
   IO.println "✓ Prefetcher tests passed"
 
+def testPrefetcherEarlyStop : IO Unit := do
+  IO.println "Testing Prefetcher early stop..."
+
+  let ds := ofArray (Array.range 1000)
+  let prefetcher ← Prefetcher.create ds 1
+  let mut count := 0
+
+  for _ in prefetcher do
+    count := count + 1
+    if count == 5 then
+      break
+
+  assert (count == 5) "Should stop after 5 items"
+  prefetcher.wait
+  let done ← prefetcher.isDone
+  assert done "Prefetcher should stop after early break"
+
+  IO.println "✓ Prefetcher early stop passed"
+
 /-! ## Pipeline Composition Test -/
 
 def testPipelineComposition : IO Unit := do
@@ -352,6 +371,8 @@ def runAll : IO Unit := do
   testCheckpoint
   IO.println "Running testPrefetcher..."
   testPrefetcher
+  IO.println "Running testPrefetcherEarlyStop..."
+  testPrefetcherEarlyStop
   IO.println "Running testPipelineComposition..."
   testPipelineComposition
 

@@ -1,4 +1,5 @@
 import TinyGrad4.Data.Dataset
+import TinyGrad4.Data.Prefetch
 
 /-!
 # Checkpoint - Training State Serialization
@@ -98,6 +99,45 @@ def deserializeIteratorState (bytes : ByteArray) : Option IteratorState := do
     key := { state := keyState }
   }
 
+/-! ## MultiIteratorState Serialization -/
+
+/-- Magic number for multi-iterator checkpoints. -/
+def multiCheckpointMagic : UInt64 := 0x5447344D4B505400  -- "TG4MKPT\0"
+
+/-- Multi-iterator checkpoint format version. -/
+def multiCheckpointVersion : UInt64 := 1
+
+/-- Serialize MultiIteratorState to bytes. -/
+def serializeMultiIteratorState (state : MultiIteratorState) : ByteArray := Id.run do
+  let mut out := serializeUInt64 multiCheckpointMagic ++ serializeUInt64 multiCheckpointVersion
+  out := out ++ serializeNat state.workerStates.size
+  out := out ++ serializeNat state.nextWorker
+  for st in state.workerStates do
+    out := out ++ serializeNat st.position
+    out := out ++ serializeNat st.epoch
+    out := out ++ serializeUInt64 st.key.state
+  out
+
+private def readStates (bytes : ByteArray) : Nat → Nat → Array IteratorState → Option (Array IteratorState)
+  | 0, _, acc => some acc
+  | n + 1, offset, acc =>
+      match deserializeNat bytes offset, deserializeNat bytes (offset + 8), deserializeUInt64 bytes (offset + 16) with
+      | some position, some epoch, some keyState =>
+          let st : IteratorState := { position, epoch, key := { state := keyState } }
+          readStates bytes n (offset + 24) (acc.push st)
+      | _, _, _ => none
+
+/-- Deserialize MultiIteratorState from bytes. -/
+def deserializeMultiIteratorState (bytes : ByteArray) : Option MultiIteratorState := do
+  let magic ← deserializeUInt64 bytes 0
+  guard (magic == multiCheckpointMagic)
+  let version ← deserializeUInt64 bytes 8
+  guard (version == multiCheckpointVersion)
+  let numWorkers ← deserializeNat bytes 16
+  let nextWorker ← deserializeNat bytes 24
+  let states ← readStates bytes numWorkers 32 (#[])
+  pure { nextWorker, workerStates := states }
+
 /-! ## File-Based Checkpointing -/
 
 /-- Save checkpoint to file -/
@@ -111,6 +151,18 @@ def loadCheckpoint (path : System.FilePath) : IO IteratorState := do
   match deserializeIteratorState bytes with
   | some state => pure state
   | none => throw (IO.userError s!"Invalid checkpoint file: {path}")
+
+/-- Save multi-iterator checkpoint to file. -/
+def saveMultiCheckpoint (path : System.FilePath) (state : MultiIteratorState) : IO Unit := do
+  let bytes := serializeMultiIteratorState state
+  IO.FS.writeBinFile path bytes
+
+/-- Load multi-iterator checkpoint from file. -/
+def loadMultiCheckpoint (path : System.FilePath) : IO MultiIteratorState := do
+  let bytes ← IO.FS.readBinFile path
+  match deserializeMultiIteratorState bytes with
+  | some state => pure state
+  | none => throw (IO.userError s!"Invalid multi checkpoint file: {path}")
 
 /-- Check if checkpoint exists -/
 def checkpointExists (path : System.FilePath) : IO Bool :=

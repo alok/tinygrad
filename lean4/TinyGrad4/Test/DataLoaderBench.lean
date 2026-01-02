@@ -42,18 +42,34 @@ def main : IO Unit := do
     | some v => v.trimAscii.toString.toNat?.getD 4
     | none => 4
   let iterDs := TinyGrad4.Data.IterDataset.ofDataset pipeline (TinyGrad4.Data.RandKey.new 7) 1
-  let multiPrefetcher ← iterDs.toMultiPrefetcher workers 8 .interleaved true
-  let startMulti ← IO.monoNanosNow
-  let mut countMulti := 0
-  repeat do
-    match ← multiPrefetcher.next with
-    | some _ => countMulti := countMulti + 1
-    | none => break
-  let stopMulti ← IO.monoNanosNow
-  multiPrefetcher.cancel
-  let secondsMulti := (stopMulti - startMulti).toFloat / 1e9
-  let rateMulti := if secondsMulti == 0.0 then 0.0 else countMulti.toFloat / secondsMulti
-  IO.println s!"Multi-prefetch throughput: workers={workers} rate={rateMulti} items/s"
+  let benchMulti (policy : TinyGrad4.Data.MultiIteratorPrefetcher.OrderingPolicy) (label : String) : IO Unit := do
+    let multiPrefetcher ← iterDs.toMultiPrefetcher workers 8 .interleaved true policy
+    let startMulti ← IO.monoNanosNow
+    let mut countMulti := 0
+    repeat do
+      match ← multiPrefetcher.next with
+      | some _ => countMulti := countMulti + 1
+      | none => break
+    let stopMulti ← IO.monoNanosNow
+    multiPrefetcher.cancel
+    let secondsMulti := (stopMulti - startMulti).toFloat / 1e9
+    let rateMulti := if secondsMulti == 0.0 then 0.0 else countMulti.toFloat / secondsMulti
+    IO.println s!"Multi-prefetch throughput ({label}): workers={workers} rate={rateMulti} items/s"
+
+  let policyStrict := TinyGrad4.Data.MultiIteratorPrefetcher.OrderingPolicy.strict
+  benchMulti policyStrict "strict"
+
+  let bestEffortSkips :=
+    match (← IO.getEnv "TG4_MULTI_PREFETCH_BESTEFFORT_SKIPS") with
+    | some v => v.trimAscii.toString.toNat?.getD 4
+    | none => 4
+  let bestEffortLead :=
+    match (← IO.getEnv "TG4_MULTI_PREFETCH_BESTEFFORT_LEAD") with
+    | some v => v.trimAscii.toString.toNat?.getD 16
+    | none => 16
+  let policyBest :=
+    TinyGrad4.Data.MultiIteratorPrefetcher.OrderingPolicy.bestEffortCfg bestEffortSkips bestEffortLead
+  benchMulti policyBest s!"best-effort(skips={bestEffortSkips}, lead={bestEffortLead})"
 
   -- 3c) Multi-worker prefetch resume benchmark (strict round-robin)
   let interruptAtRaw :=

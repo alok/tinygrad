@@ -49,6 +49,11 @@ def toIteratorFrom [Dataset D T] (ds : IterDataset D T) (state : IteratorState) 
   let cfg := { ds.cfg with startPos := state.position, startEpoch := state.epoch, key := state.key }
   Dataset.toIteratorCfg cfg
 
+/-- Create a stateful prefetcher from this dataset. -/
+def toPrefetcher [Dataset D T] (ds : IterDataset D T) (bufferSize : Nat := 8) :
+    IO (IteratorPrefetcher T) :=
+  IteratorPrefetcher.createFromIteratorCfg ds.cfg bufferSize
+
 private def mapCfg (cfg : IteratorConfig D) (f : D → D2) : IteratorConfig D2 :=
   {
     cfg with

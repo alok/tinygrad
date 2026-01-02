@@ -15,6 +15,7 @@ import TinyGrad4.Data.Shard
 import TinyGrad4.Data.Checkpoint
 import TinyGrad4.Data.Profile
 import TinyGrad4.Data.Timing
+import TinyGrad4.Data.IterDataset
 
 -- Datasets
 import TinyGrad4.Data.MNIST
@@ -34,6 +35,7 @@ Designed to be used by downstream libraries like SciLean.
 - `Dataset`: Random-access dataset typeclass
 - `RandKey`: JAX-style splittable PRNG for reproducible shuffling
 - `DataIterator`: Checkpointable sequential iteration
+- `IterDataset`: Configured, resumable iteration pipeline
 - `Prefetcher`: Background data loading with IO.asTask
 - `Profiler`: Lightweight timing stats for pipeline stages
 - `TPUDataLoader`: Host-staged loader tagged with TPU device IDs

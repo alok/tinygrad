@@ -1,6 +1,4 @@
 import Lean.Data.Json
--- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
-set_option linter.monoNanosNow false
 
 /-!
 # Benchmark Framework

@@ -87,9 +87,27 @@ def parseMetalOutput (output : String) : IO (Float × Float × Float × String) 
 
   return (parseF timeLine, parseF tputLine, parseF bwLine, deviceLine.trimAscii.toString)
 
+/-- Locate metal_runner from the current working directory. -/
+def findMetalRunner? : IO (Option String) := do
+  let candidates := #[
+    ".lake/build/metal/metal_runner",
+    "lean4/.lake/build/metal/metal_runner"
+  ]
+  for path in candidates do
+    if (← System.FilePath.pathExists path) then
+      return some path
+  return none
+
+/-- Get metal_runner path or raise with a setup hint. -/
+def findMetalRunner : IO String := do
+  match ← findMetalRunner? with
+  | some path => pure path
+  | none =>
+    throw (IO.Error.userError "metal_runner not found; run lean4/scripts/build_metal_ffi.sh")
+
 /-- Run Metal benchmark for a spec using standalone runner -/
 def runMetalSpec (spec : BenchmarkSpec) : IO BenchmarkResult := do
-  let runner := "lean4/.lake/build/metal/metal_runner"
+  let runner ← findMetalRunner
 
   -- Generate shader via MetalRenderer (uses actual codegen path!)
   let shader ← generateBenchShader .add spec.size
@@ -158,9 +176,8 @@ def backendRegistry : IO (Array BackendRunner) := do
         -- Check if metal_runner exists and we're on macOS
         try
           let _ ← IO.Process.run { cmd := "sw_vers", args := #["-productName"] }
-          -- Check for metal_runner binary (lean4 subdir)
-          let runner := "lean4/.lake/build/metal/metal_runner"
-          return (← System.FilePath.pathExists runner)
+          let runner? ← findMetalRunner?
+          return runner?.isSome
         catch _ =>
           return false
       runSpec := fun spec => runMetalSpec spec

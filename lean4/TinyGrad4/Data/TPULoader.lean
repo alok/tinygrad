@@ -88,7 +88,8 @@ def createFromIteratorCfg [Dataset D ByteArray] (cfg : IteratorConfig D) (device
       | some (batchData, state) =>
           let buf : TPUBuffer := { data := batchData, dtype, device }
           buf.assertDevice device
-          queue.push { buffer := buf, state }
+          let ok ← queue.push { buffer := buf, state }
+          if !ok then break
       | none => break
 
     queue.finish

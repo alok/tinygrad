@@ -26,7 +26,7 @@ A circular buffer with producer-consumer semantics using IO.Ref.
 structure IOQueue (T : Type) where
   /-- Buffer of items -/
   items : IO.Ref (Array T)
-  /-- Is the producer done? -/
+  /-- Is the queue closed? (No more items will be accepted.) -/
   done : IO.Ref Bool
   /-- Max buffer size for backpressure -/
   maxSize : Nat
@@ -40,13 +40,17 @@ def new (maxSize : Nat := 16) : IO (IOQueue T) := do
   pure { items, done, maxSize }
 
 /-- Add item to queue (may spin if full for backpressure) -/
-def push (q : IOQueue T) (item : T) : IO Unit := do
-  -- Simple spin-wait if buffer is full
+def push (q : IOQueue T) (item : T) : IO Bool := do
+  -- Simple spin-wait if buffer is full. Bail if closed.
   repeat do
+    if ← q.done.get then
+      return false
     let arr ← q.items.get
-    if arr.size < q.maxSize then break
+    if arr.size < q.maxSize then
+      q.items.modify (·.push item)
+      return true
     IO.sleep 1  -- 1ms backoff
-  q.items.modify (·.push item)
+  return false
 
 /-- Mark producer as done -/
 def finish (q : IOQueue T) : IO Unit :=
@@ -121,7 +125,8 @@ def create [Dataset D T] (ds : D) (bufferSize : Nat := 8) : IO (Prefetcher T) :=
       -- Fetch item
       if h : i < n then
         let item ← Dataset.getItem ds i h
-        queue.push item
+        let ok ← queue.push item
+        if !ok then break
 
     queue.finish
     return ()
@@ -177,7 +182,9 @@ instance : ForIn IO (Prefetcher T) T where
       | none => break
       | some x =>
         match ← f x acc with
-        | .done a => return a
+        | .done a =>
+            p.cancel
+            return a
         | .yield a => acc := a
     pure acc
 

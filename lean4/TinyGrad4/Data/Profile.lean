@@ -267,7 +267,7 @@ def concurrencySummary (p : Profiler) : IO String := do
   let idle := StageStat.formatNs s.idleNs
   let util := if s.wallNs == 0 then 0.0 else (s.activeNs.toFloat / s.wallNs.toFloat) * 100.0
   let overlap := if s.activeNs == 0 then 0.0 else s.busyNs.toFloat / s.activeNs.toFloat
-  pure s!"concurrency: wall={wall} active={active} busy={busy} idle={idle} " ++
+  pure <| s!"concurrency: wall={wall} active={active} busy={busy} idle={idle} " ++
     s!"util={util}% avg={s.avgConcurrency} overlap={overlap} peak={s.peakConcurrency}"
 
 /-- Render a summary sorted by wait ratio (descending). -/

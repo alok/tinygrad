@@ -49,6 +49,39 @@ def buildCfg (n epochs : Nat) (key : RandKey) :
     datasetAtEpoch := fun ds k epoch => shuffleDsCachedAtEpoch k epoch ds.inner
   }
 
+def roundRobinBaseline (cfg : IteratorConfig D) (workers : Nat) (mode : ShardMode := .interleaved)
+    (dropRemainder : Bool := true) [Dataset D T] : IO (Array T) := do
+  if workers == 0 then
+    return #[]
+  let mut iters := Array.mkEmpty workers
+  for i in [:workers] do
+    let cfg' := MultiIteratorPrefetcher.workerConfig cfg workers i mode dropRemainder
+    let iter ← Dataset.toIteratorCfg cfg'
+    iters := iters.push iter
+  let mut done := Array.replicate workers false
+  let mut active := workers
+  let mut idx := 0
+  let mut out := (#[] : Array T)
+  let advance (i : Nat) := (i + 1) % workers
+  while active > 0 do
+    if hDone : idx < done.size then
+      if done[idx]'hDone then
+        idx := advance idx
+      else if hIter : idx < iters.size then
+        match ← (iters[idx]'hIter).next with
+        | some x =>
+            out := out.push x
+            idx := advance idx
+        | none =>
+            done := done.set! idx true
+            active := active - 1
+            idx := advance idx
+      else
+        idx := advance idx
+    else
+      idx := 0
+  pure out
+
 def resumeAtSplit (cfg : IteratorConfig D) (baseline : Array T) (split : Nat) (workers : Nat)
     [Dataset D T] [BEq T] : IO Unit := do
   let prefetcher ← MultiIteratorPrefetcher.createFromIteratorCfg cfg workers 4 .interleaved false
@@ -80,9 +113,7 @@ def runAll : IO Unit := do
 
   let key := RandKey.new 42
   let cfg := buildCfg 257 2 key
-  let baselinePrefetcher ← MultiIteratorPrefetcher.createFromIteratorCfg cfg 3 4 .interleaved false
-  let baseline ← baselinePrefetcher.toArray
-  baselinePrefetcher.cancel
+  let baseline ← roundRobinBaseline cfg 3 .interleaved false
   assert (baseline.size == 257 * 2) "Baseline size mismatch"
 
   let splits := #[0, 1, 3, 17, 63, 128, 255, 256, 257, 300, baseline.size]

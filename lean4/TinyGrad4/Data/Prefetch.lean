@@ -485,6 +485,14 @@ private def shardIteratorCfg [Dataset D T] (cfg : IteratorConfig D) (scfg : Shar
       shardWithConfig scfg (cfg.datasetAtEpoch ds.inner k epoch)
   }
 
+/-- Build a per-worker iterator config for multi-worker prefetch. -/
+def workerConfig [Dataset D T] (cfg : IteratorConfig D) (numWorkers workerIdx : Nat)
+    (mode : ShardMode := .interleaved) (dropRemainder : Bool := true) :
+    IteratorConfig (ShardedDataset D T) :=
+  let n := Dataset.len cfg.base
+  let scfg : ShardConfig := { shardIndex := workerIdx, numShards := numWorkers, mode, dropRemainder }
+  shardIteratorCfg cfg scfg n
+
 /-- Create a multi-worker prefetcher from a config and explicit state. -/
 def createFromIteratorCfgState [Dataset D T] (cfg : IteratorConfig D) (numWorkers : Nat)
     (state : MultiIteratorState) (bufferSize : Nat := 8) (mode : ShardMode := .interleaved)

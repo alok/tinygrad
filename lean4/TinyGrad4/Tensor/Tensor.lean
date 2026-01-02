@@ -86,10 +86,9 @@ def ones (shape : List Nat) (dtype : DType := .float32) : TensorM (StaticTensor 
   full shape dtype 1.0
 
 private def fromArrayF32 (shape : Shape) (vals : Array Float32) : TensorM (StaticTensor shape .float32) := do
-  let u ← UOp.vconstF32 vals
-  let base : StaticTensor [vals.size] .float32 := { uop := u, h_shape := sorry_proof }
-  let reshaped ← UOp.reshape base.uop shape
-  pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+  let base ← TUOp.vconstF32 vals
+  let reshaped ← TUOp.reshape base shape
+  pure (StaticTensor.ofTUOp reshaped)
 
 private def intToFloat (v : Int) : Float :=
   if v >= 0 then

@@ -72,9 +72,9 @@ def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : N
   | .nil => panic! "stack: empty list"
   | _ =>
     let uops ← go ts
-    let out ← UOp.cat uops axis
+    let out ← TUOp.catList (d := d) uops (Shape.stackOut shapes axis) axis
     let reqGrad := TensorList.anyRequiresGrad ts
-    pure { uop := out, requiresGrad := reqGrad, h_shape := sorry_proof }
+    pure (StaticTensor.ofTUOp out reqGrad)
 
 /-- Repeat tensor along each dimension.
     repeats[i] specifies how many times to repeat dimension i.

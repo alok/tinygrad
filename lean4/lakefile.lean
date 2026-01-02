@@ -157,24 +157,89 @@ extern_lib tg4c pkg := do
     let name := nameToStaticLib "tg4c"
     buildStaticLib (pkg.staticLibDir / name) oFiles
 
+-- Default build compiles core libraries and their submodules.
+-- Use `.andSubmodules` to include the root module plus every submodule in the namespace.
+-- TinyGrad4 excludes TinyGrad4.Test.* and TinyGrad4.Backend.Engine to keep `lake build` green; build those explicitly when needed.
+-- Data loaders, benches, and experiments are opt-in to avoid work-in-progress build failures.
 @[default_target]
 lean_lib TinyGrad4 where
+  globs := #[
+    .one `TinyGrad4.Basic,
+    .one `TinyGrad4.DType,
+    .one `TinyGrad4.Shape,
+    .one `TinyGrad4.Tags,
+    .one `TinyGrad4.Ops,
+    .submodules `TinyGrad4.UOp,
+    .submodules `TinyGrad4.Tensor,
+    .one `TinyGrad4.Debug,
+    .one `TinyGrad4.Pretty,
+    .one `TinyGrad4.SimpSets,
+    .submodules `TinyGrad4.Linter,
+    .one `TinyGrad4.Backend.Accelerate,
+    .one `TinyGrad4.Backend.Buffer,
+    .one `TinyGrad4.Backend.Cost,
+    .one `TinyGrad4.Backend.CostExpr,
+    .one `TinyGrad4.Backend.CostExprMeta,
+    .one `TinyGrad4.Backend.Cuda,
+    .one `TinyGrad4.Backend.Device,
+    .one `TinyGrad4.Backend.DeviceBuffer,
+    .one `TinyGrad4.Backend.FusedContract,
+    .one `TinyGrad4.Backend.FusedEwise,
+    .one `TinyGrad4.Backend.FusedEwiseExpr,
+    .one `TinyGrad4.Backend.FusedGELU,
+    .one `TinyGrad4.Backend.FusedLayerNorm,
+    .one `TinyGrad4.Backend.FusedMatmul,
+    .one `TinyGrad4.Backend.FusedMatmulExpr,
+    .one `TinyGrad4.Backend.FusedReduce,
+    .one `TinyGrad4.Backend.FusedReduceExpr,
+    .one `TinyGrad4.Backend.FusedSGD,
+    .one `TinyGrad4.Backend.FusedSoftmax,
+    .one `TinyGrad4.Backend.FusedSoftmaxExpr,
+    .one `TinyGrad4.Backend.Fusion,
+    .one `TinyGrad4.Backend.Interpreter,
+    .one `TinyGrad4.Backend.JIT,
+    .one `TinyGrad4.Backend.Memory,
+    .one `TinyGrad4.Backend.Metal,
+    .one `TinyGrad4.Backend.MetalEwise,
+    .one `TinyGrad4.Backend.MetalMatmul,
+    .one `TinyGrad4.Backend.MetalRenderer,
+    .one `TinyGrad4.Backend.Native,
+    .one `TinyGrad4.Backend.PassManager,
+    .one `TinyGrad4.Backend.Pattern,
+    .one `TinyGrad4.Backend.Rangeify,
+    .one `TinyGrad4.Backend.Schedule,
+    .one `TinyGrad4.Backend.ShapeTracker,
+    .one `TinyGrad4.Backend.TimeM,
+    .one `TinyGrad4.Backend.Vectorization,
+    .one `TinyGrad4.Backend.View,
+    .one `TinyGrad4.Kernel.Spec,
+    .one `TinyGrad4.Kernel.Trusted,
+    .submodules `TinyGrad4.Gradient,
+    .submodules `TinyGrad4.Optim,
+    .andSubmodules `TinyGrad4.NN,
+    .andSubmodules `TinyGrad4.Benchmark,
+    .andSubmodules `TinyGrad4.Spec
+  ]
   precompileModules := true
 
+@[default_target]
 lean_lib Tqdm where
-  globs := #[`Tqdm.*]
+  globs := #[.andSubmodules `Tqdm]
 
+@[default_target]
 lean_lib LeanBenchNew where
-  globs := #[`LeanBenchNew.*]
+  globs := #[.andSubmodules `LeanBenchNew]
 
+@[default_target]
 lean_lib Wandb where
-  globs := #[`Wandb.*]
+  globs := #[.andSubmodules `Wandb]
 
+@[default_target]
 lean_lib LeanBenchWandb where
-  globs := #[`LeanBenchWandb.*]
+  globs := #[.andSubmodules `LeanBenchWandb]
 
 lean_lib TinyGrad4Bench where
-  globs := #[`TinyGrad4Bench.*]
+  globs := #[.andSubmodules `TinyGrad4Bench]
 
 lean_exe mnist_fusion_bench where
   root := `TinyGrad4Bench.MNISTFusionBenchMain
@@ -183,7 +248,8 @@ lean_exe tg4_leanbench where
   root := `TinyGrad4Bench.LeanBenchMain
   moreLinkArgs := metalLinkArgs
 
-lean_lib StrataExperiments
+lean_lib StrataExperiments where
+  globs := #[.andSubmodules `StrataExperiments]
 
 lean_exe cpu_bench where
   root := `TinyGrad4.Test.BenchmarkMain

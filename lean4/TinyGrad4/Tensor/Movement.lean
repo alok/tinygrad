@@ -16,8 +16,8 @@ def flatten {s : List Nat} {d : DType} (t : StaticTensor s d)
   let actualShape := t.uop.shape
   let base := TUOp.ofRaw t.uop
   let reshaped ← TUOp.reshape base [listProd actualShape]
-  let reshaped := TUOp.castShape reshaped [listProd s]
-  let reshaped := TUOp.castDType reshaped d
+  let reshaped : TUOp .RESHAPE [listProd s] (TUOp.rankOf [listProd s]) d :=
+    TUOp.mkUnsafe reshaped.raw
   pure (StaticTensor.ofTUOp reshaped t.requiresGrad)
 
 def expand {s : List Nat} {d : DType} (t : StaticTensor s d)
@@ -34,8 +34,8 @@ def unsqueeze {s : List Nat} {d : DType} (t : StaticTensor s d)
   let newShape := Shape.insertDim actualShape axis 1
   let base := TUOp.ofRaw t.uop
   let reshaped ← TUOp.reshape base newShape
-  let reshaped := TUOp.castShape reshaped (Shape.insertDim s axis 1)
-  let reshaped := TUOp.castDType reshaped d
+  let reshaped : TUOp .RESHAPE (Shape.insertDim s axis 1) (TUOp.rankOf (Shape.insertDim s axis 1)) d :=
+    TUOp.mkUnsafe reshaped.raw
   pure (StaticTensor.ofTUOp reshaped t.requiresGrad)
 
 def permute {s : List Nat} {d : DType} (t : StaticTensor s d)
@@ -67,18 +67,24 @@ def flip {s : List Nat} {d : DType} (t : StaticTensor s d)
 
 def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
     : TensorM (StaticTensor (Shape.stackOut shapes axis) d) := do
-  let rec go {shapes : List Shape} (ts : TensorList d shapes) : TensorM (List UOp) := do
+  let rec go (shapes : List Shape) (ts : TensorList d shapes) :
+      TensorM (TUOp.TUOpList d (shapes.map fun s => Shape.insertDim s axis 1)) := do
     match ts with
-    | .nil => pure []
-    | .cons t rest =>
+    | .nil => pure .nil
+    | .cons (s := s) (ss := ss) t rest =>
       let t' ← unsqueeze t axis
-      let rest' ← go rest
-      pure (t'.uop :: rest')
+      let rest' ← go ss rest
+      pure (.cons t'.tuop rest')
+  let uops ← go shapes ts
   match ts with
   | .nil => panic! "stack: empty list"
   | _ =>
-    let uops ← go ts
-    let out ← TUOp.catList (d := d) uops (Shape.stackOut shapes axis) axis
+    let h : Shape.ConcatListShape (shapes.map fun s => Shape.insertDim s axis 1) axis
+        (Shape.concatOutList (shapes.map fun s => Shape.insertDim s axis 1) axis) :=
+      { h_out := rfl, h_valid := sorry_proof }
+    let out ← TUOp.catList (d := d) (axis := axis)
+      (out := Shape.concatOutList (shapes.map fun s => Shape.insertDim s axis 1) axis) (h := h) uops
+    let out := TUOp.castShape out (Shape.stackOut shapes axis)
     let reqGrad := TensorList.anyRequiresGrad ts
     pure (StaticTensor.ofTUOp out reqGrad)
 

@@ -1,4 +1,5 @@
 import TinyGrad4.UOp.UOp
+import TinyGrad4.UOp.Typed
 import TinyGrad4.UOp.Graph
 
 namespace TinyGrad4
@@ -38,6 +39,14 @@ def rank {s : List Nat} {d : DType} (_ : StaticTensor s d) : Nat := s.length
 def elementSize {s : List Nat} {d : DType} (_ : StaticTensor s d) : Nat := d.itemsize
 def nbytes {s : List Nat} {d : DType} (_ : StaticTensor s d) : Nat := listProd s * d.itemsize
 
+def tuop {s : List Nat} {d : DType} (t : StaticTensor s d) :
+    TUOp t.uop.op s (TUOp.rankOf s) d :=
+  TUOp.mkUnsafe t.uop
+
+def ofTUOp {op : Ops} {s : List Nat} {r : Nat} {d : DType} (t : TUOp op s r d) (reqGrad : Bool := false) :
+    StaticTensor s d :=
+  { uop := t.raw, requiresGrad := reqGrad, h_shape := sorry_proof }
+
 end StaticTensor
 
 abbrev TensorM := UOpM
@@ -51,24 +60,24 @@ def runTensorMWithInternLimit (limit : Nat) (m : TensorM α) : α :=
 namespace Tensor
 
 def full (shape : List Nat) (dtype : DType) (value : Float32) : TensorM (StaticTensor shape dtype) := do
-  let const ← UOp.const dtype value
-  let expanded ← UOp.expand const shape
-  pure { uop := expanded, requiresGrad := false, h_shape := sorry_proof }
+  let const ← TUOp.const dtype value
+  let expanded ← TUOp.expand const shape
+  pure (StaticTensor.ofTUOp expanded)
 
 def fullInt (shape : List Nat) (dtype : DType) (value : Int) : TensorM (StaticTensor shape dtype) := do
-  let const ← UOp.constInt dtype value
-  let expanded ← UOp.expand const shape
-  pure { uop := expanded, requiresGrad := false, h_shape := sorry_proof }
+  let const ← TUOp.constInt dtype value
+  let expanded ← TUOp.expand const shape
+  pure (StaticTensor.ofTUOp expanded)
 
 def fullNat (shape : List Nat) (dtype : DType) (value : Nat) : TensorM (StaticTensor shape dtype) := do
-  let const ← UOp.constNat dtype value
-  let expanded ← UOp.expand const shape
-  pure { uop := expanded, requiresGrad := false, h_shape := sorry_proof }
+  let const ← TUOp.constNat dtype value
+  let expanded ← TUOp.expand const shape
+  pure (StaticTensor.ofTUOp expanded)
 
 def fullBool (shape : List Nat) (value : Bool) : TensorM (StaticTensor shape .bool) := do
-  let const ← UOp.constBool value
-  let expanded ← UOp.expand const shape
-  pure { uop := expanded, requiresGrad := false, h_shape := sorry_proof }
+  let const ← TUOp.constBool value
+  let expanded ← TUOp.expand const shape
+  pure (StaticTensor.ofTUOp expanded)
 
 def zeros (shape : List Nat) (dtype : DType := .float32) : TensorM (StaticTensor shape dtype) :=
   full shape dtype 0.0

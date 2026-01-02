@@ -94,6 +94,10 @@ def ofRawBuffer? (shape : Shape) (dtype : DType) (buf : RawBuffer) : Option (Dat
   else
     some { data := buf.data }
 
+/-- Convert a typed data array to a RawBuffer. -/
+def toRawBuffer (arr : DataArrayN shape dtype) : RawBuffer :=
+  { dtype := dtype, data := arr.data }
+
 /-- Decode int16 bytes into an Array Int16. -/
 def decodeI16 {shape : Shape} (arr : DataArrayN shape .int16) : Array Int16 := Id.run do
   let n := Shape.numel shape

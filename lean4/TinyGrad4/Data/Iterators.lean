@@ -41,7 +41,8 @@ def ofPrefetcher (p : Prefetcher T) (device : DeviceId := .cpu) : DeviceStream T
       | none => pure none
   }
 
-def ofGPU (loader : GPUDataLoader) : DeviceStream GPUBuffer :=
+def ofGPU (loader : GPUDataLoader batch itemShape dtype) :
+    DeviceStream (GPULease (batch :: itemShape) dtype) :=
   {
     nextFn := do
       match ← GPUDataLoader.next loader with
@@ -49,7 +50,8 @@ def ofGPU (loader : GPUDataLoader) : DeviceStream GPUBuffer :=
       | none => pure none
   }
 
-def ofMultiAny (pool : MultiGPULoader) : DeviceStream GPUBuffer :=
+def ofMultiAny (pool : MultiGPULoader batch itemShape dtype) :
+    DeviceStream (GPULease (batch :: itemShape) dtype) :=
   {
     nextFn := do
       match ← MultiGPULoader.nextAny pool with
@@ -57,7 +59,8 @@ def ofMultiAny (pool : MultiGPULoader) : DeviceStream GPUBuffer :=
       | none => pure none
   }
 
-def ofTPU (loader : TPUDataLoader) : DeviceStream TPUBuffer :=
+def ofTPU (loader : TPUDataLoader batch itemShape dtype) :
+    DeviceStream (TPUBuffer (batch :: itemShape) dtype) :=
   {
     nextFn := do
       match ← TPUDataLoader.next loader with
@@ -242,7 +245,8 @@ instance : ToIterator (BatchPrefetcher B) IO (BatchPrefetcher B) B :=
 namespace GPUDataLoader
 
 /-- Monadic iterator view for `GPUDataLoader`. -/
-def iterM (loader : GPUDataLoader) : IterM (α := GPUDataLoader) IO GPUBuffer :=
+def iterM (loader : GPUDataLoader batch itemShape dtype) :
+    IterM (α := GPUDataLoader batch itemShape dtype) IO (GPULease (batch :: itemShape) dtype) :=
   ⟨loader⟩
 
 end GPUDataLoader
@@ -250,12 +254,13 @@ end GPUDataLoader
 namespace TPUDataLoader
 
 /-- Monadic iterator view for `TPUDataLoader`. -/
-def iterM (loader : TPUDataLoader) : IterM (α := TPUDataLoader) IO TPUBuffer :=
+def iterM (loader : TPUDataLoader batch itemShape dtype) :
+    IterM (α := TPUDataLoader batch itemShape dtype) IO (TPUBuffer (batch :: itemShape) dtype) :=
   ⟨loader⟩
 
 end TPUDataLoader
 
-instance : Iterator TPUDataLoader IO TPUBuffer where
+instance : Iterator (TPUDataLoader batch itemShape dtype) IO (TPUBuffer (batch :: itemShape) dtype) where
   IsPlausibleStep _ _ := True
   step it := do
     match ← TPUDataLoader.next it.internalState with
@@ -264,16 +269,17 @@ instance : Iterator TPUDataLoader IO TPUBuffer where
     | none =>
         pure <| Std.Shrink.deflate <| PlausibleIterStep.done (by trivial)
 
-instance : IteratorLoop TPUDataLoader IO IO :=
+instance : IteratorLoop (TPUDataLoader batch itemShape dtype) IO IO :=
   IteratorLoop.defaultImplementation
 
-instance : IteratorCollect TPUDataLoader IO IO :=
+instance : IteratorCollect (TPUDataLoader batch itemShape dtype) IO IO :=
   IteratorCollect.defaultImplementation
 
-instance : ToIterator TPUDataLoader IO TPUDataLoader TPUBuffer :=
-  ToIterator.ofM TPUDataLoader (fun loader => ⟨loader⟩)
+instance : ToIterator (TPUDataLoader batch itemShape dtype) IO
+    (TPUDataLoader batch itemShape dtype) (TPUBuffer (batch :: itemShape) dtype) :=
+  ToIterator.ofM (TPUDataLoader batch itemShape dtype) (fun loader => ⟨loader⟩)
 
-instance : Iterator GPUDataLoader IO GPUBuffer where
+instance : Iterator (GPUDataLoader batch itemShape dtype) IO (GPULease (batch :: itemShape) dtype) where
   IsPlausibleStep _ _ := True
   step it := do
     match ← GPUDataLoader.next it.internalState with
@@ -282,25 +288,28 @@ instance : Iterator GPUDataLoader IO GPUBuffer where
     | none =>
         pure <| Std.Shrink.deflate <| PlausibleIterStep.done (by trivial)
 
-instance : IteratorLoop GPUDataLoader IO IO :=
+instance : IteratorLoop (GPUDataLoader batch itemShape dtype) IO IO :=
   IteratorLoop.defaultImplementation
 
-instance : IteratorCollect GPUDataLoader IO IO :=
+instance : IteratorCollect (GPUDataLoader batch itemShape dtype) IO IO :=
   IteratorCollect.defaultImplementation
 
-instance : ToIterator GPUDataLoader IO GPUDataLoader GPUBuffer :=
-  ToIterator.ofM GPUDataLoader (fun loader => ⟨loader⟩)
+instance : ToIterator (GPUDataLoader batch itemShape dtype) IO
+    (GPUDataLoader batch itemShape dtype) (GPULease (batch :: itemShape) dtype) :=
+  ToIterator.ofM (GPUDataLoader batch itemShape dtype) (fun loader => ⟨loader⟩)
 
 namespace MultiGPULoader
 
 /-- Monadic iterator view for `MultiGPULoader` (sync batches). -/
-def iterM (pool : MultiGPULoader) :
-    IterM (α := MultiGPULoader) IO (Array (DeviceBatch GPUBuffer)) :=
+def iterM (pool : MultiGPULoader batch itemShape dtype) :
+    IterM (α := MultiGPULoader batch itemShape dtype) IO
+      (Array (DeviceBatch (GPULease (batch :: itemShape) dtype))) :=
   ⟨pool⟩
 
 end MultiGPULoader
 
-instance : Iterator MultiGPULoader IO (Array (DeviceBatch GPUBuffer)) where
+instance : Iterator (MultiGPULoader batch itemShape dtype) IO
+    (Array (DeviceBatch (GPULease (batch :: itemShape) dtype))) where
   IsPlausibleStep _ _ := True
   step it := do
     let batches ← MultiGPULoader.nextAll it.internalState
@@ -311,16 +320,19 @@ instance : Iterator MultiGPULoader IO (Array (DeviceBatch GPUBuffer)) where
         buf.map fun b => { device, value := b }
       pure <| Std.Shrink.deflate <| PlausibleIterStep.yield it actual (by trivial)
 
-instance : IteratorLoop MultiGPULoader IO IO :=
+instance : IteratorLoop (MultiGPULoader batch itemShape dtype) IO IO :=
   IteratorLoop.defaultImplementation
 
-instance : IteratorCollect MultiGPULoader IO IO :=
+instance : IteratorCollect (MultiGPULoader batch itemShape dtype) IO IO :=
   IteratorCollect.defaultImplementation
 
-instance : ToIterator MultiGPULoader IO MultiGPULoader (Array (DeviceBatch GPUBuffer)) :=
-  ToIterator.ofM MultiGPULoader (fun pool => ⟨pool⟩)
+instance : ToIterator (MultiGPULoader batch itemShape dtype) IO
+    (MultiGPULoader batch itemShape dtype)
+    (Array (DeviceBatch (GPULease (batch :: itemShape) dtype))) :=
+  ToIterator.ofM (MultiGPULoader batch itemShape dtype) (fun pool => ⟨pool⟩)
 
-instance : ForIn IO MultiGPULoader (Array (DeviceBatch GPUBuffer)) where
+instance : ForIn IO (MultiGPULoader batch itemShape dtype)
+    (Array (DeviceBatch (GPULease (batch :: itemShape) dtype))) where
   forIn pool init f := do
     let mut acc := init
     repeat do
@@ -330,8 +342,14 @@ instance : ForIn IO MultiGPULoader (Array (DeviceBatch GPUBuffer)) where
       let actual := batches.filterMap fun (device, buf) =>
         buf.map fun b => { device, value := b }
       match ← f actual acc with
-      | .done a => return a
-      | .yield a => acc := a
+      | .done a =>
+          for batch in actual do
+            batch.value.release
+          return a
+      | .yield a =>
+          for batch in actual do
+            batch.value.release
+          acc := a
     pure acc
 
 end TinyGrad4.Data

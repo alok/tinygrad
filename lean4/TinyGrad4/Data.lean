@@ -11,6 +11,7 @@ import TinyGrad4.Data.IndexTransform
 import TinyGrad4.Data.Transform
 import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Prefetch
+import TinyGrad4.Data.Lease
 import TinyGrad4.Data.Shard
 import TinyGrad4.Data.Checkpoint
 import TinyGrad4.Data.Profile
@@ -38,6 +39,7 @@ Designed to be used by downstream libraries like SciLean.
 - `IterDataset`: Configured, resumable iteration pipeline
 - `Prefetcher`: Background data loading with IO.asTask
 - `Profiler`: Lightweight timing stats for pipeline stages
+- `Lease`: Scoped resource releases (buffer pooling)
 - `TPUDataLoader`: Host-staged loader tagged with TPU device IDs
 
 ## Buffer Protocol (New)

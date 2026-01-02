@@ -29,11 +29,11 @@ def main : IO Unit := do
   let target := devices[0]!
   IO.println s!"  Allocating on {target} ({repr target})"
   let buf ← try
-    GPUBuffer.alloc target 1024 .uint8
+    GPUBuffer.alloc target [1024] .uint8
   catch e =>
     IO.println s!"  ✗ Allocation failed on {target}: {e}"
     throw e
-  IO.println s!"Allocated {buf.byteSize} bytes"
+  IO.println s!"Allocated {buf.bytes} bytes"
 
   let testData := ByteArray.mk (Array.replicate 1024 42)
   buf.copyIn testData
@@ -45,21 +45,27 @@ def main : IO Unit := do
   IO.println "Testing GPUDataLoader device placement..."
   let sample : Array ByteArray := #[ByteArray.mk (Array.replicate 16 1), ByteArray.mk (Array.replicate 16 2)]
   let ds := TinyGrad4.Data.ofArray sample
-  let loader ← GPUDataLoader.create ds devices[0]! (batchSize := 1) (bufferSize := 2) (dtype := .uint8)
+  let loader ← GPUDataLoader.create ds devices[0]! (batchSize := 1) (itemShape := [16])
+    (dtype := .uint8) (bufferSize := 2)
   for _ in [:2] do
     match ← loader.next with
-    | some batch => assert (batch.device == devices[0]!) "Batch on wrong device"
+    | some batch =>
+        assert (batch.value.device == devices[0]!) "Batch on wrong device"
+        batch.release
     | none => break
   loader.stop
   IO.println "GPUDataLoader device placement ok"
 
   if devices.size >= 2 then
     IO.println "Testing MultiGPULoader device placement..."
-    let pool ← MultiGPULoader.create ds devices (batchSize := 1) (bufferSize := 2) (dtype := .uint8)
+    let pool ← MultiGPULoader.create ds devices (batchSize := 1) (itemShape := [16])
+      (dtype := .uint8) (bufferSize := 2)
     let batches ← pool.nextAll
     for (device, buf?) in batches do
       match buf? with
-      | some buf => assert (buf.device == device) "MultiGPULoader batch on wrong device"
+      | some buf =>
+          assert (buf.value.device == device) "MultiGPULoader batch on wrong device"
+          buf.release
       | none => pure ()
     pool.stop
     IO.println "MultiGPULoader device placement ok"

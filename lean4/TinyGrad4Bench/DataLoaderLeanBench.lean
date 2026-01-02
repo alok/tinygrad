@@ -23,6 +23,11 @@ structure BenchParams where
   useCachedShuffle : Bool := true
   deriving Inhabited
 
+structure ProfileSnapshot where
+  stages : Array (String × StageStat)
+  concurrency : ConcurrencyStats
+  deriving Inhabited
+
 private def getEnvNat (key : String) (default : Nat) : IO Nat := do
   match (← IO.getEnv key) with
   | some v =>
@@ -91,8 +96,17 @@ private def stageStatJson (name : String) (s : StageStat) : Lean.Json :=
     ("wait_ratio", jsonNumOfFloat s.waitRatio)
   ]
 
-private def extrasJson (cfg : BenchParams) (stats : Array (String × StageStat)) : Lean.Json :=
-  let stageArr := Lean.Json.arr (stats.map (fun (name, stat) => stageStatJson name stat))
+private def concurrencyJson (s : ConcurrencyStats) : Lean.Json :=
+  Lean.Json.mkObj [
+    ("wall_ns", Lean.Json.num s.wallNs),
+    ("busy_ns", Lean.Json.num s.busyNs),
+    ("idle_ns", Lean.Json.num s.idleNs),
+    ("avg_concurrency", jsonNumOfFloat s.avgConcurrency),
+    ("peak_concurrency", Lean.Json.num s.peakConcurrency)
+  ]
+
+private def extrasJson (cfg : BenchParams) (snap : ProfileSnapshot) : Lean.Json :=
+  let stageArr := Lean.Json.arr (snap.stages.map (fun (name, stat) => stageStatJson name stat))
   let configObj := Lean.Json.mkObj [
     ("data_dir", Lean.Json.str cfg.dataDir),
     ("max_images", Lean.Json.num cfg.maxImages),
@@ -100,7 +114,11 @@ private def extrasJson (cfg : BenchParams) (stats : Array (String × StageStat))
     ("prefetch_buffer", Lean.Json.num cfg.prefetchBuffer),
     ("cached_shuffle", Lean.Json.bool cfg.useCachedShuffle)
   ]
-  Lean.Json.mkObj [("config", configObj), ("stages", stageArr)]
+  Lean.Json.mkObj [
+    ("config", configObj),
+    ("concurrency", concurrencyJson snap.concurrency),
+    ("stages", stageArr)
+  ]
 
 private def mkShuffled (cfg : BenchParams) (key : RandKey)
     (base : ProfiledDataset MNISTDataset MNISTSample) :
@@ -112,7 +130,7 @@ private def mkShuffled (cfg : BenchParams) (key : RandKey)
     ⟨ShuffledDataset (ProfiledDataset MNISTDataset MNISTSample) MNISTSample,
       (inferInstance, shuffleDs key base)⟩
 
-private def runBaseline (cfg : BenchParams) : IO (Array (String × StageStat)) := do
+private def runBaseline (cfg : BenchParams) : IO ProfileSnapshot := do
   let profiler ← Profiler.new
   let mnist ← getMnist cfg
   let key := RandKey.new cfg.seed
@@ -126,9 +144,10 @@ private def runBaseline (cfg : BenchParams) : IO (Array (String × StageStat)) :
   for i in [:n] do
     if h : i < n then
       let _ ← Dataset.getItem batched i h
-  profiler.snapshot
+  let (stages, concurrency) ← profiler.snapshotWithConcurrency
+  pure { stages, concurrency }
 
-private def runPrefetch (cfg : BenchParams) : IO (Array (String × StageStat)) := do
+private def runPrefetch (cfg : BenchParams) : IO ProfileSnapshot := do
   let profiler ← Profiler.new
   let mnist ← getMnist cfg
   let key := RandKey.new cfg.seed
@@ -143,9 +162,10 @@ private def runPrefetch (cfg : BenchParams) : IO (Array (String × StageStat)) :
     match ← profilePrefetcherNext profiler "prefetch_next" prefetcher with
     | some _ => pure ()
     | none => break
-  profiler.snapshot
+  let (stages, concurrency) ← profiler.snapshotWithConcurrency
+  pure { stages, concurrency }
 
-private def runPrefetchItems (cfg : BenchParams) : IO (Array (String × StageStat)) := do
+private def runPrefetchItems (cfg : BenchParams) : IO ProfileSnapshot := do
   let profiler ← Profiler.new
   let mnist ← getMnist cfg
   let key := RandKey.new cfg.seed
@@ -170,18 +190,19 @@ private def runPrefetchItems (cfg : BenchParams) : IO (Array (String × StageSta
     let stopBatch ← IO.monoNanosNow
     profiler.recordSample "batch" (stopBatch - startBatch)
     batches := batches + 1
-  profiler.snapshot
+  let (stages, concurrency) ← profiler.snapshotWithConcurrency
+  pure { stages, concurrency }
 
 initialize do
   let cfg ← readParams
-  let baselineStats ← IO.mkRef (#[] : Array (String × StageStat))
-  let prefetchStats ← IO.mkRef (#[] : Array (String × StageStat))
-  let prefetchItemStats ← IO.mkRef (#[] : Array (String × StageStat))
+  let baselineStats ← IO.mkRef (default : ProfileSnapshot)
+  let prefetchStats ← IO.mkRef (default : ProfileSnapshot)
+  let prefetchItemStats ← IO.mkRef (default : ProfileSnapshot)
   LeanBench.register {
     name := "dataloader/mnist/baseline"
     action := do
-      let stats ← runBaseline cfg
-      baselineStats.set stats
+      let snap ← runBaseline cfg
+      baselineStats.set snap
     report? := some do
       extrasJson cfg <$> baselineStats.get
     config := baseConfig cfg ["data", "mnist", "baseline"]
@@ -189,8 +210,8 @@ initialize do
   LeanBench.register {
     name := "dataloader/mnist/prefetch"
     action := do
-      let stats ← runPrefetch cfg
-      prefetchStats.set stats
+      let snap ← runPrefetch cfg
+      prefetchStats.set snap
     report? := some do
       extrasJson cfg <$> prefetchStats.get
     config := baseConfig cfg ["data", "mnist", "prefetch"]
@@ -198,8 +219,8 @@ initialize do
   LeanBench.register {
     name := "dataloader/mnist/prefetch-items"
     action := do
-      let stats ← runPrefetchItems cfg
-      prefetchItemStats.set stats
+      let snap ← runPrefetchItems cfg
+      prefetchItemStats.set snap
     report? := some do
       extrasJson cfg <$> prefetchItemStats.get
     config := baseConfig cfg ["data", "mnist", "prefetch", "items"]

@@ -68,16 +68,35 @@ def accelFlags : Array String :=
   else
     cFlags
 
--- Check if nvcc (CUDA compiler) is available
-def checkNvcc : IO Bool := do
-  let out ← IO.Process.output { cmd := "which", args := #["nvcc"] }
-  return out.exitCode == 0
+-- Find CUDA include path (returns none if headers not found)
+def findCudaInclude : IO (Option String) := do
+  -- Respect CUDA_HOME/CUDA_PATH when set
+  let envHome ← IO.getEnv "CUDA_HOME"
+  let envPath ← IO.getEnv "CUDA_PATH"
+  let envs := #[envHome, envPath]
+  for env? in envs do
+    match env? with
+    | some base =>
+        let inc := base ++ "/include"
+        if ← FilePath.pathExists (inc ++ "/cuda.h") then
+          return some inc
+    | none => pure ()
+  if ← FilePath.pathExists "/usr/local/cuda/include/cuda.h" then
+    return some "/usr/local/cuda/include"
+  -- Check $HOME/cuda-12.4 for local installs
+  let home := (← IO.getEnv "HOME").getD ""
+  if !home.isEmpty && (← FilePath.pathExists (home ++ "/cuda-12.4/include/cuda.h")) then
+    return some (home ++ "/cuda-12.4/include")
+  if ← FilePath.pathExists "/usr/include/cuda.h" then
+    return some "/usr/include"
+  return none
 
 extern_lib tg4c pkg := do
   pkg.afterBuildCacheAsync do
     let mut oFiles : Array (Job FilePath) := #[]
     -- Check for CUDA availability first (affects stub compilation)
-    let hasCuda ← if System.Platform.isOSX then pure false else checkNvcc
+    let cudaInclude? ← if System.Platform.isOSX then pure none else findCudaInclude
+    let hasCuda := cudaInclude?.isSome
     let cFlagsWithCuda := if hasCuda then cFlags ++ #["-DTG4_HAS_CUDA"] else cFlags
     -- Build C files with Lake's clang
     for file in (← (pkg.dir / "c").readDir) do
@@ -119,16 +138,7 @@ extern_lib tg4c pkg := do
           IO.FS.createDirAll (pkg.buildDir / "c")
           let leanInclude := (← getLeanSysroot) / "include"
           -- Find CUDA include path (check common locations)
-          let cudaInclude ← do
-            if ← FilePath.pathExists "/usr/local/cuda/include" then
-              pure "/usr/local/cuda/include"
-            else
-              -- Check $HOME/cuda-12.4 for local installs
-              let home := (← IO.getEnv "HOME").getD ""
-              if ← FilePath.pathExists (home ++ "/cuda-12.4/include") then
-                pure (home ++ "/cuda-12.4/include")
-              else
-                pure "/usr/include"
+          let cudaInclude := (cudaInclude?.getD "/usr/include")
           -- Compile with g++ as C++ (Driver API only, no nvcc needed)
           let args := #[
             "-c", "-x", "c++", "-O3", "-fPIC",

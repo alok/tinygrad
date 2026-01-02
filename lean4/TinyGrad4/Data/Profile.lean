@@ -163,42 +163,73 @@ private structure SpanEvent where
 private def eventLt (a b : SpanEvent) : Bool :=
   if a.time == b.time then a.delta > b.delta else a.time < b.time
 
+private def concurrencyStatsFromSpans (spans : Array StageSpan) : ConcurrencyStats :=
+  if spans.isEmpty then
+    default
+  else Id.run do
+    let events := spans.foldl (fun acc s =>
+      acc.push { time := s.startNs, delta := 1 } |>.push { time := s.endNs, delta := -1 }) #[]
+    let sorted := events.qsort eventLt
+    let wallStart := sorted[0]!.time
+    let wallEnd := sorted[sorted.size - 1]!.time
+    let mut prev := wallStart
+    let mut active : Int := 0
+    let mut busyWeighted : Nat := 0
+    let mut idle : Nat := 0
+    let mut peak : Nat := 0
+    for e in sorted do
+      let dt := e.time - prev
+      if dt > 0 then
+        if active <= 0 then
+          idle := idle + dt
+        else
+          busyWeighted := busyWeighted + dt * active.toNat
+          if active.toNat > peak then
+            peak := active.toNat
+      active := active + e.delta
+      prev := e.time
+    let wallNs := wallEnd - wallStart
+    let avg :=
+      if wallNs == 0 then 0.0 else busyWeighted.toFloat / wallNs.toFloat
+    pure { wallNs, busyNs := busyWeighted, idleNs := idle, avgConcurrency := avg, peakConcurrency := peak }
+
+private def concurrencyStatsByStageFromSpans (spans : Array StageSpan) : Array (String × ConcurrencyStats) :=
+  Id.run do
+    let mut grouped : Std.HashMap String (Array StageSpan) := {}
+    for s in spans do
+      let current :=
+        match grouped.get? s.name with
+        | some v => v
+        | none => #[]
+      grouped := grouped.insert s.name (current.push s)
+    let entries := grouped.toList
+    let sorted := sortBy (fun a b => a.1 < b.1) entries
+    pure (sorted.map (fun (name, sps) => (name, concurrencyStatsFromSpans sps)) |>.toArray)
+
 /-- Compute concurrency stats across all recorded spans. -/
 def concurrencyStats (p : Profiler) : IO ConcurrencyStats := do
   let spans ← p.snapshotSpans
-  if spans.isEmpty then
-    return default
-  let events := spans.foldl (fun acc s =>
-    acc.push { time := s.startNs, delta := 1 } |>.push { time := s.endNs, delta := -1 }) #[]
-  let sorted := events.qsort eventLt
-  let wallStart := sorted[0]!.time
-  let wallEnd := sorted[sorted.size - 1]!.time
-  let mut prev := wallStart
-  let mut active : Int := 0
-  let mut busyWeighted : Nat := 0
-  let mut idle : Nat := 0
-  let mut peak : Nat := 0
-  for e in sorted do
-    let dt := e.time - prev
-    if dt > 0 then
-      if active <= 0 then
-        idle := idle + dt
-      else
-        busyWeighted := busyWeighted + dt * active.toNat
-        if active.toNat > peak then
-          peak := active.toNat
-    active := active + e.delta
-    prev := e.time
-  let wallNs := wallEnd - wallStart
-  let avg :=
-    if wallNs == 0 then 0.0 else busyWeighted.toFloat / wallNs.toFloat
-  pure { wallNs, busyNs := busyWeighted, idleNs := idle, avgConcurrency := avg, peakConcurrency := peak }
+  pure (concurrencyStatsFromSpans spans)
+
+/-- Compute concurrency stats per stage name. -/
+def concurrencyStatsByStage (p : Profiler) : IO (Array (String × ConcurrencyStats)) := do
+  let spans ← p.snapshotSpans
+  pure (concurrencyStatsByStageFromSpans spans)
 
 /-- Snapshot stats plus concurrency summary. -/
 def snapshotWithConcurrency (p : Profiler) : IO (Array (String × StageStat) × ConcurrencyStats) := do
   let stats ← p.snapshot
   let concurrency ← p.concurrencyStats
   pure (stats, concurrency)
+
+/-- Snapshot stats plus concurrency summary and per-stage concurrency. -/
+def snapshotWithConcurrencyByStage (p : Profiler) :
+    IO (Array (String × StageStat) × ConcurrencyStats × Array (String × ConcurrencyStats)) := do
+  let stats ← p.snapshot
+  let spans ← p.snapshotSpans
+  let concurrency := concurrencyStatsFromSpans spans
+  let byStage := concurrencyStatsByStageFromSpans spans
+  pure (stats, concurrency, byStage)
 
 /-- Render a summary string (unsorted). -/
 def summary (p : Profiler) : IO String := do

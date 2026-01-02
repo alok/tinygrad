@@ -42,6 +42,7 @@ structure TPUDataLoader where
   device : DeviceId
   numBatches : Nat
   lastState : IO.Ref IteratorState
+  prefetcher? : Option (IteratorPrefetcher ByteArray)
 
 namespace TPUDataLoader
 
@@ -66,6 +67,18 @@ private def nextBatch (iter : DataIterator ByteArray) (batchSize : Nat) :
     | some item => chunks := chunks.push item
     | none => return none
   let state ← iter.checkpoint
+  let batchData := concatByteArrays chunks
+  pure (some (batchData, state))
+
+/-- Build one batch from a prefetcher, returning the state after the batch. -/
+private def nextBatchFromPrefetcher (prefetcher : IteratorPrefetcher ByteArray) (batchSize : Nat) :
+    IO (Option (ByteArray × IteratorState)) := do
+  let mut chunks := Array.mkEmpty batchSize
+  for _ in [:batchSize] do
+    match ← prefetcher.next with
+    | some item => chunks := chunks.push item
+    | none => return none
+  let state ← prefetcher.checkpoint
   let batchData := concatByteArrays chunks
   pure (some (batchData, state))
 
@@ -94,7 +107,34 @@ def createFromIteratorCfg [Dataset D ByteArray] (cfg : IteratorConfig D) (device
 
     queue.finish
 
-  pure { queue, worker, device, numBatches, lastState }
+  pure { queue, worker, device, numBatches, lastState, prefetcher? := none }
+
+/-- Create loader from an iterator config with a CPU-side prefetcher. -/
+def createFromIteratorCfgPrefetch [Dataset D ByteArray] (cfg : IteratorConfig D) (device : DeviceId)
+    (batchSize : Nat) (prefetchSize : Nat := 8) (bufferSize : Nat := 4) (dtype : DType := .float32)
+    : IO TPUDataLoader := do
+  let prefetcher ← IteratorPrefetcher.createFromIteratorCfg cfg prefetchSize
+  let initState ← prefetcher.checkpoint
+  let queue ← IOQueue.new bufferSize
+  let lastState ← IO.mkRef initState
+  let n := Dataset.len cfg.base
+  let remaining := remainingItems n cfg.epochs initState
+  let numBatches := remaining / batchSize
+
+  let worker ← IO.asTask (prio := .dedicated) do
+    for _ in [:numBatches] do
+      if ← IO.checkCanceled then break
+      match ← nextBatchFromPrefetcher prefetcher batchSize with
+      | some (batchData, state) =>
+          let buf : TPUBuffer := { data := batchData, dtype, device }
+          buf.assertDevice device
+          let ok ← queue.push { buffer := buf, state }
+          if !ok then break
+      | none => break
+
+    queue.finish
+
+  pure { queue, worker, device, numBatches, lastState, prefetcher? := some prefetcher }
 
 /-- Create loader from a dataset of ByteArrays. -/
 def create [Dataset D ByteArray] (ds : D) (device : DeviceId)
@@ -128,10 +168,16 @@ def nextWithWait (loader : TPUDataLoader) : IO (Option TPUBuffer × Nat) := do
 def stop (loader : TPUDataLoader) : IO Unit := do
   loader.queue.finish
   IO.cancel loader.worker
+  match loader.prefetcher? with
+  | some p => p.cancel
+  | none => pure ()
 
 /-- Wait for loader to complete. -/
 def wait (loader : TPUDataLoader) : IO Unit := do
   let _ ← IO.wait loader.worker
+  match loader.prefetcher? with
+  | some p => p.wait
+  | none => pure ()
 
 /-- Get checkpoint state for deterministic resume. -/
 def checkpoint (loader : TPUDataLoader) : IO IteratorState :=
@@ -143,6 +189,9 @@ def drain (loader : TPUDataLoader) : IO Unit := do
     match ← loader.queue.pop with
     | some _ => pure ()
     | none => break
+  match loader.prefetcher? with
+  | some p => p.drain
+  | none => pure ()
 
 end TPUDataLoader
 

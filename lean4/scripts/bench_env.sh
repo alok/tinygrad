@@ -7,6 +7,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+METRICS_OUT="${TG4_METRICS_OUT:-}"
+if [ -n "$METRICS_OUT" ]; then
+  METRICS_BASE="${METRICS_OUT%.json}"
+  "$SCRIPT_DIR/bench_metrics.sh" > "${METRICS_BASE}.pre.json" || true
+fi
+
 if [ -d /dev/shm ]; then
   export TMPDIR="${TMPDIR:-/dev/shm/tg4_tmp}"
   mkdir -p "$TMPDIR"
@@ -24,7 +30,14 @@ fi
 
 LEAN_LIB="${HOME}/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lib"
 if [ -d "$LEAN_LIB" ]; then
-  export LD_LIBRARY_PATH="${LEAN_LIB}:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${LEAN_LIB}:${LD_LIBRARY_PATH:-}"
+fi
+
+if [ -n "$METRICS_OUT" ]; then
+  "$@"
+  exit_code=$?
+  "$SCRIPT_DIR/bench_metrics.sh" > "${METRICS_BASE}.post.json" || true
+  exit $exit_code
 fi
 
 exec "$@"

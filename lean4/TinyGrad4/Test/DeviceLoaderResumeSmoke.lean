@@ -99,8 +99,10 @@ def buildCfg (n epochs : Nat) (key : RandKey) :
 
 /-- Collect batch checksums from a GPU loader. -/
 def collectGPU (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
-    [Dataset D ByteArray] : IO (Array UInt64) := do
-  let loader ← GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO (Array UInt64) := do
+  let loader ← match prefetchSize? with
+    | some p => GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
+    | none => GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
   let mut out := #[]
   for buf in loader do
     let bytes ← buf.copyOut
@@ -114,9 +116,15 @@ def collectGPU (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
 def collectMultiGPU (cfg : IteratorConfig D) (devices : Array DeviceId) (batchSize : Nat)
     (world? : Option WorldConfig := none)
     (states? : Option (Array (DeviceId × IteratorState)) := none)
+    (prefetchSize? : Option Nat := none)
     [Dataset D ByteArray] : IO (Array UInt64) := do
-  let pool ← MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
-    (world? := world?) (states? := states?)
+  let pool ← match prefetchSize? with
+    | some p =>
+        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize p (bufferSize := 2) (dtype := .uint8)
+          (world? := world?) (states? := states?)
+    | none =>
+        MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
+          (world? := world?) (states? := states?)
   let mut out := #[]
   repeat do
     let batches ← pool.nextAll
@@ -135,8 +143,10 @@ def collectMultiGPU (cfg : IteratorConfig D) (devices : Array DeviceId) (batchSi
 
 /-- Collect batch checksums from a TPU loader. -/
 def collectTPU (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
-    [Dataset D ByteArray] : IO (Array UInt64) := do
-  let loader ← TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO (Array UInt64) := do
+  let loader ← match prefetchSize? with
+    | some p => TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
+    | none => TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
   let mut out := #[]
   for buf in loader do
     out := out.push (checksum buf.data)
@@ -146,8 +156,11 @@ def collectTPU (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
 
 /-- Resume test for GPU loader at a split point. -/
 def resumeGPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
-    (baseline : Array UInt64) (split : Nat) [Dataset D ByteArray] : IO Unit := do
-  let loader ← GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    (baseline : Array UInt64) (split : Nat) (prefetchSize? : Option Nat := none)
+    [Dataset D ByteArray] : IO Unit := do
+  let loader ← match prefetchSize? with
+    | some p => GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
+    | none => GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
   let mut seen := (#[] : Array UInt64)
   let mut count := 0
   while count < split do
@@ -170,14 +183,19 @@ def resumeGPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize : N
     key := state.key
   }
 
-  let remainder ← collectGPU cfg' device batchSize
-  verifyResume "GPU" baseline seen remainder split
+  let remainder ← collectGPU cfg' device batchSize (prefetchSize? := prefetchSize?)
+  let label := match prefetchSize? with
+    | some _ => "GPU prefetch"
+    | none => "GPU"
+  verifyResume label baseline seen remainder split
 
 /-- Interrupt test for GPU loader at a split point (adversarial cancellation). -/
 def interruptGPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
     (baseline : Array UInt64) (split : Nat) (interruptDelayMs : Nat := 5)
-    [Dataset D ByteArray] : IO Unit := do
-  let loader ← GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO Unit := do
+  let loader ← match prefetchSize? with
+    | some p => GPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
+    | none => GPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
   let mut seen := (#[] : Array UInt64)
   let mut count := 0
   while count < split do
@@ -203,13 +221,19 @@ def interruptGPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize 
     key := state.key
   }
 
-  let remainder ← collectGPU cfg' device batchSize
-  verifyResume "GPU interrupt" baseline seen remainder split
+  let remainder ← collectGPU cfg' device batchSize (prefetchSize? := prefetchSize?)
+  let label := match prefetchSize? with
+    | some _ => "GPU interrupt prefetch"
+    | none => "GPU interrupt"
+  verifyResume label baseline seen remainder split
 
 /-- Resume test for TPU loader at a split point. -/
 def resumeTPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
-    (baseline : Array UInt64) (split : Nat) [Dataset D ByteArray] : IO Unit := do
-  let loader ← TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    (baseline : Array UInt64) (split : Nat) (prefetchSize? : Option Nat := none)
+    [Dataset D ByteArray] : IO Unit := do
+  let loader ← match prefetchSize? with
+    | some p => TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
+    | none => TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
   let mut seen := (#[] : Array UInt64)
   let mut count := 0
   while count < split do
@@ -230,14 +254,19 @@ def resumeTPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize : N
     key := state.key
   }
 
-  let remainder ← collectTPU cfg' device batchSize
-  verifyResume "TPU" baseline seen remainder split
+  let remainder ← collectTPU cfg' device batchSize (prefetchSize? := prefetchSize?)
+  let label := match prefetchSize? with
+    | some _ => "TPU prefetch"
+    | none => "TPU"
+  verifyResume label baseline seen remainder split
 
 /-- Interrupt test for TPU loader at a split point (adversarial cancellation). -/
 def interruptTPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize : Nat)
     (baseline : Array UInt64) (split : Nat) (interruptDelayMs : Nat := 5)
-    [Dataset D ByteArray] : IO Unit := do
-  let loader ← TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
+    (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO Unit := do
+  let loader ← match prefetchSize? with
+    | some p => TPUDataLoader.createFromIteratorCfgPrefetch cfg device batchSize p (bufferSize := 2) (dtype := .uint8)
+    | none => TPUDataLoader.createFromIteratorCfg cfg device batchSize (bufferSize := 2) (dtype := .uint8)
   let mut seen := (#[] : Array UInt64)
   let mut count := 0
   while count < split do
@@ -260,15 +289,23 @@ def interruptTPUAtSplit (cfg : IteratorConfig D) (device : DeviceId) (batchSize 
     key := state.key
   }
 
-  let remainder ← collectTPU cfg' device batchSize
-  verifyResume "TPU interrupt" baseline seen remainder split
+  let remainder ← collectTPU cfg' device batchSize (prefetchSize? := prefetchSize?)
+  let label := match prefetchSize? with
+    | some _ => "TPU interrupt prefetch"
+    | none => "TPU interrupt"
+  verifyResume label baseline seen remainder split
 
 /-- Resume test for MultiGPULoader at a split point (rounds). -/
 def resumeMultiGPUAtSplit (cfg : IteratorConfig D) (devices : Array DeviceId) (batchSize : Nat)
     (baseline : Array UInt64) (split : Nat) (world? : Option WorldConfig := none)
-    [Dataset D ByteArray] : IO Unit := do
-  let pool ← MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
-    (world? := world?)
+    (prefetchSize? : Option Nat := none) [Dataset D ByteArray] : IO Unit := do
+  let pool ← match prefetchSize? with
+    | some p =>
+        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize p (bufferSize := 2) (dtype := .uint8)
+          (world? := world?)
+    | none =>
+        MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
+          (world? := world?)
   let mut seen := (#[] : Array UInt64)
   let mut rounds := 0
   while rounds < split do
@@ -289,14 +326,24 @@ def resumeMultiGPUAtSplit (cfg : IteratorConfig D) (devices : Array DeviceId) (b
   pool.drain
 
   let remainder ← collectMultiGPU cfg devices batchSize (world? := world?) (states? := some states)
-  verifyResume "MultiGPU" baseline seen remainder split
+    (prefetchSize? := prefetchSize?)
+  let label := match prefetchSize? with
+    | some _ => "MultiGPU prefetch"
+    | none => "MultiGPU"
+  verifyResume label baseline seen remainder split
 
 /-- Interrupt test for MultiGPULoader at a split point (adversarial cancellation). -/
 def interruptMultiGPUAtSplit (cfg : IteratorConfig D) (devices : Array DeviceId) (batchSize : Nat)
     (baseline : Array UInt64) (split : Nat) (world? : Option WorldConfig := none)
-    (interruptDelayMs : Nat := 5) [Dataset D ByteArray] : IO Unit := do
-  let pool ← MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
-    (world? := world?)
+    (interruptDelayMs : Nat := 5) (prefetchSize? : Option Nat := none)
+    [Dataset D ByteArray] : IO Unit := do
+  let pool ← match prefetchSize? with
+    | some p =>
+        MultiGPULoader.createFromIteratorCfgPrefetch cfg devices batchSize p (bufferSize := 2) (dtype := .uint8)
+          (world? := world?)
+    | none =>
+        MultiGPULoader.createFromIteratorCfg cfg devices batchSize (bufferSize := 2) (dtype := .uint8)
+          (world? := world?)
   let mut seen := (#[] : Array UInt64)
   let mut rounds := 0
   while rounds < split do
@@ -321,7 +368,11 @@ def interruptMultiGPUAtSplit (cfg : IteratorConfig D) (devices : Array DeviceId)
   pool.drain
 
   let remainder ← collectMultiGPU cfg devices batchSize (world? := world?) (states? := some states)
-  verifyResume "MultiGPU interrupt" baseline seen remainder split
+    (prefetchSize? := prefetchSize?)
+  let label := match prefetchSize? with
+    | some _ => "MultiGPU interrupt prefetch"
+    | none => "MultiGPU interrupt"
+  verifyResume label baseline seen remainder split
 
 /-- Run all checks. -/
 def runAll : IO Unit := do
@@ -344,6 +395,9 @@ def runAll : IO Unit := do
     for split in splits do
       resumeGPUAtSplit cfg dev batchSize baseline split
     interruptGPUAtSplit cfg dev batchSize baseline 3
+    let prefetchSize? : Option Nat := some 4
+    resumeGPUAtSplit cfg dev batchSize baseline 3 (prefetchSize? := prefetchSize?)
+    interruptGPUAtSplit cfg dev batchSize baseline 2 (prefetchSize? := prefetchSize?)
     IO.println "✓ GPU resume test passed"
 
   -- Multi-GPU (if available)
@@ -353,6 +407,9 @@ def runAll : IO Unit := do
     for split in splitsMulti do
       resumeMultiGPUAtSplit cfg gpuDevices batchSize baselineMulti split (world? := world?)
     interruptMultiGPUAtSplit cfg gpuDevices batchSize baselineMulti 2 (world? := world?)
+    let prefetchSize? : Option Nat := some 4
+    resumeMultiGPUAtSplit cfg gpuDevices batchSize baselineMulti 2 (world? := world?) (prefetchSize? := prefetchSize?)
+    interruptMultiGPUAtSplit cfg gpuDevices batchSize baselineMulti 1 (world? := world?) (prefetchSize? := prefetchSize?)
     IO.println "✓ MultiGPU resume test passed"
 
   -- TPU (host-backed)
@@ -362,6 +419,9 @@ def runAll : IO Unit := do
   for split in splitsTpu do
     resumeTPUAtSplit cfg tpuDev batchSize baselineTpu split
   interruptTPUAtSplit cfg tpuDev batchSize baselineTpu 3
+  let prefetchSize? : Option Nat := some 4
+  resumeTPUAtSplit cfg tpuDev batchSize baselineTpu 3 (prefetchSize? := prefetchSize?)
+  interruptTPUAtSplit cfg tpuDev batchSize baselineTpu 2 (prefetchSize? := prefetchSize?)
   IO.println "✓ TPU resume test passed"
 
 end TinyGrad4.Test.DeviceLoaderResumeSmoke

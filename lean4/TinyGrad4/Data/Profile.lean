@@ -87,6 +87,18 @@ structure ConcurrencyStats where
   peakConcurrency : Nat := 0
   deriving Repr, Inhabited
 
+namespace StageStat
+
+/-- Render a one-line summary with concurrency stats. -/
+def summaryLineWithConcurrency (name : String) (s : StageStat) (c : ConcurrencyStats) : String :=
+  let base := summaryLine name s
+  let wall := formatNs c.wallNs
+  let busy := formatNs c.busyNs
+  let idle := formatNs c.idleNs
+  s!"{base} conc_avg={c.avgConcurrency} conc_peak={c.peakConcurrency} conc_wall={wall} conc_busy={busy} conc_idle={idle}"
+
+end StageStat
+
 /-! ## Profiler -/
 
 /-- Collects stage timing statistics. -/
@@ -258,6 +270,19 @@ def summaryByTotal (p : Profiler) : IO String := do
   let lines := sorted.map (fun (name, stat) => StageStat.summaryLine name stat)
   pure <| String.intercalate "\n" lines
 
+/-- Render a summary with per-stage concurrency stats. -/
+def summaryWithConcurrencyByStage (p : Profiler) : IO String := do
+  let (stats, _total, byStage) ← p.snapshotWithConcurrencyByStage
+  let mut statMap : Std.HashMap String StageStat := {}
+  for (name, stat) in stats do
+    statMap := statMap.insert name stat
+  let mut lines : Array String := #[]
+  lines := lines.push (← p.concurrencySummary)
+  for (name, conc) in byStage do
+    let stat := statMap.getD name default
+    lines := lines.push (StageStat.summaryLineWithConcurrency name stat conc)
+  pure <| String.intercalate "\n" lines.toList
+
 end Profiler
 
 /-! ## Profiling Wrappers -/
@@ -283,6 +308,15 @@ def profileIter (profiler : Profiler) (name : String) (iter : DataIterator T) : 
 
 /-- Profile a prefetcher's `next` with wait time attribution. -/
 def profilePrefetcherNext (profiler : Profiler) (name : String) (p : Prefetcher T) : IO (Option T) := do
+  let start ← IO.monoNanosNow
+  let (result, waitNs) ← p.nextWithWait
+  let stop ← IO.monoNanosNow
+  profiler.recordSampleSpan name start stop waitNs
+  pure result
+
+/-- Profile an IteratorPrefetcher `next` with wait time attribution. -/
+def profileIteratorPrefetcherNext (profiler : Profiler) (name : String)
+    (p : IteratorPrefetcher T) : IO (Option T) := do
   let start ← IO.monoNanosNow
   let (result, waitNs) ← p.nextWithWait
   let stop ← IO.monoNanosNow

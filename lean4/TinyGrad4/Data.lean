@@ -17,6 +17,7 @@ import TinyGrad4.Data.Checkpoint
 import TinyGrad4.Data.Profile
 import TinyGrad4.Data.Timing
 import TinyGrad4.Data.IterDataset
+import TinyGrad4.Data.TUOpInput
 
 -- Datasets
 import TinyGrad4.Data.MNIST

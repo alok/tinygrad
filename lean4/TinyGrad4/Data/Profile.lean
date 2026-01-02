@@ -84,6 +84,7 @@ structure StageSpan where
 /-- Aggregate concurrency statistics across recorded spans. -/
 structure ConcurrencyStats where
   wallNs : Nat := 0
+  activeNs : Nat := 0
   busyNs : Nat := 0
   idleNs : Nat := 0
   avgConcurrency : Float := 0.0
@@ -96,9 +97,13 @@ namespace StageStat
 def summaryLineWithConcurrency (name : String) (s : StageStat) (c : ConcurrencyStats) : String :=
   let base := summaryLine name s
   let wall := formatNs c.wallNs
+  let active := formatNs c.activeNs
   let busy := formatNs c.busyNs
   let idle := formatNs c.idleNs
-  s!"{base} conc_avg={c.avgConcurrency} conc_peak={c.peakConcurrency} conc_wall={wall} conc_busy={busy} conc_idle={idle}"
+  let util := if c.wallNs == 0 then 0.0 else (c.activeNs.toFloat / c.wallNs.toFloat) * 100.0
+  let overlap := if c.activeNs == 0 then 0.0 else c.busyNs.toFloat / c.activeNs.toFloat
+  s!"{base} conc_avg={c.avgConcurrency} conc_peak={c.peakConcurrency} " ++
+    s!"conc_util={util}% conc_overlap={overlap} conc_wall={wall} conc_active={active} conc_busy={busy} conc_idle={idle}"
 
 end StageStat
 
@@ -190,6 +195,7 @@ private def concurrencyStatsFromSpans (spans : Array StageSpan) : ConcurrencySta
     let mut prev := wallStart
     let mut active : Int := 0
     let mut busyWeighted : Nat := 0
+    let mut activeWall : Nat := 0
     let mut idle : Nat := 0
     let mut peak : Nat := 0
     for e in sorted do
@@ -199,6 +205,7 @@ private def concurrencyStatsFromSpans (spans : Array StageSpan) : ConcurrencySta
           idle := idle + dt
         else
           busyWeighted := busyWeighted + dt * active.toNat
+          activeWall := activeWall + dt
           if active.toNat > peak then
             peak := active.toNat
       active := active + e.delta
@@ -206,7 +213,7 @@ private def concurrencyStatsFromSpans (spans : Array StageSpan) : ConcurrencySta
     let wallNs := wallEnd - wallStart
     let avg :=
       if wallNs == 0 then 0.0 else busyWeighted.toFloat / wallNs.toFloat
-    pure { wallNs, busyNs := busyWeighted, idleNs := idle, avgConcurrency := avg, peakConcurrency := peak }
+    pure { wallNs, activeNs := activeWall, busyNs := busyWeighted, idleNs := idle, avgConcurrency := avg, peakConcurrency := peak }
 
 private def concurrencyStatsByStageFromSpans (spans : Array StageSpan) : Array (String × ConcurrencyStats) :=
   Id.run do
@@ -255,9 +262,13 @@ def summary (p : Profiler) : IO String := do
 def concurrencySummary (p : Profiler) : IO String := do
   let s ← p.concurrencyStats
   let wall := StageStat.formatNs s.wallNs
+  let active := StageStat.formatNs s.activeNs
   let busy := StageStat.formatNs s.busyNs
   let idle := StageStat.formatNs s.idleNs
-  pure s!"concurrency: wall={wall} busy={busy} idle={idle} avg={s.avgConcurrency} peak={s.peakConcurrency}"
+  let util := if s.wallNs == 0 then 0.0 else (s.activeNs.toFloat / s.wallNs.toFloat) * 100.0
+  let overlap := if s.activeNs == 0 then 0.0 else s.busyNs.toFloat / s.activeNs.toFloat
+  pure s!"concurrency: wall={wall} active={active} busy={busy} idle={idle} " ++
+    s!"util={util}% avg={s.avgConcurrency} overlap={overlap} peak={s.peakConcurrency}"
 
 /-- Render a summary sorted by wait ratio (descending). -/
 def summaryByWaitRatio (p : Profiler) : IO String := do

@@ -317,10 +317,11 @@ def bench_torch(
         return None
 
     class FileDataset(Dataset):
-        def __init__(self, path: str, chunk_bytes: int, total_bytes: int) -> None:
+        def __init__(self, path: str, chunk_bytes: int, total_bytes: int, return_bytes: bool) -> None:
             self.path = path
             self.chunk_bytes = chunk_bytes
             self.total_bytes = total_bytes
+            self.return_bytes = return_bytes
             self._open()
 
         def _open(self) -> None:
@@ -332,12 +333,14 @@ def bench_torch(
                 "path": self.path,
                 "chunk_bytes": self.chunk_bytes,
                 "total_bytes": self.total_bytes,
+                "return_bytes": self.return_bytes,
             }
 
         def __setstate__(self, state):
             self.path = state["path"]
             self.chunk_bytes = state["chunk_bytes"]
             self.total_bytes = state["total_bytes"]
+            self.return_bytes = state["return_bytes"]
             self._open()
 
         def __len__(self) -> int:
@@ -346,9 +349,11 @@ def bench_torch(
         def __getitem__(self, idx: int) -> memoryview:
             start = idx * self.chunk_bytes
             end = min(start + self.chunk_bytes, self.total_bytes)
+            if self.return_bytes:
+                return self._mm[start:end]
             return memoryview(self._mm)[start:end]
 
-    ds = FileDataset(path, chunk_bytes, total_bytes)
+    ds = FileDataset(path, chunk_bytes, total_bytes, return_bytes=(num_workers > 0))
     loader = DataLoader(
         ds,
         batch_size=None,

@@ -151,6 +151,9 @@ extern_lib tg4c pkg := do
 lean_lib TinyGrad4 where
   precompileModules := true
 
+lean_lib Tqdm where
+  globs := #[`Tqdm.*]
+
 lean_lib LeanBenchNew where
   globs := #[`LeanBenchNew.*]
 

@@ -16,6 +16,8 @@ def flatten {s : List Nat} {d : DType} (t : StaticTensor s d)
   let actualShape := t.uop.shape
   let base := TUOp.ofRaw t.uop
   let reshaped ← TUOp.reshape base [listProd actualShape]
+  let reshaped := TUOp.castShape reshaped [listProd s]
+  let reshaped := TUOp.castDType reshaped d
   pure (StaticTensor.ofTUOp reshaped t.requiresGrad)
 
 def expand {s : List Nat} {d : DType} (t : StaticTensor s d)
@@ -32,6 +34,8 @@ def unsqueeze {s : List Nat} {d : DType} (t : StaticTensor s d)
   let newShape := Shape.insertDim actualShape axis 1
   let base := TUOp.ofRaw t.uop
   let reshaped ← TUOp.reshape base newShape
+  let reshaped := TUOp.castShape reshaped (Shape.insertDim s axis 1)
+  let reshaped := TUOp.castDType reshaped d
   pure (StaticTensor.ofTUOp reshaped t.requiresGrad)
 
 def permute {s : List Nat} {d : DType} (t : StaticTensor s d)

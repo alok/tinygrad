@@ -2,6 +2,7 @@ import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Gradient.Autodiff
+import TinyGrad4.UOp.Typed
 
 namespace TinyGrad4.Optim
 
@@ -168,11 +169,11 @@ def stepOne (opt : Adam) (paramUop gradUop : UOp) (env : Env)
     | none => initMoments dtype shape
 
   -- Build UOps for moments (convert RawBuffer to UOp)
-  let mUop ← UOp.vconstRaw moments.m shape
-  let vUop ← UOp.vconstRaw moments.v shape
+  let mUop ← TUOp.vconstRaw moments.m shape
+  let vUop ← TUOp.vconstRaw moments.v shape
 
   -- Build update UOps
-  let (paramNew, mNew, vNew) ← buildUpdateUOps paramUop gradUop mUop vUop opt.config newBeta1_t newBeta2_t
+  let (paramNew, mNew, vNew) ← buildUpdateUOps paramUop gradUop mUop.raw vUop.raw opt.config newBeta1_t newBeta2_t
 
   -- Evaluate all at once
   let results := evalMany [paramNew, mNew, vNew] env

@@ -4,6 +4,7 @@ import TinyGrad4.Data.Transform
 import TinyGrad4.Backend.Accelerate
 import TinyGrad4.Backend.Metal
 import TinyGrad4.UOp.UOp
+import TinyGrad4.UOp.Typed
 
 /-!
 # MNIST Raw Data Loading (tinygrad-style)
@@ -204,7 +205,8 @@ def toTensorU8 (slice : ByteSlice) (shape : Shape) : UOpM UOp := do
   -- Copy slice data to RawBuffer for now
   -- Future: could use offset-based BUFFER reference for true zero-copy in UOp graph
   let buf : RawBuffer := { dtype := .uint8, data := slice.toByteArray }
-  UOp.vconstRaw buf shape
+  let uop ← TUOp.vconstRaw buf shape
+  pure uop.raw
 
 /-- Create float32 tensor from uint8 image slice.
     Normalizes pixel values to [0, 1] via the UOp graph. -/
@@ -213,10 +215,12 @@ def imagesToTensorF32 (ib : ImageBuffer) (startIdx numImages : Nat) (shape : Sha
   -- Create uint8 tensor
   let u8Tensor ← toTensorU8 slice shape
   -- Cast to float32 and normalize: x / 255.0
-  let f32Tensor ← UOp.cast u8Tensor .float32
-  let scale ← UOp.const .float32 (1.0 / 255.0 : Float32)
-  let scaleBroadcast ← UOp.expand scale shape
-  UOp.binaryOp .MUL f32Tensor scaleBroadcast
+  let u8TU := TUOp.ofRaw u8Tensor
+  let f32Tensor ← TUOp.cast u8TU .float32
+  let scale ← TUOp.const .float32 (1.0 / 255.0 : Float32)
+  let scaleBroadcast ← TUOp.expand scale shape
+  let out ← TUOp.binaryOp .MUL f32Tensor scaleBroadcast
+  pure out.raw
 
 /-- Create one-hot encoded tensor from uint8 label slice.
     Output shape: [batchSize, numClasses] -/
@@ -226,7 +230,7 @@ def labelsToOneHot (lb : LabelBuffer) (startIdx numLabels : Nat) (numClasses : N
   -- This is done lazily in the UOp graph
   let labelTensor ← toTensorU8 slice [numLabels]
   -- Cast to int and use for indexing into identity matrix
-  let labelInt ← UOp.cast labelTensor .int32
+  let labelInt ← TUOp.cast (TUOp.ofRaw labelTensor) .int32
   -- Create one-hot via comparison with range
   -- For each label l, one_hot[i] = (i == l) ? 1.0 : 0.0
   -- This can be expressed as: eye(numClasses)[labels]

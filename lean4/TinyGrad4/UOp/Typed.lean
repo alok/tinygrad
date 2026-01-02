@@ -72,6 +72,16 @@ def vconstF32 (vals : Array Float32) : TUOpM (TUOp .VCONST [vals.size] (rankOf [
   let raw ← UOp.vconstF32 vals
   pure (mkUnsafe raw)
 
+def vconst (bytes : ByteArray) (dtype : DType) (shape : Shape) :
+    TUOpM (TUOp .VCONST shape (rankOf shape) dtype) := do
+  let raw ← UOp.vconst bytes dtype shape
+  pure (mkUnsafe raw)
+
+def vconstRaw (buf : RawBuffer) (shape : Shape) :
+    TUOpM (TUOp .VCONST shape (rankOf shape) buf.dtype) := do
+  let raw ← UOp.vconstRaw buf shape
+  pure (mkUnsafe raw)
+
 def buffer (dtype : DType) (shape : Shape) (dev : String := "CPU") :
     TUOpM (TUOp .BUFFER shape (rankOf shape) dtype) := do
   let raw ← UOp.buffer dtype shape dev
@@ -100,9 +110,9 @@ def bitcast {opx : Ops} {s : Shape} {r : Nat} {d : DType} (x : TUOp opx s r d) (
   let raw ← UOp.bitcast x.raw dtype
   pure (mkUnsafe raw)
 
-def cat {opx opy : Ops} {sx sy : Shape} {rx ry : Nat} {d : DType}
-    (x : TUOp opx sx rx d) (y : TUOp opy sy ry d) (axis : Nat) :
-    TUOpM (TUOp .CAT (Shape.concatOut sx sy axis) (rankOf (Shape.concatOut sx sy axis)) d) := do
+def cat {opx opy : Ops} {sx sy : Shape} {rx ry : Nat} {d : DType} {out : Shape} {axis : Nat}
+    [Shape.ConcatShape sx sy axis out] (x : TUOp opx sx rx d) (y : TUOp opy sy ry d) :
+    TUOpM (TUOp .CAT out (rankOf out) d) := do
   let raw ← UOp.cat [x.raw, y.raw] axis
   pure (mkUnsafe raw)
 

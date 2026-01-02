@@ -6,15 +6,24 @@
 #include <lean/lean.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 // ============================================================================
 // Global CUDA State
 // ============================================================================
 
+#define TG4_MAX_CUDA_DEVICES 16
+
 static CUdevice g_device = 0;
 static CUcontext g_context = NULL;
 static CUstream g_stream = NULL;
+static CUdevice g_devices[TG4_MAX_CUDA_DEVICES];
+static CUcontext g_contexts[TG4_MAX_CUDA_DEVICES];
+static CUstream g_streams[TG4_MAX_CUDA_DEVICES];
+static int g_device_initialized[TG4_MAX_CUDA_DEVICES];
+static int g_device_count = -1;
 static int g_initialized = 0;
+static __thread int g_current_device = 0;
 
 #define CHECK_CU(x) do { \
     CUresult err = (x); \
@@ -32,14 +41,48 @@ static int g_initialized = 0;
     } \
 } while(0)
 
-static void ensure_cuda_init(void) {
+static int ensure_cuda_runtime(void) {
     if (!g_initialized) {
         CHECK_CU(cuInit(0));
-        CHECK_CU(cuDeviceGet(&g_device, 0));
-        CHECK_CU(cuCtxCreate(&g_context, 0, g_device));
-        CHECK_CU(cuStreamCreate(&g_stream, CU_STREAM_DEFAULT));
         g_initialized = 1;
     }
+    if (g_device_count < 0) {
+        int count = 0;
+        CUresult err = cuDeviceGetCount(&count);
+        if (err != CUDA_SUCCESS) {
+            const char* errStr = NULL;
+            cuGetErrorString(err, &errStr);
+            fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, errStr ? errStr : "unknown");
+            g_device_count = 0;
+        } else {
+            g_device_count = count;
+        }
+    }
+    return g_device_count;
+}
+
+static int ensure_cuda_device(int device_idx) {
+    int count = ensure_cuda_runtime();
+    if (count <= 0) return -1;
+    if (device_idx < 0 || device_idx >= count) device_idx = 0;
+
+    if (!g_device_initialized[device_idx]) {
+        CHECK_CU(cuDeviceGet(&g_devices[device_idx], device_idx));
+        CHECK_CU(cuCtxCreate(&g_contexts[device_idx], 0, g_devices[device_idx]));
+        CHECK_CU(cuStreamCreate(&g_streams[device_idx], CU_STREAM_DEFAULT));
+        g_device_initialized[device_idx] = 1;
+    }
+
+    g_current_device = device_idx;
+    g_device = g_devices[device_idx];
+    g_context = g_contexts[device_idx];
+    g_stream = g_streams[device_idx];
+    CHECK_CU(cuCtxSetCurrent(g_context));
+    return device_idx;
+}
+
+static void ensure_cuda_init(void) {
+    (void)ensure_cuda_device(g_current_device);
 }
 
 // ============================================================================
@@ -49,13 +92,15 @@ static void ensure_cuda_init(void) {
 typedef struct {
     CUdeviceptr gpu_mem;
     size_t numel;
+    int device_idx;
 } TG4CUDABuffer;
 
 static void tg4_cuda_buffer_finalize(void* ptr) {
     TG4CUDABuffer* buf = (TG4CUDABuffer*)ptr;
     if (buf) {
         if (buf->gpu_mem) {
-            cuMemFree(buf->gpu_mem);
+            ensure_cuda_device(buf->device_idx);
+            CHECK_CU(cuMemFree(buf->gpu_mem));
         }
         free(buf);
     }
@@ -148,6 +193,7 @@ extern "C" lean_obj_res tg4_cuda_alloc(b_lean_obj_arg n_obj, lean_object* world)
 
     TG4CUDABuffer* buf = (TG4CUDABuffer*)malloc(sizeof(TG4CUDABuffer));
     buf->numel = n;
+    buf->device_idx = g_current_device;
 
     CHECK_CU(cuMemAlloc(&buf->gpu_mem, bytes));
     CHECK_CU(cuMemsetD8(buf->gpu_mem, 0, bytes));
@@ -166,9 +212,8 @@ extern "C" lean_obj_res tg4_cuda_free(b_lean_obj_arg buf_obj, lean_object* world
 // Copy data from FloatArray to CUDA buffer
 // @[extern "tg4_cuda_copy_in"]
 extern "C" lean_obj_res tg4_cuda_copy_in(b_lean_obj_arg buf_obj, b_lean_obj_arg arr_obj, lean_object* world) {
-    ensure_cuda_init();
-
     TG4CUDABuffer* buf = cuda_buffer_unbox(buf_obj);
+    ensure_cuda_device(buf->device_idx);
 
     size_t n = lean_sarray_size(arr_obj);
     size_t copy_n = n < buf->numel ? n : buf->numel;
@@ -191,12 +236,10 @@ extern "C" lean_obj_res tg4_cuda_copy_in(b_lean_obj_arg buf_obj, b_lean_obj_arg 
 // Copy data from CUDA buffer to FloatArray
 // @[extern "tg4_cuda_copy_out"]
 extern "C" lean_obj_res tg4_cuda_copy_out(b_lean_obj_arg buf_obj, lean_object* world) {
-    ensure_cuda_init();
-
+    TG4CUDABuffer* buf = cuda_buffer_unbox(buf_obj);
+    ensure_cuda_device(buf->device_idx);
     // Sync before reading
     CHECK_CU(cuStreamSynchronize(g_stream));
-
-    TG4CUDABuffer* buf = cuda_buffer_unbox(buf_obj);
     size_t n = buf->numel;
 
     // Allocate temp host buffer
@@ -377,7 +420,7 @@ extern "C" lean_obj_res tg4_cuda_launch(
 // Sync (wait for all GPU work)
 // @[extern "tg4_cuda_sync"]
 extern "C" lean_obj_res tg4_cuda_sync(lean_object* world) {
-    ensure_cuda_init();
+    ensure_cuda_device(g_current_device);
     CHECK_CU(cuStreamSynchronize(g_stream));
     return lean_io_result_mk_ok(lean_box(0));
 }
@@ -389,12 +432,30 @@ extern "C" lean_obj_res tg4_cuda_sync(lean_object* world) {
 // Get device name
 // @[extern "tg4_cuda_device_name"]
 extern "C" lean_obj_res tg4_cuda_device_name(lean_object* world) {
-    ensure_cuda_init();
+    ensure_cuda_device(g_current_device);
 
     char name[256];
     CHECK_CU(cuDeviceGetName(name, sizeof(name), g_device));
 
     return lean_io_result_mk_ok(lean_mk_string(name));
+}
+
+// Get device count
+// @[extern "tg4_cuda_device_count"]
+extern "C" lean_obj_res tg4_cuda_device_count(lean_object* world) {
+    (void)world;
+    int count = ensure_cuda_runtime();
+    if (count < 0) count = 0;
+    return lean_io_result_mk_ok(lean_box(count));
+}
+
+// Set current device for this thread
+// @[extern "tg4_cuda_set_device"]
+extern "C" lean_obj_res tg4_cuda_set_device(b_lean_obj_arg idx_obj, lean_object* world) {
+    (void)world;
+    int idx = (int)lean_usize_of_nat(idx_obj);
+    ensure_cuda_device(idx);
+    return lean_io_result_mk_ok(lean_box(0));
 }
 
 // ============================================================================
@@ -410,6 +471,7 @@ extern "C" lean_obj_res tg4_cuda_alloc_bytes(b_lean_obj_arg nbytes_obj, lean_obj
 
     TG4CUDABuffer* buf = (TG4CUDABuffer*)malloc(sizeof(TG4CUDABuffer));
     buf->numel = nbytes;  // Store byte count (reusing numel field)
+    buf->device_idx = g_current_device;
 
     CHECK_CU(cuMemAlloc(&buf->gpu_mem, nbytes));
     CHECK_CU(cuMemsetD8(buf->gpu_mem, 0, nbytes));
@@ -420,9 +482,8 @@ extern "C" lean_obj_res tg4_cuda_alloc_bytes(b_lean_obj_arg nbytes_obj, lean_obj
 // Copy raw bytes from ByteArray to CUDA buffer
 // @[extern "tg4_cuda_copy_in_bytes"]
 extern "C" lean_obj_res tg4_cuda_copy_in_bytes(b_lean_obj_arg buf_obj, b_lean_obj_arg data_obj, lean_object* world) {
-    ensure_cuda_init();
-
     TG4CUDABuffer* buf = cuda_buffer_unbox(buf_obj);
+    ensure_cuda_device(buf->device_idx);
 
     size_t data_size = lean_sarray_size(data_obj);
     size_t copy_bytes = data_size < buf->numel ? data_size : buf->numel;
@@ -437,12 +498,10 @@ extern "C" lean_obj_res tg4_cuda_copy_in_bytes(b_lean_obj_arg buf_obj, b_lean_ob
 // Copy raw bytes from CUDA buffer to ByteArray
 // @[extern "tg4_cuda_copy_out_bytes"]
 extern "C" lean_obj_res tg4_cuda_copy_out_bytes(b_lean_obj_arg buf_obj, b_lean_obj_arg nbytes_obj, lean_object* world) {
-    ensure_cuda_init();
-
+    TG4CUDABuffer* buf = cuda_buffer_unbox(buf_obj);
+    ensure_cuda_device(buf->device_idx);
     // Sync before reading
     CHECK_CU(cuStreamSynchronize(g_stream));
-
-    TG4CUDABuffer* buf = cuda_buffer_unbox(buf_obj);
     size_t nbytes = lean_usize_of_nat(nbytes_obj);
     size_t copy_bytes = nbytes < buf->numel ? nbytes : buf->numel;
 
@@ -587,6 +646,7 @@ extern "C" lean_obj_res tg4_cuda_matmul_sync(
     b_lean_obj_arg a_obj, b_lean_obj_arg b_obj,
     b_lean_obj_arg m_obj, b_lean_obj_arg k_obj, b_lean_obj_arg n_obj
 ) {
+    ensure_cuda_init();
     size_t M = lean_usize_of_nat(m_obj);
     size_t K = lean_usize_of_nat(k_obj);
     size_t N = lean_usize_of_nat(n_obj);

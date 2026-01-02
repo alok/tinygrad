@@ -147,6 +147,47 @@ structure WorldConfig where
   worldSize : Nat   -- Total number of processes
   deriving Repr, Inhabited
 
+private def getEnvNat? (key : String) : IO (Option Nat) := do
+  match (← IO.getEnv key) with
+  | some v =>
+      let v' := v.trimAscii.toString
+      pure v'.toNat?
+  | none => pure none
+
+private def getEnvNatAny? (keys : List String) : IO (Option Nat) := do
+  for key in keys do
+    if let some v ← getEnvNat? key then
+      return some v
+  return none
+
+/-- Read world configuration from environment variables.
+
+Priority:
+- `TG4_RANK` + `TG4_WORLD_SIZE` (or `RANK` + `WORLD_SIZE`)
+- `TG4_NODE_RANK`, `TG4_NODE_COUNT`, `TG4_LOCAL_RANK`, `TG4_LOCAL_COUNT`
+
+Defaults to rank=0, worldSize=1 when unspecified.
+-/
+def WorldConfig.fromEnv : IO WorldConfig := do
+  let rank? ← getEnvNatAny? ["TG4_RANK", "RANK"]
+  let world? ← getEnvNatAny? ["TG4_WORLD_SIZE", "WORLD_SIZE"]
+  match rank?, world? with
+  | some r, some w =>
+      let worldSize := if w == 0 then 1 else w
+      let rank := if r < worldSize then r else 0
+      pure { rank, worldSize }
+  | _, _ =>
+      let nodeRank := (← getEnvNatAny? ["TG4_NODE_RANK", "NODE_RANK"]).getD 0
+      let nodeCount := (← getEnvNatAny? ["TG4_NODE_COUNT", "NODE_COUNT"]).getD 1
+      let localRank := (← getEnvNatAny? ["TG4_LOCAL_RANK", "LOCAL_RANK"]).getD 0
+      let localCount := (← getEnvNatAny? ["TG4_LOCAL_COUNT", "LOCAL_COUNT"]).getD 1
+      let nodeCount' := if nodeCount == 0 then 1 else nodeCount
+      let localCount' := if localCount == 0 then 1 else localCount
+      let worldSize := nodeCount' * localCount'
+      let rank := nodeRank * localCount' + localRank
+      let rank' := if rank < worldSize then rank else 0
+      pure { rank := rank', worldSize }
+
 /-- Create shard config from world config -/
 def WorldConfig.toShardConfig (world : WorldConfig) (mode : ShardMode := .interleaved)
     (dropRemainder : Bool := true) : ShardConfig :=
@@ -156,6 +197,12 @@ def WorldConfig.toShardConfig (world : WorldConfig) (mode : ShardMode := .interl
 def shardForWorker [Dataset D T] (world : WorldConfig) (mode : ShardMode := .interleaved)
     (dropRemainder : Bool := true) (ds : D) : ShardedDataset D T :=
   shardWithConfig (world.toShardConfig mode dropRemainder) ds
+
+/-- Shard dataset based on environment-configured world settings. -/
+def shardForEnv [Dataset D T] (mode : ShardMode := .interleaved)
+    (dropRemainder : Bool := true) (ds : D) : IO (ShardedDataset D T) := do
+  let world ← WorldConfig.fromEnv
+  pure (shardForWorker world mode dropRemainder ds)
 
 /-! ## Even Split Helper -/
 

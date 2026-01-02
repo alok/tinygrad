@@ -107,7 +107,7 @@ def iterateBatches (ds : MNISTDataset) (batchSize : Nat) (key : RandKey)
 /-! ## Benchmark: New vs Old Loader -/
 
 /-- Benchmark comparison between old DataLoader and new Dataset pipeline -/
-def benchmarkComparison (dataDir : String := "data") (batchSize : Nat := 64)
+def mnistBenchmarkComparison (dataDir : String := "data") (batchSize : Nat := 64)
     (maxImages : Nat := 10000) : IO Unit := do
   IO.println "=== MNIST Loader Benchmark ==="
 

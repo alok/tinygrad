@@ -13,12 +13,14 @@ import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Prefetch
 import TinyGrad4.Data.Shard
 import TinyGrad4.Data.Checkpoint
+import TinyGrad4.Data.Profile
 
 -- Datasets
 import TinyGrad4.Data.MNIST
 import TinyGrad4.Data.MNISTDataset
 import TinyGrad4.Data.MNISTRaw
 import TinyGrad4.Data.GPULoader
+import TinyGrad4.Data.TPULoader
 import TinyGrad4.Data.Iterators
 
 /-!
@@ -32,13 +34,17 @@ Designed to be used by downstream libraries like SciLean.
 - `RandKey`: JAX-style splittable PRNG for reproducible shuffling
 - `DataIterator`: Checkpointable sequential iteration
 - `Prefetcher`: Background data loading with IO.asTask
+- `Profiler`: Lightweight timing stats for pipeline stages
+- `TPUDataLoader`: Host-staged loader tagged with TPU device IDs
 
 ## Buffer Protocol (New)
 Device-agnostic buffer exchange inspired by DLPack:
 - `Device`: Memory location (cpu, gpu, nvme, remote)
-- `BufferDescriptor`: Zero-copy tensor view (handle, dtype, shape, strides)
-- `TrackedBuffer`: Ref-counted buffer with registry
-- `BufferExchange`: Typeclass for zero-copy conversion
+- `Allocation` / `TrackedAllocation`: Owned allocations with ref-counting
+- `Buffer`: Typed zero-copy view (shape/dtype at type level)
+- `TrackedBuffer`: Typed view with ownership tracking
+- `RawBuffer`: FFI descriptor (runtime shape/dtype)
+- `BufferExchange`: Typeclass for RawBuffer conversion
 - `IndexTransform`: Pure index transforms with composition
 
 ## Transformations
@@ -58,6 +64,7 @@ All transformations are O(1) to construct and compose lazily:
 - `shuffleDs` is convenient but rebuilds permutation each epoch
 - `filterDs` eagerly scans dataset on construction
 - All other transformations are lazy wrappers
+- `Profiler` helps identify stages dominated by wait time
 
 ## Usage
 ```lean

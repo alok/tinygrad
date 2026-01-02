@@ -80,8 +80,8 @@ private def initMoments (dtype : DType) (shape : Shape) : AdamMoments :=
     v := RawBuffer.zeros dtype numel
     shape := shape }
 
-/-- Build UOps for Adam update formula.
-    Returns (new_param, new_m, new_v) as UOps to be evaluated together.
+/-- Build TUOps for Adam update formula.
+    Returns (new_param, new_m, new_v) as TUOps to be evaluated together.
 
     m_t = beta1 * m_{t-1} + (1 - beta1) * g_t
     v_t = beta2 * v_{t-1} + (1 - beta2) * g_t^2
@@ -89,66 +89,89 @@ private def initMoments (dtype : DType) (shape : Shape) : AdamMoments :=
     v_hat = v_t / (1 - beta2^t)
     param = param - lr * m_hat / (sqrt(v_hat) + eps)
 -/
-def buildUpdateUOps (param grad mBuf vBuf : UOp) (cfg : AdamConfig)
-    (beta1_t beta2_t : Float) : TensorM (UOp × UOp × UOp) := do
-  let dtype := param.dtype
-  let shape := param.shape
+def buildUpdateTUOps {opP opG opM opV : Ops} {s : Shape} {r : Nat} {d : DType}
+    (param : TUOp opP s r d) (grad : TUOp opG s r d) (mBuf : TUOp opM s r d) (vBuf : TUOp opV s r d)
+    (cfg : AdamConfig) (beta1_t beta2_t : Float) :
+    TUOpM (TUOp .SUB s r d × TUOp .ADD s r d × TUOp .ADD s r d) := do
+  let asSRD {op : Ops} {s' : Shape} {r' : Nat} {d' : DType} (u : TUOp op s' r' d') : TUOp op s r d :=
+    TUOp.mkUnsafe (TUOp.castDType (TUOp.castShape u s) d).raw
 
   -- Create scalar constants
-  let beta1 ← UOp.const dtype cfg.beta1.toFloat32
-  let beta2 ← UOp.const dtype cfg.beta2.toFloat32
-  let one ← UOp.const dtype 1.0
-  let lr ← UOp.const dtype cfg.lr.toFloat32
-  let eps ← UOp.const dtype cfg.eps.toFloat32
+  let beta1 ← TUOp.const d cfg.beta1.toFloat32
+  let beta2 ← TUOp.const d cfg.beta2.toFloat32
+  let one ← TUOp.const d 1.0
+  let lr ← TUOp.const d cfg.lr.toFloat32
+  let eps ← TUOp.const d cfg.eps.toFloat32
 
   -- Bias correction denominators
-  let biasCorr1 ← UOp.const dtype (1.0 - beta1_t).toFloat32
-  let biasCorr2 ← UOp.const dtype (1.0 - beta2_t).toFloat32
+  let biasCorr1 ← TUOp.const d (1.0 - beta1_t).toFloat32
+  let biasCorr2 ← TUOp.const d (1.0 - beta2_t).toFloat32
 
   -- Expand scalars to param shape
-  let beta1B ← UOp.expand beta1 shape
-  let beta2B ← UOp.expand beta2 shape
-  let oneB ← UOp.expand one shape
-  let lrB ← UOp.expand lr shape
-  let epsB ← UOp.expand eps shape
-  let biasCorr1B ← UOp.expand biasCorr1 shape
-  let biasCorr2B ← UOp.expand biasCorr2 shape
+  let beta1B ← TUOp.expand beta1 s
+  let beta2B ← TUOp.expand beta2 s
+  let oneB ← TUOp.expand one s
+  let lrB ← TUOp.expand lr s
+  let epsB ← TUOp.expand eps s
+  let biasCorr1B ← TUOp.expand biasCorr1 s
+  let biasCorr2B ← TUOp.expand biasCorr2 s
 
   -- Update moments: m_new = beta1 * m + (1 - beta1) * grad
-  let oneMinusBeta1 ← UOp.binaryOp .SUB oneB beta1B
-  let mScaled ← UOp.binaryOp .MUL beta1B mBuf
-  let gScaled ← UOp.binaryOp .MUL oneMinusBeta1 grad
-  let mNew ← UOp.binaryOp .ADD mScaled gScaled
+  let oneMinusBeta1 ← TUOp.binaryOp .SUB oneB beta1B
+  let mScaled ← TUOp.binaryOp .MUL beta1B mBuf
+  let gScaled ← TUOp.binaryOp .MUL oneMinusBeta1 grad
+  let mNew := asSRD (← TUOp.binaryOp .ADD mScaled gScaled)
 
   -- v_new = beta2 * v + (1 - beta2) * grad^2
-  let oneMinusBeta2 ← UOp.binaryOp .SUB oneB beta2B
-  let vScaled ← UOp.binaryOp .MUL beta2B vBuf
-  let gradSq ← UOp.binaryOp .MUL grad grad
-  let gSqScaled ← UOp.binaryOp .MUL oneMinusBeta2 gradSq
-  let vNew ← UOp.binaryOp .ADD vScaled gSqScaled
+  let oneMinusBeta2 ← TUOp.binaryOp .SUB oneB beta2B
+  let vScaled ← TUOp.binaryOp .MUL beta2B vBuf
+  let gradSq ← TUOp.binaryOp .MUL grad grad
+  let gSqScaled ← TUOp.binaryOp .MUL oneMinusBeta2 gradSq
+  let vNew := asSRD (← TUOp.binaryOp .ADD vScaled gSqScaled)
 
   -- Bias correction: m_hat = m_new / (1 - beta1^t)
-  let mHat ← UOp.binaryOp .IDIV mNew biasCorr1B
-  let vHat ← UOp.binaryOp .IDIV vNew biasCorr2B
+  let mHat := asSRD (← TUOp.binaryOp .IDIV mNew biasCorr1B)
+  let vHat := asSRD (← TUOp.binaryOp .IDIV vNew biasCorr2B)
 
   -- Weight decay (AdamW style - applied to param before update)
-  let paramDecayed ← if cfg.weightDecay > 0.0 then do
-    let wd ← UOp.const dtype cfg.weightDecay.toFloat32
-    let wdB ← UOp.expand wd shape
-    let lrWd ← UOp.binaryOp .MUL lrB wdB
-    let decay ← UOp.binaryOp .SUB oneB lrWd
-    UOp.binaryOp .MUL param decay
+  let paramDecayedRaw ← if cfg.weightDecay > 0.0 then do
+    let wd ← TUOp.const d cfg.weightDecay.toFloat32
+    let wdB ← TUOp.expand wd s
+    let lrWd ← TUOp.binaryOp .MUL lrB wdB
+    let decay ← TUOp.binaryOp .SUB oneB lrWd
+    let decayed ← TUOp.binaryOp .MUL param decay
+    pure decayed.raw
   else
-    pure param
+    pure param.raw
+  let paramDecayed : TUOp paramDecayedRaw.op s r d := TUOp.mkUnsafe paramDecayedRaw
 
   -- Update: param_new = param - lr * m_hat / (sqrt(v_hat) + eps)
-  let sqrtV ← UOp.unaryOp .SQRT vHat
-  let denom ← UOp.binaryOp .ADD sqrtV epsB
-  let update ← UOp.binaryOp .IDIV mHat denom
-  let scaledUpdate ← UOp.binaryOp .MUL lrB update
-  let paramNew ← UOp.binaryOp .SUB paramDecayed scaledUpdate
+  let sqrtV ← TUOp.unaryOp .SQRT vHat
+  let denom ← TUOp.binaryOp .ADD sqrtV epsB
+  let update ← TUOp.binaryOp .IDIV mHat denom
+  let scaledUpdate ← TUOp.binaryOp .MUL lrB update
+  let paramNew := asSRD (← TUOp.binaryOp .SUB paramDecayed scaledUpdate)
 
   pure (paramNew, mNew, vNew)
+
+/-- Build UOps for Adam update formula.
+    Returns (new_param, new_m, new_v) as UOps to be evaluated together. -/
+def buildUpdateUOps (param grad mBuf vBuf : UOp) (cfg : AdamConfig)
+    (beta1_t beta2_t : Float) : TensorM (UOp × UOp × UOp) := do
+  let shape := param.shape
+  let dtype := param.dtype
+  let paramT : TUOp param.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe param
+  let gradT0 := TUOp.ofRaw grad
+  let gradT := TUOp.castDType (TUOp.castShape gradT0 shape) dtype
+  let gradT : TUOp grad.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe gradT.raw
+  let mT0 := TUOp.ofRaw mBuf
+  let mT := TUOp.castDType (TUOp.castShape mT0 shape) dtype
+  let mT : TUOp mBuf.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe mT.raw
+  let vT0 := TUOp.ofRaw vBuf
+  let vT := TUOp.castDType (TUOp.castShape vT0 shape) dtype
+  let vT : TUOp vBuf.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe vT.raw
+  let (paramNew, mNew, vNew) ← buildUpdateTUOps paramT gradT mT vT cfg beta1_t beta2_t
+  pure (paramNew.raw, mNew.raw, vNew.raw)
 
 /-- Single step update for one parameter.
     Returns: (updated param RawBuffer, updated optimizer) -/
@@ -169,17 +192,28 @@ def stepOne (opt : Adam) (paramUop gradUop : UOp) (env : Env)
     | none => initMoments dtype shape
 
   -- Build UOps for moments (convert RawBuffer to UOp)
-  let mUop ← TUOp.vconstRaw moments.m shape
-  let vUop ← TUOp.vconstRaw moments.v shape
+  let mUop0 ← TUOp.vconstRaw moments.m shape
+  let vUop0 ← TUOp.vconstRaw moments.v shape
+  let mUop := TUOp.castDType (TUOp.castShape mUop0 shape) dtype
+  let vUop := TUOp.castDType (TUOp.castShape vUop0 shape) dtype
+  let mUop : TUOp mUop.raw.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe mUop.raw
+  let vUop : TUOp vUop.raw.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe vUop.raw
 
-  -- Build update UOps
-  let (paramNew, mNew, vNew) ← buildUpdateUOps paramUop gradUop mUop.raw vUop.raw opt.config newBeta1_t newBeta2_t
+  -- Build update TUOps
+  let paramT : TUOp paramUop.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe paramUop
+  let gradT0 := TUOp.ofRaw gradUop
+  let gradT := TUOp.castDType (TUOp.castShape gradT0 shape) dtype
+  let gradT : TUOp gradUop.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe gradT.raw
+  let (paramNew, mNew, vNew) ← buildUpdateTUOps paramT gradT mUop vUop opt.config newBeta1_t newBeta2_t
 
   -- Evaluate all at once
-  let results := evalMany [paramNew, mNew, vNew] env
-  let paramResult := results.getD paramNew.uid (RawBuffer.zeros dtype (listProd shape))
-  let mResult := results.getD mNew.uid (RawBuffer.zeros dtype (listProd shape))
-  let vResult := results.getD vNew.uid (RawBuffer.zeros dtype (listProd shape))
+  let paramNewU := paramNew.raw
+  let mNewU := mNew.raw
+  let vNewU := vNew.raw
+  let results := evalMany [paramNewU, mNewU, vNewU] env
+  let paramResult := results.getD paramNewU.uid (RawBuffer.zeros dtype (listProd shape))
+  let mResult := results.getD mNewU.uid (RawBuffer.zeros dtype (listProd shape))
+  let vResult := results.getD vNewU.uid (RawBuffer.zeros dtype (listProd shape))
 
   -- Update state
   let newMoments : AdamMoments := { m := mResult, v := vResult, shape := shape }

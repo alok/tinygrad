@@ -87,6 +87,10 @@ instance [Dataset D T] : Dataset (ShuffledDataset D T) T where
 def shuffleDs [Dataset D T] (key : RandKey) (ds : D) : ShuffledDataset D T :=
   { inner := ds, key := key }
 
+/-- Shuffle a dataset at a specific epoch. -/
+def shuffleDsAtEpoch [Dataset D T] (key : RandKey) (epoch : Nat) (ds : D) : ShuffledDataset D T :=
+  { inner := ds, key := key, epoch := epoch }
+
 /-- Advance to the next epoch (triggers reshuffle on access) -/
 def ShuffledDataset.nextEpoch (ds : ShuffledDataset D T) : ShuffledDataset D T :=
   { ds with epoch := ds.epoch + 1 }
@@ -126,6 +130,10 @@ def shuffleDsCached [Dataset D T] (key : RandKey) (ds : D) : CachedShuffledDatas
   let n := Dataset.len ds
   let perm := buildPermutation key n
   { inner := ds, perm := perm }
+
+/-- Create a cached shuffle for a specific epoch. -/
+def shuffleDsCachedAtEpoch [Dataset D T] (key : RandKey) (epoch : Nat) (ds : D) : CachedShuffledDataset D T :=
+  shuffleDsCached (key.fold epoch.toUInt64) ds
 
 /-! ## Sparse Fisher-Yates Shuffle
 

@@ -154,6 +154,20 @@ structure IteratorState where
   key : RandKey
   deriving Repr, Inhabited
 
+/-- Remaining items given per-epoch length and iterator state. -/
+def remainingItems (n : Nat) (epochs : Nat) (state : IteratorState) : Nat :=
+  if epochs == 0 then
+    if state.position >= n then 0 else n - state.position
+  else
+    if state.epoch >= epochs then 0
+    else
+      let remainingEpochs := epochs - state.epoch
+      let firstRemaining := if state.position >= n then 0 else n - state.position
+      if remainingEpochs == 0 then 0
+      else
+        let restEpochs := remainingEpochs - 1
+        firstRemaining + restEpochs * n
+
 /-- Sequential iterator over a dataset with checkpoint support -/
 structure DataIterator (T : Type) where
   private mk ::
@@ -163,6 +177,25 @@ structure DataIterator (T : Type) where
   stateFn : IO IteratorState
   /-- Restore from checkpoint state -/
   restoreFn : IteratorState → IO Unit
+
+/-! ## Iterator Config -/
+
+/-- Configuration for building a checkpointable iterator. -/
+structure IteratorConfig (D : Type) where
+  /-- Base dataset (epoch 0). -/
+  base : D
+  /-- Start position (for resume). -/
+  startPos : Nat := 0
+  /-- Start epoch (for resume). -/
+  startEpoch : Nat := 0
+  /-- Total epochs (0 = infinite). -/
+  epochs : Nat := 1
+  /-- Base RNG key (stored in checkpoints). -/
+  key : RandKey := RandKey.new 0
+  /-- Update key when advancing epoch. -/
+  updateKey : RandKey → Nat → RandKey := fun k _ => k
+  /-- Build dataset for a specific epoch/key. -/
+  datasetAtEpoch : D → RandKey → Nat → D := fun d _ _ => d
 
 namespace DataIterator
 
@@ -191,7 +224,29 @@ def toArray (iter : DataIterator T) : IO (Array T) := do
     | none => break
   pure arr
 
+/-- Wrap the next function to create a derived iterator. -/
+def wrap (iter : DataIterator T) (f : IO (Option T) → IO (Option T)) : DataIterator T :=
+  {
+    nextFn := f iter.nextFn
+    stateFn := iter.stateFn
+    restoreFn := iter.restoreFn
+  }
+
 end DataIterator
+
+/-! ## ForIn Instances -/
+
+instance : ForIn IO (DataIterator T) T where
+  forIn iter init f := do
+    let mut acc := init
+    repeat do
+      match ← iter.next with
+      | none => break
+      | some x =>
+        match ← f x acc with
+        | .done a => return a
+        | .yield a => acc := a
+    pure acc
 
 /-! ## Simple Dataset Wrappers -/
 
@@ -206,33 +261,70 @@ instance : Dataset (ArrayDataset T) T where
 /-- Create dataset from array -/
 def ofArray (arr : Array T) : ArrayDataset T := { data := arr }
 
-/-- Create iterator for an array dataset -/
-def ArrayDataset.toIterator (ds : ArrayDataset T) (key : RandKey := RandKey.new 0) : IO (DataIterator T) := do
-  let posRef ← IO.mkRef 0
-  let epochRef ← IO.mkRef 0
-  let keyRef ← IO.mkRef key
+/-! ## Generic Iterator -/
+
+/-- Create a checkpointable iterator for any dataset. -/
+private partial def iterStep [Dataset D T] (cfg : IteratorConfig D)
+    (posRef : IO.Ref Nat) (epochRef : IO.Ref Nat) (keyRef : IO.Ref RandKey) (dsRef : IO.Ref D)
+    : IO (Option T) := do
+  let epoch ← epochRef.get
+  if cfg.epochs != 0 && epoch >= cfg.epochs then
+    return none
+
+  let ds ← dsRef.get
+  let n := Dataset.len ds
+  if n == 0 then
+    return none
+
+  let pos ← posRef.get
+  if h : pos < n then
+    posRef.set (pos + 1)
+    some <$> Dataset.getItem ds pos h
+  else
+    if cfg.epochs != 0 && epoch + 1 >= cfg.epochs then
+      return none
+    let nextEpoch := epoch + 1
+    epochRef.set nextEpoch
+    let key := cfg.updateKey (← keyRef.get) nextEpoch
+    keyRef.set key
+    dsRef.set (cfg.datasetAtEpoch cfg.base key nextEpoch)
+    posRef.set 0
+    iterStep cfg posRef epochRef keyRef dsRef
+
+def Dataset.toIteratorCfg [Dataset D T] (cfg : IteratorConfig D) : IO (DataIterator T) := do
+  let posRef ← IO.mkRef cfg.startPos
+  let epochRef ← IO.mkRef cfg.startEpoch
+  let keyRef ← IO.mkRef cfg.key
+  let dsRef ← IO.mkRef (cfg.datasetAtEpoch cfg.base cfg.key cfg.startEpoch)
+  let step := iterStep cfg posRef epochRef keyRef dsRef
 
   pure {
-    nextFn := do
-      let pos ← posRef.get
-      if h : pos < ds.data.size then
-        posRef.set (pos + 1)
-        pure (some ds.data[pos])
-      else
-        pure none
-
+    nextFn := step
     stateFn := do
       pure {
         position := ← posRef.get
         epoch := ← epochRef.get
         key := ← keyRef.get
       }
-
     restoreFn := fun state => do
       posRef.set state.position
       epochRef.set state.epoch
       keyRef.set state.key
+      dsRef.set (cfg.datasetAtEpoch cfg.base state.key state.epoch)
   }
+
+/-- Create an iterator for a dataset (single epoch, deterministic). -/
+def Dataset.toIterator [Dataset D T] (ds : D) (key : RandKey := RandKey.new 0) : IO (DataIterator T) := do
+  Dataset.toIteratorCfg {
+    base := ds,
+    key := key
+  }
+
+/-! ## ArrayDataset Iterator -/
+
+/-- Create iterator for an array dataset -/
+def ArrayDataset.toIterator (ds : ArrayDataset T) (key : RandKey := RandKey.new 0) : IO (DataIterator T) := do
+  Dataset.toIterator ds key
 
 /-! ## Benchmarking Utilities -/
 

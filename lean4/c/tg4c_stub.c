@@ -3814,6 +3814,16 @@ LEAN_EXPORT lean_obj_res tg4_cuda_device_name(lean_object* world) {
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
+LEAN_EXPORT lean_obj_res tg4_cuda_device_count(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_set_device(b_lean_obj_arg idx, lean_object* world) {
+  (void)idx; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
 // Legacy float-based API stubs (for backward compatibility)
 LEAN_EXPORT lean_obj_res tg4_cuda_alloc(b_lean_obj_arg n, lean_object* world) {
   (void)n; (void)world;

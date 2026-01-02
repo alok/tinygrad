@@ -52,15 +52,22 @@ def push (q : IOQueue T) (item : T) : IO Unit := do
 def finish (q : IOQueue T) : IO Unit :=
   q.done.set true
 
+/-- Try to pop an item without blocking. -/
+def tryPop (q : IOQueue T) : IO (Option T) := do
+  q.items.modifyGet fun arr =>
+    if h : arr.size > 0 then
+      let item := arr[0]'(by omega)
+      (some item, arr.eraseIdx 0)
+    else
+      (none, arr)
+
 /-- Try to pop an item (returns none if empty and done) -/
 def pop (q : IOQueue T) : IO (Option T) := do
   repeat do
-    let arr ← q.items.get
-    if h : arr.size > 0 then
-      -- Pop from front
-      let item := arr[0]'(by omega)
-      q.items.set (arr.eraseIdx 0)
-      return some item
+    let item? ← q.tryPop
+    match item? with
+    | some item => return some item
+    | none => pure ()
     -- Empty - check if done
     if ← q.done.get then
       return none
@@ -68,6 +75,22 @@ def pop (q : IOQueue T) : IO (Option T) := do
     IO.sleep 1
   -- Should never reach here
   pure none
+
+/-- Pop an item and report time spent waiting (sleeping) in nanoseconds. -/
+def popWithWait (q : IOQueue T) : IO (Option T × Nat) := do
+  let mut waitNs : Nat := 0
+  repeat do
+    let item? ← q.tryPop
+    match item? with
+    | some item => return (some item, waitNs)
+    | none => pure ()
+    if ← q.done.get then
+      return (none, waitNs)
+    let start ← IO.monoNanosNow
+    IO.sleep 1
+    let stop ← IO.monoNanosNow
+    waitNs := waitNs + (stop - start)
+  pure (none, waitNs)
 
 end IOQueue
 
@@ -109,6 +132,10 @@ def create [Dataset D T] (ds : D) (bufferSize : Nat := 8) : IO (Prefetcher T) :=
 def next (p : Prefetcher T) : IO (Option T) :=
   p.queue.pop
 
+/-- Get next item and the time spent waiting for it (ns). -/
+def nextWithWait (p : Prefetcher T) : IO (Option T × Nat) :=
+  p.queue.popWithWait
+
 /-- Cancel the prefetcher -/
 def cancel (p : Prefetcher T) : IO Unit := do
   p.queue.finish
@@ -139,6 +166,20 @@ def toArray (p : Prefetcher T) : IO (Array T) := do
   pure arr
 
 end Prefetcher
+
+/-! ## ForIn Instances -/
+
+instance : ForIn IO (Prefetcher T) T where
+  forIn p init f := do
+    let mut acc := init
+    repeat do
+      match ← p.next with
+      | none => break
+      | some x =>
+        match ← f x acc with
+        | .done a => return a
+        | .yield a => acc := a
+    pure acc
 
 /-! ## PrefetchedDataset -/
 

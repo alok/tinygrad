@@ -2,11 +2,13 @@ import Std.Data.Iterators
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Prefetch
 import TinyGrad4.Data.GPULoader
+import TinyGrad4.Data.TPULoader
 
 namespace TinyGrad4.Data
 
 open Std.Iterators
 open GPULoader
+open TPULoader
 
 /-- Device-tagged batch/element. -/
 structure DeviceBatch (T : Type) where
@@ -52,6 +54,14 @@ def ofMultiAny (pool : MultiGPULoader) : DeviceStream GPUBuffer :=
     nextFn := do
       match ← MultiGPULoader.nextAny pool with
       | some (device, buf) => pure (some { device, value := buf })
+      | none => pure none
+  }
+
+def ofTPU (loader : TPUDataLoader) : DeviceStream TPUBuffer :=
+  {
+    nextFn := do
+      match ← TPUDataLoader.next loader with
+      | some buf => pure (some { device := loader.device, value := buf })
       | none => pure none
   }
 
@@ -170,6 +180,32 @@ def iterM (loader : GPUDataLoader) : IterM (α := GPUDataLoader) IO GPUBuffer :=
   ⟨loader⟩
 
 end GPUDataLoader
+
+namespace TPUDataLoader
+
+/-- Monadic iterator view for `TPUDataLoader`. -/
+def iterM (loader : TPUDataLoader) : IterM (α := TPUDataLoader) IO TPUBuffer :=
+  ⟨loader⟩
+
+end TPUDataLoader
+
+instance : Iterator TPUDataLoader IO TPUBuffer where
+  IsPlausibleStep _ _ := True
+  step it := do
+    match ← TPUDataLoader.next it.internalState with
+    | some buf =>
+        pure <| Std.Shrink.deflate <| PlausibleIterStep.yield it buf (by trivial)
+    | none =>
+        pure <| Std.Shrink.deflate <| PlausibleIterStep.done (by trivial)
+
+instance : IteratorLoop TPUDataLoader IO IO :=
+  IteratorLoop.defaultImplementation
+
+instance : IteratorCollect TPUDataLoader IO IO :=
+  IteratorCollect.defaultImplementation
+
+instance : ToIterator TPUDataLoader IO TPUDataLoader TPUBuffer :=
+  ToIterator.ofM TPUDataLoader (fun loader => ⟨loader⟩)
 
 instance : Iterator GPUDataLoader IO GPUBuffer where
   IsPlausibleStep _ _ := True

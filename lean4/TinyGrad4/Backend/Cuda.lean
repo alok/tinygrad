@@ -72,6 +72,14 @@ opaque cudaSync : IO Unit
 @[extern "tg4_cuda_device_name"]
 opaque cudaDeviceName : IO String
 
+/-- Get CUDA device count -/
+@[extern "tg4_cuda_device_count"]
+opaque cudaDeviceCount : IO Nat
+
+/-- Set CUDA device for the current thread -/
+@[extern "tg4_cuda_set_device"]
+opaque cudaSetDevice : @& Nat → IO Unit
+
 /-! ## Synchronous GPU Matmul -/
 
 /-- Execute matmul on GPU: C[m,n] = A[m,k] @ B[k,n]
@@ -111,14 +119,34 @@ def cudaRenderer : Renderer where
 /-- Check if CUDA is available -/
 def isAvailable : IO Bool := do
   try
-    let _ ← cudaDeviceName
-    return true
+    let n ← cudaDeviceCount
+    return decide (n > 0)
   catch _ =>
     return false
+
+/-- Get CUDA device count (0 if unavailable). -/
+def deviceCount : IO Nat := do
+  try
+    cudaDeviceCount
+  catch _ =>
+    return 0
+
+/-- Set CUDA device for this thread. -/
+def setDevice (idx : Nat) : IO Unit := do
+  cudaSetDevice idx
 
 /-- Get GPU device info -/
 def deviceInfo : IO String := do
   let name ← cudaDeviceName
   return s!"CUDA Device: {name}"
+
+/-- Get GPU device info for a specific device index. -/
+def deviceInfoFor (idx : Nat) : IO String := do
+  try
+    cudaSetDevice idx
+    let name ← cudaDeviceName
+    return s!"CUDA Device: {name}"
+  catch _ =>
+    deviceInfo
 
 end TinyGrad4.Backend.Cuda

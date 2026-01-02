@@ -181,7 +181,7 @@ structure CheckpointConfig where
   resumeIfExists : Bool := true
 
 /-- Run training with automatic checkpointing -/
-def withCheckpointing [Dataset D T] (config : CheckpointConfig) (ds : D)
+def withCheckpointingCfg [Dataset D T] (config : CheckpointConfig) (iterCfg : IteratorConfig D)
     (trainStep : T → Nat → IO Unit) : IO Unit := do
   -- Create checkpoint directory
   IO.FS.createDirAll config.checkpointDir
@@ -189,39 +189,35 @@ def withCheckpointing [Dataset D T] (config : CheckpointConfig) (ds : D)
   let manager ← CheckpointManager.new config.checkpointDir config.saveInterval
 
   -- Try to resume from checkpoint
-  let mut startPos := 0
-  let mut startEpoch := 0
-  let mut key := RandKey.new 42
+  let mut cfg := iterCfg
 
   if config.resumeIfExists then
     if let some state ← manager.loadLatest then
       IO.println s!"Resuming from checkpoint: pos={state.position}, epoch={state.epoch}"
-      startPos := state.position
-      startEpoch := state.epoch
-      key := state.key
+      cfg := {
+        cfg with
+        startPos := state.position
+        startEpoch := state.epoch
+        key := state.key
+      }
 
   -- Training loop
-  let n := Dataset.len ds
+  let iter ← Dataset.toIteratorCfg cfg
   let mut iteration := 0
-
-  for epoch in [startEpoch:startEpoch + 10] do  -- Example: 10 epochs
-    for i in [startPos:n] do
-      if h : i < n then
-        let item ← Dataset.getItem ds i h
+  repeat do
+    match ← iter.next with
+    | none => break
+    | some item =>
         trainStep item iteration
-
-        -- Checkpoint
-        let state : IteratorState := {
-          position := i + 1
-          epoch := epoch
-          key := key
-        }
-        manager.step state
-
+        manager.step (← iter.checkpoint)
         iteration := iteration + 1
 
-    -- Reset position for next epoch
-    startPos := 0
-    key := key.fold epoch.toUInt64  -- New key for each epoch
+/-- Run training with automatic checkpointing (default iterator config). -/
+def withCheckpointing [Dataset D T] (config : CheckpointConfig) (ds : D)
+    (trainStep : T → Nat → IO Unit) : IO Unit := do
+  withCheckpointingCfg config {
+    base := ds,
+    epochs := 10
+  } trainStep
 
 end TinyGrad4.Data

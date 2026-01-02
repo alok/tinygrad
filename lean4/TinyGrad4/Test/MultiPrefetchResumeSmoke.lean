@@ -80,8 +80,9 @@ def runAll : IO Unit := do
 
   let key := RandKey.new 42
   let cfg := buildCfg 257 2 key
-  let iter ← Dataset.toIteratorCfg cfg
-  let baseline ← DataIterator.toArray iter
+  let baselinePrefetcher ← MultiIteratorPrefetcher.createFromIteratorCfg cfg 3 4 .interleaved false
+  let baseline ← baselinePrefetcher.toArray
+  baselinePrefetcher.cancel
   assert (baseline.size == 257 * 2) "Baseline size mismatch"
 
   let splits := #[0, 1, 3, 17, 63, 128, 255, 256, 257, 300, baseline.size]

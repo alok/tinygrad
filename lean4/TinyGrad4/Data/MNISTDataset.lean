@@ -4,6 +4,9 @@ import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Shard
 import TinyGrad4.Data.MNIST
 
+-- Disable IO.monoNanosNow linter: dataset benchmarks use raw monotonic timing.
+set_option linter.monoNanosNow false
+
 /-!
 # MNIST Dataset - grain-style Wrapper
 

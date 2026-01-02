@@ -1,6 +1,9 @@
 import TinyGrad4.DType
 import TinyGrad4.Data.ArrayN
 
+-- Disable IO.monoNanosNow linter: benchmark helpers use raw monotonic timing.
+set_option linter.monoNanosNow false
+
 /-!
 # Dataset - Core Data Loading Abstractions
 

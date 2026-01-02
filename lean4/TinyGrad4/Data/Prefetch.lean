@@ -1,5 +1,8 @@
 import TinyGrad4.Data.Dataset
 
+-- Disable IO.monoNanosNow linter: prefetch wait attribution uses raw monotonic timestamps.
+set_option linter.monoNanosNow false
+
 /-!
 # Prefetch - Asynchronous Data Loading
 

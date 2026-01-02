@@ -1,4 +1,5 @@
 import TinyGrad4.Tensor.Tensor
+import TinyGrad4.UOp.Typed
 import TinyGrad4.Tensor.Movement
 
 set_option maxHeartbeats 800000
@@ -7,85 +8,93 @@ namespace TinyGrad4
 
 namespace StaticTensor
 
+private def ofTU {op : Ops} {s : Shape} {r : Nat} {d : DType} (t : TUOp op s r d) (reqGrad : Bool) :
+    StaticTensor s d :=
+  StaticTensor.ofTUOp t reqGrad
+
+private def ofTUCast {op : Ops} {s : Shape} {r : Nat} {d : DType} (t : TUOp op s r d) (s' : Shape)
+    (reqGrad : Bool) : StaticTensor s' d :=
+  StaticTensor.ofTUOp (TUOp.castShape t s') reqGrad
+
 def add {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.add t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.add t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def addB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.add t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.add t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def mul {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.mul t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.mul t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def mulB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.mul t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.mul t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def sub {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.sub t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.sub t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def subB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.sub t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.sub t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def div {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.div t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.div t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def divB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.div t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.div t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def pow {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.pow t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .POW t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def powB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.pow t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .POW t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cmplt {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.cmplt t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmplt t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def cmpltB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.cmplt t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmplt t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cmpgt {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s .bool) := do
   cmplt t2 t1
 
 def cmpgtB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.cmplt t2.uop t1.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmplt t2.tuop t1.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cmpeq {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.cmpeq t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmpeq t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def cmpeqB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.cmpeq t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmpeq t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cmpne {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.cmpne t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmpne t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def cmpneB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.cmpne t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmpne t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cat {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     (axis : Nat) : TensorM (StaticTensor (Shape.concatOut s1 s2 axis) d) := do
@@ -99,41 +108,41 @@ def catList {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis :
   pure { uop := out, requiresGrad := reqGrad, h_shape := sorry_proof }
 
 def bitand {s : List Nat} (t1 t2 : StaticTensor s .bool) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.bitand t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .AND t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def bitandB {s1 s2 : List Nat} (t1 : StaticTensor s1 .bool) (t2 : StaticTensor s2 .bool)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.bitand t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .AND t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def bitor {s : List Nat} (t1 t2 : StaticTensor s .bool) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.bitor t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .OR t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def bitorB {s1 s2 : List Nat} (t1 : StaticTensor s1 .bool) (t2 : StaticTensor s2 .bool)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.bitor t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .OR t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def bitxor {s : List Nat} (t1 t2 : StaticTensor s .bool) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.bitxor t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .XOR t1.tuop t2.tuop
+  pure (ofTU result (t1.requiresGrad || t2.requiresGrad))
 
 def bitxorB {s1 s2 : List Nat} (t1 : StaticTensor s1 .bool) (t2 : StaticTensor s2 .bool)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.bitxor t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .XOR t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cast {s : List Nat} {d : DType} (t : StaticTensor s d) (dtype : DType)
     : TensorM (StaticTensor s dtype) := do
-  let result ← UOp.cast t.uop dtype
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cast t.tuop dtype
+  pure (ofTU result t.requiresGrad)
 
 def bitcast {s : List Nat} {d : DType} (t : StaticTensor s d) (dtype : DType)
     : TensorM (StaticTensor s dtype) := do
-  let result ← UOp.bitcast t.uop dtype
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.bitcast t.tuop dtype
+  pure (ofTU result t.requiresGrad)
 
 def to {s : List Nat} {d : DType} (t : StaticTensor s d) (dtype : DType)
     : TensorM (StaticTensor s dtype) :=
@@ -146,8 +155,8 @@ def to_ {s : List Nat} {d : DType} (t : StaticTensor s d) (dtype : DType)
 def where_ {s1 s2 s3 : List Nat} {d : DType}
     (cond : StaticTensor s1 .bool) (x : StaticTensor s2 d) (y : StaticTensor s3 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 (Shape.broadcastOut s2 s3)) d) := do
-  let out ← UOp.where_ cond.uop x.uop y.uop
-  pure { uop := out, requiresGrad := x.requiresGrad || y.requiresGrad, h_shape := sorry_proof }
+  let out ← TUOp.where_ cond.tuop x.tuop y.tuop
+  pure (ofTUCast out (Shape.broadcastOut s1 (Shape.broadcastOut s2 s3)) (x.requiresGrad || y.requiresGrad))
 
 infixl:65 " +. " => addB
 infixl:65 " -. " => subB
@@ -155,65 +164,65 @@ infixl:70 " *. " => mulB
 infixl:70 " /. " => divB
 
 def neg {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.neg t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.neg t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def trunc {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.trunc t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .TRUNC t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def floor {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let truncT ← trunc t
-  let isNeg ← UOp.cmplt t.uop truncT.uop
-  let one ← UOp.const d 1.0
-  let truncMinusOne ← UOp.sub truncT.uop one
-  let out ← UOp.where_ isNeg truncMinusOne truncT.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let isNeg ← TUOp.cmplt t.tuop truncT.tuop
+  let one ← TUOp.const d 1.0
+  let truncMinusOne ← TUOp.sub truncT.tuop one
+  let out ← TUOp.where_ isNeg truncMinusOne truncT.tuop
+  pure (ofTU out t.requiresGrad)
 
 def ceil {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let truncT ← trunc t
-  let isPos ← UOp.cmplt truncT.uop t.uop
-  let one ← UOp.const d 1.0
-  let truncPlusOne ← UOp.add truncT.uop one
-  let out ← UOp.where_ isPos truncPlusOne truncT.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let isPos ← TUOp.cmplt truncT.tuop t.tuop
+  let one ← TUOp.const d 1.0
+  let truncPlusOne ← TUOp.add truncT.tuop one
+  let out ← TUOp.where_ isPos truncPlusOne truncT.tuop
+  pure (ofTU out t.requiresGrad)
 
 def sqrt {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.sqrt t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .SQRT t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def rsqrt {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let sqrtT ← sqrt t
-  let result ← UOp.recip sqrtT.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .RECIPROCAL sqrtT.tuop
+  pure (ofTU result t.requiresGrad)
 
 def exp2 {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.exp2 t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .EXP2 t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def log2 {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.log2 t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .LOG2 t.tuop
+  pure (ofTU result t.requiresGrad)
 
 /-- Sine function -/
 def sin {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.sin t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .SIN t.tuop
+  pure (ofTU result t.requiresGrad)
 
 /-- Cosine function -/
 def cos {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.cos t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .COS t.tuop
+  pure (ofTU result t.requiresGrad)
 
 /-- Tangent function -/
 def tan {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.tan t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .TAN t.tuop
+  pure (ofTU result t.requiresGrad)
 
 /-- Reciprocal (1/x) -/
 def recip {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.recip t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .RECIPROCAL t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def sum {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (Scalar d) := do
   let axes := listRange s.length

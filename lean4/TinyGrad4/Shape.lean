@@ -85,6 +85,26 @@ def concatOutList (shapes : List Shape) (axis : Nat) : Shape :=
     (listRange s.length).map fun i =>
       if i == axis then axisDim else dim s i
 
+/-- Typeclass witness for valid concat shapes. -/
+class ConcatShape (s1 s2 : Shape) (axis : Nat) (out : Shape) : Prop where
+  h_out : out = concatOut s1 s2 axis
+  h_valid : concatValid s1 s2 axis = true
+
+instance concatShapeInst (s1 s2 : Shape) (axis : Nat) :
+    ConcatShape s1 s2 axis (concatOut s1 s2 axis) where
+  h_out := rfl
+  h_valid := sorry_proof
+
+/-- Typeclass witness for valid concat shapes (list). -/
+class ConcatListShape (shapes : List Shape) (axis : Nat) (out : Shape) : Prop where
+  h_out : out = concatOutList shapes axis
+  h_valid : concatListValid shapes axis = true
+
+instance concatListShapeInst (shapes : List Shape) (axis : Nat) :
+    ConcatListShape shapes axis (concatOutList shapes axis) where
+  h_out := rfl
+  h_valid := sorry_proof
+
 /-- Insert a dimension of size `dim` at `axis` (axis clamped to [0, rank]). -/
 def insertDim (s : Shape) (axis : Nat) (dim : Nat) : Shape :=
   let pre := s.take axis

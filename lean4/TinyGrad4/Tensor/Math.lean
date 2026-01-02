@@ -98,7 +98,7 @@ def cmpneB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticT
 
 def cat {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     (axis : Nat) : TensorM (StaticTensor (Shape.concatOut s1 s2 axis) d) := do
-  let out ← TUOp.cat t1.tuop t2.tuop axis
+  let out ← TUOp.cat (axis := axis) t1.tuop t2.tuop
   pure (ofTU out (t1.requiresGrad || t2.requiresGrad))
 
 def catList {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)

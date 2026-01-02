@@ -1,3 +1,4 @@
+import Std
 import TinyGrad4.Backend.Device
 
 /-!
@@ -116,20 +117,45 @@ def cudaRenderer : Renderer where
 
 /-! ## High-Level API -/
 
+/-- Fallback device count for environments without CUDA FFI. -/
+private def fallbackDeviceCount : IO Nat := do
+  let env ← IO.getEnv "CUDA_VISIBLE_DEVICES"
+  match env with
+  | some raw =>
+      let s := raw.trimAscii.toString
+      if s.isEmpty || s == "none" || s == "void" || s == "NoDevFiles" || s == "-1" then
+        pure 0
+      else
+        let parts := s.splitOn "," |>.filter (fun p => !(p.trimAscii.toString.isEmpty))
+        pure parts.length
+  | none =>
+      let mut count := 0
+      try
+        for entry in (← (System.FilePath.mk "/dev").readDir) do
+          let name : String := entry.fileName
+          if name.startsWith "nvidia" then
+            let suffix : String := (name.drop 6).toString
+            if !suffix.isEmpty && suffix.all Char.isDigit then
+              count := count + 1
+        pure count
+      catch _ =>
+        pure 0
+
 /-- Check if CUDA is available -/
 def isAvailable : IO Bool := do
   try
     let n ← cudaDeviceCount
     return decide (n > 0)
   catch _ =>
-    return false
+    let n ← fallbackDeviceCount
+    return decide (n > 0)
 
 /-- Get CUDA device count (0 if unavailable). -/
 def deviceCount : IO Nat := do
   try
     cudaDeviceCount
   catch _ =>
-    return 0
+    fallbackDeviceCount
 
 /-- Set CUDA device for this thread. -/
 def setDevice (idx : Nat) : IO Unit := do

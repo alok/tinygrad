@@ -19,6 +19,8 @@ Disable it locally with:
 set_option linter.monoNanosNow false in
 def f := IO.monoNanosNow  -- justified here
 ```
+
+The linter auto-skips benchmark/test files based on file path patterns.
 -/
 
 namespace TinyGrad4.Linter
@@ -34,6 +36,15 @@ register_option linter.monoNanosNow : Bool := {
 /-- Check if the linter is enabled -/
 def monoNanosNowLinterEnabled : CommandElabM Bool := do
   return linter.monoNanosNow.get (← getOptions)
+
+private def isBenchOrTestFile (fileName : String) : Bool :=
+  fileName.contains "/Test/" ||
+  fileName.contains "/Benchmark/" ||
+  fileName.contains "/Bench/" ||
+  fileName.contains "TinyGrad4Bench" ||
+  fileName.contains "LeanBench" ||
+  fileName.endsWith "Bench.lean" ||
+  fileName.endsWith "Benchmark.lean"
 
 private def isMonoNanosNowIdent (stx : Syntax) : Bool :=
   match stx with
@@ -69,6 +80,8 @@ def monoNanosNowWarning : MessageData :=
 /-- The IO.monoNanosNow linter run function. -/
 def monoNanosNowLinterRun (stx : Syntax) : CommandElabM Unit := do
   unless ← monoNanosNowLinterEnabled do return
+  if isBenchOrTestFile (← getFileName) then
+    return
   let idents := findMonoNanosNowIdents stx
   for ident in idents do
     logWarningAt ident monoNanosNowWarning

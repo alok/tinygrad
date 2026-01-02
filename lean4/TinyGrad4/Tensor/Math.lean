@@ -98,16 +98,14 @@ def cmpneB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticT
 
 def cat {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     (axis : Nat) : TensorM (StaticTensor (Shape.concatOut s1 s2 axis) d) := do
-  let out ← UOp.cat [t1.uop, t2.uop] axis
-  let outTU := TUOp.castShape (TUOp.ofRaw out) (Shape.concatOut s1 s2 axis)
-  pure (ofTU outTU (t1.requiresGrad || t2.requiresGrad))
+  let out ← TUOp.cat t1.tuop t2.tuop axis
+  pure (ofTU out (t1.requiresGrad || t2.requiresGrad))
 
 def catList {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
     : TensorM (StaticTensor (Shape.concatOutList shapes axis) d) := do
-  let out ← UOp.cat (TensorList.toUOps ts) axis
-  let outTU := TUOp.castShape (TUOp.ofRaw out) (Shape.concatOutList shapes axis)
+  let out ← TUOp.catList (d := d) (TensorList.toUOps ts) (Shape.concatOutList shapes axis) axis
   let reqGrad := TensorList.anyRequiresGrad ts
-  pure (ofTU outTU reqGrad)
+  pure (ofTU out reqGrad)
 
 def bitand {s : List Nat} (t1 t2 : StaticTensor s .bool) : TensorM (StaticTensor s .bool) := do
   let result ← TUOp.binaryOp .AND t1.tuop t2.tuop
@@ -519,8 +517,8 @@ private def classRangeF32 (n : Nat) : Array Float32 := Id.run do
 def oneHotF32 {batch numClasses : Nat}
     (targets : StaticTensor [batch] .float32)
     : TensorM (StaticTensor [batch, numClasses] .float32) := do
-  let classUop ← UOp.vconstF32 (classRangeF32 numClasses)
-  let classesTU := TUOp.castShape (TUOp.ofRaw classUop) [numClasses]
+  let classUop ← TUOp.vconstF32 (classRangeF32 numClasses)
+  let classesTU := TUOp.castShape classUop [numClasses]
   let classes : StaticTensor [numClasses] .float32 := ofTU classesTU false
   let targets2 ← reshape targets [batch, 1]
   let classes2 ← reshape classes [1, numClasses]
@@ -612,8 +610,8 @@ private def argmaxF32 {batch n : Nat} (t : StaticTensor [batch, n] .float32)
   let eq ← TUOp.cmpeq t.tuop maxVal
   let eqT : StaticTensor [batch, n] .bool := ofTUCast eq [batch, n] false
   let eqF ← cast eqT .float32
-  let classesUop ← UOp.vconstF32 (classRangeF32 n)
-  let classesTU := TUOp.castShape (TUOp.ofRaw classesUop) [n]
+  let classesUop ← TUOp.vconstF32 (classRangeF32 n)
+  let classesTU := TUOp.castShape classesUop [n]
   let classes : StaticTensor [n] .float32 := ofTU classesTU false
   let classes2 ← reshape classes [1, n]
   let classesB ← expand classes2 [batch, n]

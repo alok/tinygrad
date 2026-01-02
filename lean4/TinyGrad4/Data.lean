@@ -14,6 +14,7 @@ import TinyGrad4.Data.Prefetch
 import TinyGrad4.Data.Shard
 import TinyGrad4.Data.Checkpoint
 import TinyGrad4.Data.Profile
+import TinyGrad4.Data.Timing
 
 -- Datasets
 import TinyGrad4.Data.MNIST

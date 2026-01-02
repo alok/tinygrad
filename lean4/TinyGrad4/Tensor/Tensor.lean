@@ -148,10 +148,11 @@ def arange (n : Nat) (dtype : DType := .float32) : TensorM (StaticTensor [n] dty
     return out
   let base ← fromArrayF32 [n] vals
   if dtype == .float32 then
-    pure { uop := base.uop, requiresGrad := false, h_shape := sorry_proof }
+    let baseTU := TUOp.castDType base.tuop dtype
+    pure (StaticTensor.ofTUOp baseTU)
   else
-    let casted ← UOp.cast base.uop dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    let casted ← TUOp.cast base.tuop dtype
+    pure (StaticTensor.ofTUOp casted)
 
 def linspace (start stop : Float32) (steps : Nat) (dtype : DType := .float32)
     : TensorM (StaticTensor [steps] dtype) := do
@@ -168,51 +169,55 @@ def linspace (start stop : Float32) (steps : Nat) (dtype : DType := .float32)
     return out
   let base ← fromArrayF32 [steps] vals
   if dtype == .float32 then
-    pure { uop := base.uop, requiresGrad := false, h_shape := sorry_proof }
+    let baseTU := TUOp.castDType base.tuop dtype
+    pure (StaticTensor.ofTUOp baseTU)
   else
-    let casted ← UOp.cast base.uop dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    let casted ← TUOp.cast base.tuop dtype
+    pure (StaticTensor.ofTUOp casted)
 
 def rand (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0)
     : TensorM (StaticTensor shape dtype) := do
   let numel := listProd shape
   let vals := randArray numel seed
   let base ← fromArrayF32 [numel] vals
-  let reshaped ← UOp.reshape base.uop shape
+  let reshaped ← TUOp.reshape base.tuop shape
   if dtype == .float32 then
-    pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+    let reshaped := TUOp.castDType reshaped dtype
+    pure (StaticTensor.ofTUOp reshaped)
   else
-    let casted ← UOp.cast reshaped dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    let casted ← TUOp.cast reshaped dtype
+    pure (StaticTensor.ofTUOp casted)
 
 def randn (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0)
     : TensorM (StaticTensor shape dtype) := do
   let numel := listProd shape
   let vals := randnArray numel seed
   let base ← fromArrayF32 [numel] vals
-  let reshaped ← UOp.reshape base.uop shape
+  let reshaped ← TUOp.reshape base.tuop shape
   if dtype == .float32 then
-    pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+    let reshaped := TUOp.castDType reshaped dtype
+    pure (StaticTensor.ofTUOp reshaped)
   else
-    let casted ← UOp.cast reshaped dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    let casted ← TUOp.cast reshaped dtype
+    pure (StaticTensor.ofTUOp casted)
 
 def randint (shape : Shape) (low high : Int) (dtype : DType := .int32) (seed : Nat := 0)
     : TensorM (StaticTensor shape dtype) := do
   let numel := listProd shape
   let vals := randintArray numel seed low high
   let base ← fromArrayF32 [numel] vals
-  let reshaped ← UOp.reshape base.uop shape
+  let reshaped ← TUOp.reshape base.tuop shape
   if dtype == .float32 then
-    pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+    let reshaped := TUOp.castDType reshaped dtype
+    pure (StaticTensor.ofTUOp reshaped)
   else
-    let casted ← UOp.cast reshaped dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    let casted ← TUOp.cast reshaped dtype
+    pure (StaticTensor.ofTUOp casted)
 
 def buffer (shape : List Nat) (dtype : DType := .float32) (device : String := "CPU")
     : TensorM (StaticTensor shape dtype) := do
-  let buf ← UOp.buffer dtype shape device
-  pure { uop := buf, requiresGrad := false, h_shape := sorry_proof }
+  let buf ← TUOp.buffer dtype shape device
+  pure (StaticTensor.ofTUOp buf)
 
 /-- Set a max size for the UOp interning table (0 disables). -/
 def setInternLimit (limit : Nat) : TensorM Unit :=
@@ -232,10 +237,11 @@ def fullLike {s : List Nat} {d : DType} (_t : StaticTensor s d) (value : Float32
     : TensorM (StaticTensor s d) := do
   let base ← full s .float32 value
   if d == .float32 then
-    pure { uop := base.uop, requiresGrad := false, h_shape := sorry_proof }
+    let baseTU := TUOp.castDType base.tuop d
+    pure (StaticTensor.ofTUOp baseTU)
   else
-    let casted ← UOp.cast base.uop d
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    let casted ← TUOp.cast base.tuop d
+    pure (StaticTensor.ofTUOp casted)
 
 def randLike {s : List Nat} {d : DType} (_t : StaticTensor s d) (seed : Nat := 0)
     : TensorM (StaticTensor s d) :=

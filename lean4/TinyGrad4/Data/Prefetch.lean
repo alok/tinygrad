@@ -236,6 +236,14 @@ def next (p : IteratorPrefetcher T) : IO (Option T) := do
       pure (some item.item)
   | none => pure none
 
+/-- Try to get the next prefetched item without blocking. -/
+def tryNext (p : IteratorPrefetcher T) : IO (Option T) := do
+  match ← p.queue.tryPop with
+  | some item =>
+      p.lastState.set item.state
+      pure (some item.item)
+  | none => pure none
+
 /-- Get next item and time spent waiting for it (ns). -/
 def nextWithWait (p : IteratorPrefetcher T) : IO (Option T × Nat) := do
   let (item?, waitNs) ← p.queue.popWithWait
@@ -436,13 +444,37 @@ end BatchPrefetcher
 structure MultiIteratorState where
   nextWorker : Nat
   workerStates : Array IteratorState
+  produced : Array Nat := #[]
   deriving Repr, Inhabited
+
+namespace MultiIteratorPrefetcher
+
+structure BestEffortConfig where
+  maxSkipsPerRound : Nat := 4
+  maxLead : Nat := 16
+  deriving Repr, Inhabited
+
+inductive OrderingPolicy where
+  | strict
+  | bestEffort (cfg : BestEffortConfig)
+  deriving Repr, Inhabited
+
+namespace OrderingPolicy
+
+def bestEffortCfg (maxSkipsPerRound : Nat := 4) (maxLead : Nat := 16) : OrderingPolicy :=
+  .bestEffort { maxSkipsPerRound, maxLead }
+
+end OrderingPolicy
+
+end MultiIteratorPrefetcher
 
 /-- Multi-worker prefetcher that deterministically interleaves shard iterators. -/
 structure MultiIteratorPrefetcher (T : Type) where
   workers : Array (IteratorPrefetcher T)
   nextWorker : IO.Ref Nat
   done : IO.Ref (Array Bool)
+  produced : IO.Ref (Array Nat)
+  policy : MultiIteratorPrefetcher.OrderingPolicy
   totalItems : Nat
 
 namespace MultiIteratorPrefetcher
@@ -493,10 +525,16 @@ def workerConfig [Dataset D T] (cfg : IteratorConfig D) (numWorkers workerIdx : 
   let scfg : ShardConfig := { shardIndex := workerIdx, numShards := numWorkers, mode, dropRemainder }
   shardIteratorCfg cfg scfg n
 
+private def normalizeProduced (produced : Array Nat) (n : Nat) : Array Nat := Id.run do
+  let mut out := Array.mkEmpty n
+  for i in [:n] do
+    out := out.push (produced.getD i 0)
+  out
+
 /-- Create a multi-worker prefetcher from a config and explicit state. -/
 def createFromIteratorCfgState [Dataset D T] (cfg : IteratorConfig D) (numWorkers : Nat)
     (state : MultiIteratorState) (bufferSize : Nat := 8) (mode : ShardMode := .interleaved)
-    (dropRemainder : Bool := true) : IO (MultiIteratorPrefetcher T) := do
+    (dropRemainder : Bool := true) (policy : OrderingPolicy := .strict) : IO (MultiIteratorPrefetcher T) := do
   if numWorkers == 0 then
     throw (IO.userError "MultiIteratorPrefetcher: numWorkers must be > 0")
   let n := Dataset.len cfg.base
@@ -513,11 +551,13 @@ def createFromIteratorCfgState [Dataset D T] (cfg : IteratorConfig D) (numWorker
     workers := workers.push pref
   let nextWorker ← IO.mkRef (state.nextWorker % numWorkers)
   let done ← IO.mkRef doneFlags
-  pure { workers, nextWorker, done, totalItems }
+  let producedInit := normalizeProduced state.produced numWorkers
+  let produced ← IO.mkRef producedInit
+  pure { workers, nextWorker, done, produced, policy, totalItems }
 
 /-- Create a multi-worker prefetcher from a config. -/
 def createFromIteratorCfg [Dataset D T] (cfg : IteratorConfig D) (numWorkers : Nat) (bufferSize : Nat := 8)
-    (mode : ShardMode := .interleaved) (dropRemainder : Bool := true) :
+    (mode : ShardMode := .interleaved) (dropRemainder : Bool := true) (policy : OrderingPolicy := .strict) :
     IO (MultiIteratorPrefetcher T) := do
   if numWorkers == 0 then
     throw (IO.userError "MultiIteratorPrefetcher: numWorkers must be > 0")
@@ -528,13 +568,24 @@ def createFromIteratorCfg [Dataset D T] (cfg : IteratorConfig D) (numWorkers : N
     let cfg' := shardIteratorCfg cfg scfg n
     initStates := initStates.push (defaultStateFromCfg cfg')
   createFromIteratorCfgState cfg numWorkers { nextWorker := 0, workerStates := initStates }
-    bufferSize mode dropRemainder
+    bufferSize mode dropRemainder policy
 
 private def advanceIndex (idx count : Nat) : Nat :=
   if count == 0 then 0 else (idx + 1) % count
 
-/-- Get next item with wait time. -/
-partial def nextWithWait (p : MultiIteratorPrefetcher T) : IO (Option T × Nat) := do
+private def minProduced (produced : Array Nat) (doneFlags : Array Bool) : Nat := Id.run do
+  let mut minVal : Option Nat := none
+  let n := produced.size
+  for i in [:n] do
+    if !doneFlags.getD i true then
+      let v := produced[i]!
+      minVal := match minVal with
+        | none => some v
+        | some m => some (Nat.min m v)
+  minVal.getD 0
+
+/-- Strict round-robin next. -/
+private def nextWithWaitStrict (p : MultiIteratorPrefetcher T) : IO (Option T × Nat) := do
   let n := p.workers.size
   if n == 0 then
     return (none, 0)
@@ -542,6 +593,7 @@ partial def nextWithWait (p : MultiIteratorPrefetcher T) : IO (Option T × Nat) 
   let mut tried := 0
   let mut waitTotal := 0
   let mut doneFlags ← p.done.get
+  let mut produced ← p.produced.get
   while tried < n do
     if doneFlags[idx]! then
       idx := advanceIndex idx n
@@ -553,6 +605,8 @@ partial def nextWithWait (p : MultiIteratorPrefetcher T) : IO (Option T × Nat) 
         waitTotal := waitTotal + waitNs
         match item? with
         | some item =>
+            produced := produced.set! idx (produced.getD idx 0 + 1)
+            p.produced.set produced
             p.nextWorker.set (advanceIndex idx n)
             return (some item, waitTotal)
         | none =>
@@ -564,7 +618,94 @@ partial def nextWithWait (p : MultiIteratorPrefetcher T) : IO (Option T × Nat) 
         idx := advanceIndex idx n
         tried := tried + 1
   p.nextWorker.set idx
+  p.produced.set produced
   pure (none, waitTotal)
+
+/-- Best-effort next with bounded skipping and lead control. -/
+private def nextWithWaitBestEffort (p : MultiIteratorPrefetcher T) (cfg : BestEffortConfig) :
+    IO (Option T × Nat) := do
+  let n := p.workers.size
+  if n == 0 then
+    return (none, 0)
+  let mut idx := (← p.nextWorker.get) % n
+  let mut doneFlags ← p.done.get
+  let mut produced ← p.produced.get
+  let mut waitTotal := 0
+  let mut scanned := 0
+  let mut skipped := 0
+  let minProd := minProduced produced doneFlags
+  let maxLead := cfg.maxLead
+
+  -- Phase 1: non-blocking scan.
+  while scanned < n && skipped <= cfg.maxSkipsPerRound do
+    if doneFlags[idx]! then
+      idx := advanceIndex idx n
+      scanned := scanned + 1
+    else if produced.getD idx 0 >= minProd + maxLead && maxLead > 0 then
+      idx := advanceIndex idx n
+      scanned := scanned + 1
+      skipped := skipped + 1
+    else
+      if hIdx : idx < n then
+        let w := p.workers[idx]'hIdx
+        let item? ← w.tryNext
+        match item? with
+        | some item =>
+            produced := produced.set! idx (produced.getD idx 0 + 1)
+            p.produced.set produced
+            p.nextWorker.set (advanceIndex idx n)
+            return (some item, waitTotal)
+        | none =>
+            if ← w.isDone then
+              doneFlags := doneFlags.set! idx true
+              p.done.set doneFlags
+            idx := advanceIndex idx n
+            scanned := scanned + 1
+            skipped := skipped + 1
+      else
+        idx := advanceIndex idx n
+        scanned := scanned + 1
+        skipped := skipped + 1
+
+  -- Phase 2: block on the next eligible worker.
+  let mut attempts := 0
+  let minProd2 := minProduced produced doneFlags
+  while attempts < n do
+    if doneFlags[idx]! then
+      idx := advanceIndex idx n
+      attempts := attempts + 1
+    else if produced.getD idx 0 >= minProd2 + maxLead && maxLead > 0 then
+      idx := advanceIndex idx n
+      attempts := attempts + 1
+    else
+      if hIdx : idx < n then
+        let w := p.workers[idx]'hIdx
+        let (item?, waitNs) ← w.nextWithWait
+        waitTotal := waitTotal + waitNs
+        match item? with
+        | some item =>
+            produced := produced.set! idx (produced.getD idx 0 + 1)
+            p.produced.set produced
+            p.nextWorker.set (advanceIndex idx n)
+            return (some item, waitTotal)
+        | none =>
+            doneFlags := doneFlags.set! idx true
+            p.done.set doneFlags
+            idx := advanceIndex idx n
+            attempts := attempts + 1
+      else
+        idx := advanceIndex idx n
+        attempts := attempts + 1
+
+  p.nextWorker.set idx
+  p.produced.set produced
+  pure (none, waitTotal)
+
+/-- Get next item with wait time. -/
+partial def nextWithWait (p : MultiIteratorPrefetcher T) : IO (Option T × Nat) := do
+  match p.policy with
+  | .strict => nextWithWaitStrict p
+  | .bestEffort cfg => nextWithWaitBestEffort p cfg
 
 /-- Get next item (blocks in round-robin order). -/
 def next (p : MultiIteratorPrefetcher T) : IO (Option T) := do
@@ -577,7 +718,8 @@ def checkpoint (p : MultiIteratorPrefetcher T) : IO MultiIteratorState := do
   let mut states := Array.mkEmpty p.workers.size
   for w in p.workers do
     states := states.push (← w.checkpoint)
-  pure { nextWorker, workerStates := states }
+  let produced ← p.produced.get
+  pure { nextWorker, workerStates := states, produced := produced }
 
 /-- Cancel all workers. -/
 def cancel (p : MultiIteratorPrefetcher T) : IO Unit := do

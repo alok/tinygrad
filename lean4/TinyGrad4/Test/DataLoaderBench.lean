@@ -55,6 +55,41 @@ def main : IO Unit := do
   let rateMulti := if secondsMulti == 0.0 then 0.0 else countMulti.toFloat / secondsMulti
   IO.println s!"Multi-prefetch throughput: workers={workers} rate={rateMulti} items/s"
 
+  -- 3c) Multi-worker prefetch resume benchmark (strict round-robin)
+  let interruptAtRaw :=
+    match (← IO.getEnv "TG4_MULTI_PREFETCH_INTERRUPT") with
+    | some v => v.trimAscii.toString.toNat?.getD 1024
+    | none => 1024
+  let policy := TinyGrad4.Data.MultiIteratorPrefetcher.OrderingPolicy.strict
+  let prefetcherResume ← iterDs.toMultiPrefetcher workers 8 .interleaved true policy
+  let totalResume := prefetcherResume.totalItems
+  let interruptAt := min interruptAtRaw totalResume
+  let mut seen := 0
+  for _ in [:interruptAt] do
+    match ← prefetcherResume.next with
+    | some _ => seen := seen + 1
+    | none => break
+  let ckptStart ← IO.monoNanosNow
+  let state ← prefetcherResume.checkpoint
+  let ckptStop ← IO.monoNanosNow
+  prefetcherResume.cancel
+  let resumeStart ← IO.monoNanosNow
+  let prefetcherResume2 ← iterDs.toMultiPrefetcherFrom state workers 8 .interleaved true policy
+  let mut remainder := 0
+  repeat do
+    match ← prefetcherResume2.next with
+    | some _ => remainder := remainder + 1
+    | none => break
+  let resumeStop ← IO.monoNanosNow
+  prefetcherResume2.cancel
+  if seen + remainder != totalResume then
+    throw (IO.userError s!"Multi-prefetch resume mismatch: total={totalResume} seen={seen} remainder={remainder}")
+  let ckptMs := (ckptStop - ckptStart).toFloat / 1e6
+  let resumeSeconds := (resumeStop - resumeStart).toFloat / 1e9
+  let resumeRate := if resumeSeconds == 0.0 then 0.0 else remainder.toFloat / resumeSeconds
+  IO.println s!"Multi-prefetch resume: workers={workers} interruptAt={interruptAt} total={totalResume} " ++
+    s!"ckptMs={ckptMs} resumeRate={resumeRate} items/s policy=strict"
+
   -- 4) Stagewise profiling: iterator/prefetch/transfer/compute
   IO.println ""
   IO.println "=== Stagewise Profiling (iterator/prefetch/transfer/compute) ==="

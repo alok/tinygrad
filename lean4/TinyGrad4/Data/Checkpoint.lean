@@ -105,7 +105,7 @@ def deserializeIteratorState (bytes : ByteArray) : Option IteratorState := do
 def multiCheckpointMagic : UInt64 := 0x5447344D4B505400  -- "TG4MKPT\0"
 
 /-- Multi-iterator checkpoint format version. -/
-def multiCheckpointVersion : UInt64 := 1
+def multiCheckpointVersion : UInt64 := 2
 
 /-- Serialize MultiIteratorState to bytes. -/
 def serializeMultiIteratorState (state : MultiIteratorState) : ByteArray := Id.run do
@@ -116,6 +116,9 @@ def serializeMultiIteratorState (state : MultiIteratorState) : ByteArray := Id.r
     out := out ++ serializeNat st.position
     out := out ++ serializeNat st.epoch
     out := out ++ serializeUInt64 st.key.state
+  out := out ++ serializeNat state.produced.size
+  for count in state.produced do
+    out := out ++ serializeNat count
   out
 
 private def readStates (bytes : ByteArray) : Nat → Nat → Array IteratorState → Option (Array IteratorState)
@@ -127,16 +130,30 @@ private def readStates (bytes : ByteArray) : Nat → Nat → Array IteratorState
           readStates bytes n (offset + 24) (acc.push st)
       | _, _, _ => none
 
+private def readProduced (bytes : ByteArray) : Nat → Nat → Array Nat → Option (Array Nat)
+  | 0, _, acc => some acc
+  | n + 1, offset, acc =>
+      match deserializeNat bytes offset with
+      | some count => readProduced bytes n (offset + 8) (acc.push count)
+      | none => none
+
 /-- Deserialize MultiIteratorState from bytes. -/
 def deserializeMultiIteratorState (bytes : ByteArray) : Option MultiIteratorState := do
   let magic ← deserializeUInt64 bytes 0
   guard (magic == multiCheckpointMagic)
   let version ← deserializeUInt64 bytes 8
-  guard (version == multiCheckpointVersion)
   let numWorkers ← deserializeNat bytes 16
   let nextWorker ← deserializeNat bytes 24
   let states ← readStates bytes numWorkers 32 (#[])
-  pure { nextWorker, workerStates := states }
+  if version == (1 : UInt64) then
+    pure { nextWorker, workerStates := states }
+  else if version == multiCheckpointVersion then
+    let producedOffset := 32 + numWorkers * 24
+    let producedCount ← deserializeNat bytes producedOffset
+    let produced ← readProduced bytes producedCount (producedOffset + 8) (#[])
+    pure { nextWorker, workerStates := states, produced := produced }
+  else
+    none
 
 /-! ## File-Based Checkpointing -/
 

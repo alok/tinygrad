@@ -13,7 +13,9 @@ tinygrad compiles tensor operations into optimized kernels. The pipeline:
 ## Key Concepts
 
 ### UOp (Universal Operation)
-Everything is a UOp - tensors, operations, buffers, kernels. Key properties:
+
+Everything is a `UOp` - tensors, operations, buffers, kernels. Key properties:
+
 - `op`: The operation type (Ops enum)
 - `dtype`: Data type
 - `src`: Tuple of source UOps
@@ -22,8 +24,10 @@ Everything is a UOp - tensors, operations, buffers, kernels. Key properties:
 
 UOps are **immutable and cached** - creating the same UOp twice returns the same object (ucache).
 
-### PatternMatcher
+### `PatternMatcher`
+
 Used extensively for graph transformations:
+
 ```python
 pm = PatternMatcher([
   (UPat(Ops.ADD, src=(UPat.cvar("x"), UPat.cvar("x"))), lambda x: x * 2),
@@ -32,6 +36,7 @@ result = graph_rewrite(uop, pm)
 ```
 
 ### Schedule Cache
+
 Schedules are cached by graph structure. BIND nodes (variables with bound values) are unbound before cache key computation so different values hit the same cache.
 
 ## Directory Structure
@@ -60,6 +65,50 @@ tinygrad/
 ├── renderer/          # Code generation (CUDA, Metal, etc.)
 └── runtime/           # Device backends
 ```
+
+## TUOp Master Plan (Lean)
+
+Vision: move as much as possible into static structure while keeping the runtime core minimal, fast, and aggressively optimized.
+
+Principles:
+- Typed TUOp is the default API; raw UOp remains an escape hatch (`UOp.Raw`) for low-level or dynamic paths.
+- Proofs are shallow for now (`sorry_proof`), but types carry op/shape/rank/dtype to eliminate runtime checks later.
+- Only add type-level complexity if it buys runtime wins (fewer checks, better fusion/scheduling, more specialization).
+
+Roadmap:
+- Phase 0 (done): TUOp core type (op/shape/rank/dtype), basic constructors/ops, raw aliases, smoke test.
+- Phase 1: Expand TUOp coverage across UOp builders (movement, reduce, where, cat, contract) and core tensor helpers.
+- Phase 2: Typed validation path — allow typed graphs to skip shape checks; keep raw validation for untyped graphs.
+- Phase 3: Typed scheduling/codegen entrypoints; specialize kernels on rank/shape when known.
+- Phase 4: Remove redundant runtime shape checks in typed path; tighten proofs gradually.
+- Phase 5 (optional): ShapeN/Vector shapes for rank-indexed APIs if it unlocks additional optimizations.
+
+Success criteria:
+- Typed path eliminates runtime broadcast/reshape/permute checks for statically shaped graphs.
+- Measurable reduction in compile-time shape-tracking cost for typed workloads.
+- No regressions in dynamic/escape-hatch paths.
+
+## TUOp Master Plan (Lean)
+
+Vision: move as much as possible into static structure while keeping the runtime core minimal, fast, and aggressively optimized.
+
+Principles:
+- Typed TUOp is the default API; raw UOp remains an escape hatch (`UOp.Raw`) for low-level or dynamic paths.
+- Proofs are shallow for now (`sorry_proof`), but types carry op/shape/rank/dtype to eliminate runtime checks later.
+- Only add type-level complexity if it buys runtime wins (fewer checks, better fusion/scheduling, more specialization).
+
+Roadmap:
+- Phase 0 (done): TUOp core type (op/shape/rank/dtype), basic constructors/ops, raw aliases, smoke test.
+- Phase 1: Expand TUOp coverage across UOp builders (movement, reduce, where, cat, contract) and core tensor helpers.
+- Phase 2: Typed validation path — allow typed graphs to skip shape checks; keep raw validation for untyped graphs.
+- Phase 3: Typed scheduling/codegen entrypoints; specialize kernels on rank/shape when known.
+- Phase 4: Remove redundant runtime shape checks in typed path; tighten proofs gradually.
+- Phase 5 (optional): ShapeN/Vector shapes for rank-indexed APIs if it unlocks additional optimizations.
+
+Success criteria:
+- Typed path eliminates runtime broadcast/reshape/permute checks for statically shaped graphs.
+- Measurable reduction in compile-time shape-tracking cost for typed workloads.
+- No regressions in dynamic/escape-hatch paths.
 
 ## Testing
 
@@ -94,7 +143,6 @@ VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 
 ## Workflow Rules
 
-- **NEVER commit without explicit user approval** - always show the diff and wait for approval
 - **NEVER amend commits** - always create a new commit instead
 - Run `pre-commit run --all-files` before committing to catch linting/type errors
 - Run tests before proposing commits
@@ -111,31 +159,41 @@ VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 ## Lessons Learned
 
 ### UOp ucache Behavior
+
 UOps are cached by their contents - creating a UOp with identical (op, dtype, src, arg) returns the **same object**. This means:
+
 - `uop.replace(tag=None)` on a tagged UOp returns the original untagged UOp if it exists in cache
 - Two UOps with same structure are identical (`is` comparison works)
 
 ### Spec Validation
+
 When adding new UOp patterns, update `tinygrad/uop/spec.py`. Test with:
+
 ```bash
 SPEC=2 python3 test/unit/test_something.py
 ```
+
 Spec issues appear as `RuntimeError: SPEC ISSUE None: UOp(...)`.
 
 ### Schedule Cache Key Normalization
+
 The schedule cache strips values from BIND nodes so different bound values (e.g., KV cache positions) hit the same cache entry:
+
 - `pm_pre_sched_cache`: BIND(DEFINE_VAR, CONST) → BIND(DEFINE_VAR) for cache key
 - `pm_post_sched_cache`: restores original BIND from context
 - When accessing `bind.src[1]`, check `len(bind.src) > 1` first (might be stripped)
 - Extract var_vals from `input_buffers` dict after graph_rewrite (avoids extra toposort)
 
 ### Avoiding Extra Work
+
 - Use ctx dict from graph_rewrite to collect info during traversal instead of separate toposort
 - Only extract var_vals when schedule is non-empty (no kernels = no vars needed)
 - PatternMatchers are slow to construct - define at module level, not in functions
 
 ### Readability Over Speed
+
 Don't add complexity for marginal performance gains. Simpler code that's slightly slower is often better:
+
 ```python
 # BAD: "optimized" with extra complexity
 if has_afters:  # skip toposort if no AFTERs
@@ -144,9 +202,11 @@ if has_afters:  # skip toposort if no AFTERs
 # GOOD: simple, always works
 after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
 ```
+
 The conditional check adds complexity, potential bugs, and often negligible speedup. Only optimize when profiling shows a real bottleneck.
 
 ### Testing LLM Changes
+
 ```bash
 # Quick smoke test
 echo "Hello" | DEBUG=1 python tinygrad/apps/llm.py --model "llama3.2:1b"
@@ -161,6 +221,7 @@ echo "Hello" | BEAM=2 python tinygrad/apps/llm.py --model "llama3.2:1b"
 ## Common Patterns
 
 ### Graph Transformation
+
 ```python
 def my_transform(ctx, x):
   # Return new UOp or None to skip
@@ -173,6 +234,7 @@ result = graph_rewrite(input_uop, pm, ctx={})
 ```
 
 ### Finding Variables
+
 ```python
 # Get all variables in a UOp graph
 variables = uop.variables()
@@ -182,6 +244,7 @@ var, val = bind_uop.unbind()
 ```
 
 ### Shape Handling
+
 ```python
 # Shapes can be symbolic (contain UOps)
 shape = tensor.shape  # tuple[sint, ...] where sint = int | UOp
@@ -220,6 +283,7 @@ TRACK_MATCH_STATS=2 PYTHONPATH="." python3 test/external/external_benchmark_sche
 Output format: `matches / attempts -- match_time / total_time ms -- location`
 
 Key patterns to watch (from ResNet50 benchmark):
+
 - `split_load_store`: ~146ms, 31% match rate - does real work
 - `simplify_valid`: ~75ms, 0% match rate in this workload - checks AND ops for INDEX in backward slice
 - `vmin==vmax folding`: ~55ms, 0.33% match rate - checks 52K ops but rarely matches

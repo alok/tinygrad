@@ -311,6 +311,65 @@ def testPrefetcherEarlyStop : IO Unit := do
 
   IO.println "✓ Prefetcher early stop passed"
 
+def arrayTake (arr : Array T) (n : Nat) : Array T := Id.run do
+  let stop := min n arr.size
+  let mut out := Array.mkEmpty stop
+  for i in [:stop] do
+    if h : i < arr.size then
+      out := out.push (arr[i]'(h))
+  out
+
+def arrayDrop (arr : Array T) (n : Nat) : Array T := Id.run do
+  let start := min n arr.size
+  let mut out := Array.mkEmpty (arr.size - start)
+  for i in [start:arr.size] do
+    if h : i < arr.size then
+      out := out.push (arr[i]'(h))
+  out
+
+def testIteratorPrefetcherResume : IO Unit := do
+  IO.println "Testing IteratorPrefetcher resume..."
+
+  let ds := ofArray (Array.range 100)
+  let key := RandKey.new 123
+  let cfg : IteratorConfig (ArrayDataset Nat) := {
+    base := ds,
+    epochs := 1,
+    key := key
+  }
+
+  let baselineIter ← Dataset.toIteratorCfg cfg
+  let baseline ← DataIterator.toArray baselineIter
+
+  let prefetcher ← TinyGrad4.Data.IteratorPrefetcher.createFromIteratorCfg cfg 4
+  let mut seen := #[]
+  let split := 7
+  for _ in [:split] do
+    match ← TinyGrad4.Data.IteratorPrefetcher.next prefetcher with
+    | some x => seen := seen.push x
+    | none => break
+
+  let state : IteratorState ← TinyGrad4.Data.IteratorPrefetcher.checkpoint prefetcher
+  TinyGrad4.Data.IteratorPrefetcher.cancel prefetcher
+  TinyGrad4.Data.IteratorPrefetcher.drain prefetcher
+
+  let cfg' := {
+    cfg with
+    startPos := state.position
+    startEpoch := state.epoch
+    key := state.key
+  }
+  let iter2 ← Dataset.toIteratorCfg cfg'
+  let remainder ← DataIterator.toArray iter2
+
+  let expectedPrefix := arrayTake baseline seen.size
+  let expectedRemainder := arrayDrop baseline seen.size
+
+  assert (seen == expectedPrefix) "IteratorPrefetcher prefix mismatch"
+  assert (remainder == expectedRemainder) "IteratorPrefetcher remainder mismatch"
+
+  IO.println "✓ IteratorPrefetcher resume passed"
+
 /-! ## Pipeline Composition Test -/
 
 def testPipelineComposition : IO Unit := do
@@ -373,6 +432,8 @@ def runAll : IO Unit := do
   testPrefetcher
   IO.println "Running testPrefetcherEarlyStop..."
   testPrefetcherEarlyStop
+  IO.println "Running testIteratorPrefetcherResume..."
+  testIteratorPrefetcherResume
   IO.println "Running testPipelineComposition..."
   testPipelineComposition
 

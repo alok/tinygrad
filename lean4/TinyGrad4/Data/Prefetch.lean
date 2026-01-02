@@ -172,6 +172,108 @@ def toArray (p : Prefetcher T) : IO (Array T) := do
 
 end Prefetcher
 
+/-! ## IteratorPrefetcher -/
+
+/-- Queue item with iterator state after this element. -/
+structure QueuedItem (T : Type) where
+  item : T
+  state : IteratorState
+
+/-- Prefetcher that preserves iterator state for deterministic resume. -/
+structure IteratorPrefetcher (T : Type) where
+  queue : IOQueue (QueuedItem T)
+  worker : Task (Except IO.Error Unit)
+  totalItems : Nat
+  lastState : IO.Ref IteratorState
+
+namespace IteratorPrefetcher
+
+private def createFromIterator (iter : DataIterator T) (initState : IteratorState) (totalItems : Nat)
+    (bufferSize : Nat := 8) : IO (IteratorPrefetcher T) := do
+  let queue ← IOQueue.new bufferSize
+  let lastState ← IO.mkRef initState
+
+  let worker ← IO.asTask (prio := .dedicated) do
+    repeat do
+      if ← IO.checkCanceled then break
+      match ← iter.next with
+      | some item =>
+          let state ← iter.checkpoint
+          let ok ← queue.push { item, state }
+          if !ok then break
+      | none => break
+    queue.finish
+
+  pure { queue, worker, totalItems, lastState }
+
+/-- Create a stateful prefetcher from an iterator config. -/
+def createFromIteratorCfg [Dataset D T] (cfg : IteratorConfig D) (bufferSize : Nat := 8) :
+    IO (IteratorPrefetcher T) := do
+  let iter ← Dataset.toIteratorCfg cfg
+  let initState ← iter.checkpoint
+  let n := Dataset.len cfg.base
+  let remaining := remainingItems n cfg.epochs initState
+  createFromIterator iter initState remaining bufferSize
+
+/-- Get next prefetched item. -/
+def next (p : IteratorPrefetcher T) : IO (Option T) := do
+  match ← p.queue.pop with
+  | some item =>
+      p.lastState.set item.state
+      pure (some item.item)
+  | none => pure none
+
+/-- Get next item and time spent waiting for it (ns). -/
+def nextWithWait (p : IteratorPrefetcher T) : IO (Option T × Nat) := do
+  let (item?, waitNs) ← p.queue.popWithWait
+  match item? with
+  | some item =>
+      p.lastState.set item.state
+      pure (some item.item, waitNs)
+  | none => pure (none, waitNs)
+
+/-- Get checkpoint state for deterministic resume. -/
+def checkpoint (p : IteratorPrefetcher T) : IO IteratorState :=
+  p.lastState.get
+
+/-- Cancel the prefetcher. -/
+def cancel (p : IteratorPrefetcher T) : IO Unit := do
+  p.queue.finish
+  IO.cancel p.worker
+
+/-- Check if worker is done. -/
+def isDone (p : IteratorPrefetcher T) : IO Bool :=
+  IO.hasFinished p.worker
+
+/-- Wait for worker completion. -/
+def wait (p : IteratorPrefetcher T) : IO Unit := do
+  let _ ← IO.wait p.worker
+
+/-- Drain any queued items. -/
+def drain (p : IteratorPrefetcher T) : IO Unit := do
+  repeat do
+    match ← p.queue.pop with
+    | some _ => pure ()
+    | none => break
+
+/-- Iterate through all items. -/
+def forEach (p : IteratorPrefetcher T) (f : T → IO Unit) : IO Unit := do
+  repeat do
+    match ← p.next with
+    | some item => f item
+    | none => break
+
+/-- Collect all remaining items. -/
+def toArray (p : IteratorPrefetcher T) : IO (Array T) := do
+  let mut arr := Array.mkEmpty p.totalItems
+  repeat do
+    match ← p.next with
+    | some item => arr := arr.push item
+    | none => break
+  pure arr
+
+end IteratorPrefetcher
+
 /-! ## ForIn Instances -/
 
 instance : ForIn IO (Prefetcher T) T where
@@ -186,6 +288,20 @@ instance : ForIn IO (Prefetcher T) T where
             p.cancel
             return a
         | .yield a => acc := a
+    pure acc
+
+instance : ForIn IO (IteratorPrefetcher T) T where
+  forIn p init f := do
+    let mut acc := init
+    repeat do
+      match ← IteratorPrefetcher.next p with
+      | none => break
+      | some x =>
+          match ← f x acc with
+          | .done a =>
+              IteratorPrefetcher.cancel p
+              return a
+          | .yield a => acc := a
     pure acc
 
 /-! ## PrefetchedDataset -/

@@ -143,6 +143,14 @@ def iterM (p : Prefetcher T) : IterM (α := Prefetcher T) IO T :=
 
 end Prefetcher
 
+namespace IteratorPrefetcher
+
+/-- Monadic iterator view for `IteratorPrefetcher`. -/
+def iterM (p : IteratorPrefetcher T) : IterM (α := IteratorPrefetcher T) IO T :=
+  ⟨p⟩
+
+end IteratorPrefetcher
+
 instance : Iterator (Prefetcher T) IO T where
   IsPlausibleStep _ _ := True
   step it := do
@@ -170,6 +178,38 @@ instance : ForIn IO (Prefetcher T) T where
       | some x =>
           match ← f x acc with
           | .done a => return a
+          | .yield a => acc := a
+    pure acc
+
+instance : Iterator (IteratorPrefetcher T) IO T where
+  IsPlausibleStep _ _ := True
+  step it := do
+    match ← IteratorPrefetcher.next it.internalState with
+    | some x =>
+        pure <| Std.Shrink.deflate <| PlausibleIterStep.yield it x (by trivial)
+    | none =>
+        pure <| Std.Shrink.deflate <| PlausibleIterStep.done (by trivial)
+
+instance : IteratorLoop (IteratorPrefetcher T) IO IO :=
+  IteratorLoop.defaultImplementation
+
+instance : IteratorCollect (IteratorPrefetcher T) IO IO :=
+  IteratorCollect.defaultImplementation
+
+instance : ToIterator (IteratorPrefetcher T) IO (IteratorPrefetcher T) T :=
+  ToIterator.ofM (IteratorPrefetcher T) (fun p => ⟨p⟩)
+
+instance : ForIn IO (IteratorPrefetcher T) T where
+  forIn p init f := do
+    let mut acc := init
+    repeat do
+      match ← IteratorPrefetcher.next p with
+      | none => break
+      | some x =>
+          match ← f x acc with
+          | .done a =>
+              IteratorPrefetcher.cancel p
+              return a
           | .yield a => acc := a
     pure acc
 

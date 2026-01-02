@@ -217,7 +217,13 @@ lean_lib TinyGrad4 where
     .submodules `TinyGrad4.Gradient,
     .submodules `TinyGrad4.Optim,
     .andSubmodules `TinyGrad4.NN,
-    .andSubmodules `TinyGrad4.Benchmark,
+    .one `TinyGrad4.Benchmark.Framework,
+    .one `TinyGrad4.Benchmark.Runner,
+    .one `TinyGrad4.Benchmark.Kernels,
+    .one `TinyGrad4.Benchmark.Instrumentation,
+    .one `TinyGrad4.Benchmark.CudaBenchmark,
+    .one `TinyGrad4.Benchmark.MetalBenchmark,
+    .one `TinyGrad4.Benchmark.MetalDirect,
     .andSubmodules `TinyGrad4.Spec
   ]
   precompileModules := true

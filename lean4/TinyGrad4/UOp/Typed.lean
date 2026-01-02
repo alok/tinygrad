@@ -9,8 +9,15 @@ namespace TinyGrad4
 /-!
 Typed UOp wrapper.
 
-This is a shallow, proof-light layer: key metadata is pushed into the type,
-but we defer most proofs with `sorry_proof` for now.
+Design notes:
+- `TUOp` stores op/shape/rank/dtype in the type, so consumers can carry static metadata through
+  graph construction without extra runtime checks.
+- Proofs are intentionally shallow (`sorry_proof`); the goal is type-directed structure first,
+  and deeper proofs later. This keeps the typed path usable while we migrate call sites.
+- `mkUnsafe`/`ofRaw`/`castShape`/`castDType` are the escape hatches: they let us bridge from raw UOp,
+  align with actual runtime shapes, and defer verification to later phases.
+- Typed helpers (e.g., `cat`, `catList`) take shape witnesses so well-formedness can live at the
+  type level even before we fully prove it.
 -/
 
 /-- Typed UOp node with op, shape, rank, and dtype in the type. -/

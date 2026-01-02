@@ -222,6 +222,9 @@ lean_lib TinyGrad4 where
   ]
   precompileModules := true
 
+lean_lib TinyGrad4Data where
+  globs := #[.andSubmodules `TinyGrad4.Data]
+
 @[default_target]
 lean_lib Tqdm where
   globs := #[.andSubmodules `Tqdm]
@@ -345,6 +348,10 @@ lean_exe dataset_test where
 
 lean_exe checkpoint_resume_test where
   root := `TinyGrad4.Test.CheckpointResumeSmoke
+  moreLinkArgs := metalLinkArgs
+
+lean_exe multi_prefetch_best_effort_smoke where
+  root := `TinyGrad4.Test.MultiPrefetchBestEffortSmoke
   moreLinkArgs := metalLinkArgs
 
 lean_exe data_loader_bench where

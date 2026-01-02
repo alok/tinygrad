@@ -72,6 +72,7 @@ def applyUpdates {s : List Nat} {d : DType}
   for (p, u) in params.zip updates do
     -- Create new tensor from updated values
     let newUop ← TUOp.vconstRaw u s
+    let newUop := TUOp.castDType newUop d
     let reshaped ← TUOp.reshape newUop s
     result := result ++ [StaticTensor.ofTUOp reshaped p.requiresGrad]
   pure result

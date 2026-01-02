@@ -87,6 +87,16 @@ def parseMetalOutput (output : String) : IO (Float × Float × Float × String) 
 
   return (parseF timeLine, parseF tputLine, parseF bwLine, deviceLine.trimAscii.toString)
 
+/-- Get Unix epoch timestamp in seconds. -/
+def getUnixTimestamp : IO Nat := do
+  try
+    let ts ← IO.Process.run { cmd := "date", args := #["+%s"] }
+    match ts.trimAscii.toString.toNat? with
+    | some n => return n
+    | none => return 0
+  catch _ =>
+    return 0
+
 /-- Locate metal_runner from the current working directory. -/
 def findMetalRunner? : IO (Option String) := do
   let candidates := #[
@@ -122,7 +132,7 @@ def runMetalSpec (spec : BenchmarkSpec) : IO BenchmarkResult := do
 
   -- Parse output
   let (timeUs, gflops, gbps, device) ← parseMetalOutput output
-  let timestamp ← IO.monoMsNow
+  let timestamp ← getUnixTimestamp
   return {
     spec := spec
     backend := "METAL"
@@ -247,6 +257,22 @@ def fromResults (spec : BenchmarkSpec) (results : Array BenchmarkResult) : Bench
 
 end BenchmarkComparison
 
+/-- Configuration for benchmark run. -/
+structure RunConfig where
+  /-- Backends to run (empty = all available). -/
+  backends : Array String := #[]
+  /-- Suites to run (empty = all). -/
+  suites : Array String := #[]
+  /-- Quick run (fewer iterations). -/
+  quick : Bool := false
+  /-- JSON output path. -/
+  jsonOutput : Option String := none
+  /-- Markdown output path. -/
+  markdownOutput : Option String := none
+  /-- Verbose output. -/
+  verbose : Bool := true
+  deriving Repr, Inhabited
+
 /-- Full benchmark report -/
 structure BenchmarkReport where
   /-- Report timestamp -/
@@ -255,6 +281,14 @@ structure BenchmarkReport where
   gitCommit : Option String
   /-- Machine info -/
   machineInfo : String
+  /-- Benchmark tool version -/
+  toolVersion : String
+  /-- Run configuration as requested by the user -/
+  runConfig : RunConfig
+  /-- Backends actually executed -/
+  selectedBackends : Array String
+  /-- Suites actually executed -/
+  selectedSuites : Array String
   /-- All results by backend -/
   resultsByBackend : List (String × Array BenchmarkResult)
   /-- Comparisons -/
@@ -271,11 +305,26 @@ instance : ToJson BenchmarkComparison where
   ]
 
 open Lean Json in
+instance : ToJson RunConfig where
+  toJson c := Json.mkObj [
+    ("backends", Json.arr (c.backends.map Json.str)),
+    ("suites", Json.arr (c.suites.map Json.str)),
+    ("quick", toJson c.quick),
+    ("json_output", match c.jsonOutput with | some p => Json.str p | none => Json.null),
+    ("markdown_output", match c.markdownOutput with | some p => Json.str p | none => Json.null),
+    ("verbose", toJson c.verbose)
+  ]
+
+open Lean Json in
 instance : ToJson BenchmarkReport where
   toJson r := Json.mkObj [
     ("timestamp", toJson r.timestamp),
     ("git_commit", match r.gitCommit with | some c => Json.str c | none => Json.null),
     ("machine_info", toJson r.machineInfo),
+    ("tool_version", toJson r.toolVersion),
+    ("run_config", toJson r.runConfig),
+    ("selected_backends", Json.arr (r.selectedBackends.map Json.str)),
+    ("selected_suites", Json.arr (r.selectedSuites.map Json.str)),
     ("results_by_backend", Json.mkObj (r.resultsByBackend.map fun (name, results) =>
       (name, Json.arr (results.map toJson)))),
     ("comparisons", Json.arr (r.comparisons.map toJson))
@@ -299,16 +348,6 @@ def getGitCommit : IO (Option String) := do
     return some hash.trimAscii.toString
   catch _ =>
     return none
-
-/-- Get Unix epoch timestamp in seconds. -/
-def getUnixTimestamp : IO Nat := do
-  try
-    let ts ← IO.Process.run { cmd := "date", args := #["+%s"] }
-    match ts.trimAscii.toString.toNat? with
-    | some n => return n
-    | none => return 0
-  catch _ =>
-    return 0
 
 /-- Detect available backends -/
 def detectBackends : IO (Array String) := do
@@ -344,9 +383,23 @@ def formatComparisonMarkdown (c : BenchmarkComparison) : String :=
 /-- Format full report as markdown -/
 def formatReportMarkdown (r : BenchmarkReport) : String :=
   let header := "# TinyGrad4 Benchmark Report\n\n"
+  let requestedBackends :=
+    if r.runConfig.backends.isEmpty then "all" else String.intercalate ", " r.runConfig.backends.toList
+  let requestedSuites :=
+    if r.runConfig.suites.isEmpty then "all" else String.intercalate ", " r.runConfig.suites.toList
+  let selectedBackends :=
+    if r.selectedBackends.isEmpty then "none" else String.intercalate ", " r.selectedBackends.toList
+  let selectedSuites :=
+    if r.selectedSuites.isEmpty then "none" else String.intercalate ", " r.selectedSuites.toList
   let metadata := s!"- **Machine**: {r.machineInfo}\n" ++
                   s!"- **Git Commit**: {r.gitCommit.getD "unknown"}\n" ++
-                  s!"- **Timestamp**: {r.timestamp}\n\n"
+                  s!"- **Tool Version**: {r.toolVersion}\n" ++
+                  s!"- **Timestamp**: {r.timestamp}\n" ++
+                  s!"- **Requested Backends**: {requestedBackends}\n" ++
+                  s!"- **Requested Suites**: {requestedSuites}\n" ++
+                  s!"- **Selected Backends**: {selectedBackends}\n" ++
+                  s!"- **Selected Suites**: {selectedSuites}\n" ++
+                  s!"- **Quick Mode**: {r.runConfig.quick}\n\n"
   let comparisons := r.comparisons.map formatComparisonMarkdown
   header ++ metadata ++ "## Results\n\n" ++ String.intercalate "\n\n" comparisons.toList
 
@@ -361,20 +414,6 @@ def writeMarkdownReport (path : String) (report : BenchmarkReport) : IO Unit := 
   IO.FS.writeFile path md
 
 /-! ## Main Entry Points -/
-
-/-- Configuration for benchmark run -/
-structure RunConfig where
-  /-- Backends to run (empty = all available) -/
-  backends : Array String := #[]
-  /-- Suites to run (empty = all) -/
-  suites : Array String := #[]
-  /-- JSON output path -/
-  jsonOutput : Option String := none
-  /-- Markdown output path -/
-  markdownOutput : Option String := none
-  /-- Verbose output -/
-  verbose : Bool := true
-  deriving Repr, Inhabited
 
 /-- Default configuration -/
 def defaultConfig : RunConfig := {}
@@ -395,6 +434,12 @@ def parseArgs (args : List String) : RunConfig := Id.run do
     else if arg == "--backend" && i + 1 < argArray.size then
       config := { config with backends := config.backends.push argArray[i + 1]! }
       i := i + 2
+    else if arg == "--suite" && i + 1 < argArray.size then
+      config := { config with suites := config.suites.push argArray[i + 1]! }
+      i := i + 2
+    else if arg == "--quick" then
+      config := { config with quick := true }
+      i := i + 1
     else if arg == "--quiet" then
       config := { config with verbose := false }
       i := i + 1

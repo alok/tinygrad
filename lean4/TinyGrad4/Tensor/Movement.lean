@@ -14,8 +14,9 @@ def flatten {s : List Nat} {d : DType} (t : StaticTensor s d)
     : TensorM (StaticTensor [listProd s] d) := do
   -- Use actual UOp shape in case type parameter doesn't match (e.g. after sorry_proof cast)
   let actualShape := t.uop.shape
-  let reshaped ← UOp.reshape t.uop [listProd actualShape]
-  pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let base := TUOp.ofRaw t.uop
+  let reshaped ← TUOp.reshape base [listProd actualShape]
+  pure (StaticTensor.ofTUOp reshaped t.requiresGrad)
 
 def expand {s : List Nat} {d : DType} (t : StaticTensor s d)
     (newShape : List Nat)
@@ -29,8 +30,9 @@ def unsqueeze {s : List Nat} {d : DType} (t : StaticTensor s d)
   -- Use actual UOp shape in case type parameter doesn't match (e.g. after sorry_proof cast)
   let actualShape := t.uop.shape
   let newShape := Shape.insertDim actualShape axis 1
-  let reshaped ← UOp.reshape t.uop newShape
-  pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let base := TUOp.ofRaw t.uop
+  let reshaped ← TUOp.reshape base newShape
+  pure (StaticTensor.ofTUOp reshaped t.requiresGrad)
 
 def permute {s : List Nat} {d : DType} (t : StaticTensor s d)
     (perm : List Nat)

@@ -4,6 +4,8 @@ import TinyGrad4.Benchmark.Kernels
 
 -- Disable RawBuffer linter for benchmark files that need FloatArray for data generation
 set_option linter.useRawBuffer false
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 /-!
 # Direct Metal FFI Benchmark

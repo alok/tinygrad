@@ -1,4 +1,6 @@
 import TinyGrad4.Backend.Metal
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 /-!
 # Benchmark Instrumentation

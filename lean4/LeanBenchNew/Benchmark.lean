@@ -1,6 +1,8 @@
 import Lean
 import LeanBenchNew.LogValue
 import LeanBenchNew.Stats
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 /-!
 # Benchmarking Utilities

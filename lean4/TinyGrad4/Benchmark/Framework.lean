@@ -1,4 +1,6 @@
 import Lean.Data.Json
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 /-!
 # Benchmark Framework
@@ -259,6 +261,62 @@ def vectorAddSmall : BenchmarkSpec := {
   iterations := 1000
   warmupRuns := 10
   description := "Small vector add for measuring dispatch overhead"
+}
+
+/-! ## Matmul Benchmark Specs -/
+
+/-- Matmul benchmark spec with M, N, K dimensions -/
+structure MatmulSpec extends BenchmarkSpec where
+  m : Nat
+  k : Nat
+  n : Nat
+  deriving Repr, Inhabited
+
+namespace MatmulSpec
+
+/-- Compute memory bandwidth for matmul (read A[M,K] + B[K,N], write C[M,N]) -/
+def computeBandwidth (spec : MatmulSpec) (timeUs : Float) : Float :=
+  let bytesA := spec.m * spec.k * 4  -- float32
+  let bytesB := spec.k * spec.n * 4
+  let bytesC := spec.m * spec.n * 4
+  let totalBytes := (bytesA + bytesB + bytesC).toFloat
+  (totalBytes / timeUs) * 1e6 / 1e9  -- GB/s
+
+/-- Compute GFLOP/s for matmul (2*M*N*K FLOPs) -/
+def computeThroughput (spec : MatmulSpec) (timeUs : Float) : Float :=
+  let flops := 2 * spec.m * spec.n * spec.k  -- multiply-add
+  (flops.toFloat / timeUs) * 1e6 / 1e9  -- GFLOP/s
+
+end MatmulSpec
+
+/-- 512x512 matmul (small, dispatch-bound) -/
+def matmul512 : MatmulSpec := {
+  name := "matmul_512"
+  size := 512 * 512  -- Output size
+  m := 512, k := 512, n := 512
+  iterations := 100
+  warmupRuns := 5
+  description := "Square matmul 512x512"
+}
+
+/-- 1024x1024 matmul (medium) -/
+def matmul1024 : MatmulSpec := {
+  name := "matmul_1024"
+  size := 1024 * 1024
+  m := 1024, k := 1024, n := 1024
+  iterations := 50
+  warmupRuns := 5
+  description := "Square matmul 1024x1024"
+}
+
+/-- 2048x2048 matmul (large, compute-bound) -/
+def matmul2048 : MatmulSpec := {
+  name := "matmul_2048"
+  size := 2048 * 2048
+  m := 2048, k := 2048, n := 2048
+  iterations := 20
+  warmupRuns := 3
+  description := "Square matmul 2048x2048"
 }
 
 /-! ## Output Formatting -/

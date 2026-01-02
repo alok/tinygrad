@@ -7,6 +7,8 @@ Debug NaN in GPU matmul at larger sizes.
 -/
 
 set_option linter.useRawBuffer false
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 namespace TinyGrad4.Test.MatmulNaNDebug
 

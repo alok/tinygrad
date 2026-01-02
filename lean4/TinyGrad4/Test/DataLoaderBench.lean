@@ -6,6 +6,8 @@ import TinyGrad4.Data.Profile
 import TinyGrad4.Data.GPULoader
 import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Transform
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 def main : IO Unit := do
   let dataDir := "../data"

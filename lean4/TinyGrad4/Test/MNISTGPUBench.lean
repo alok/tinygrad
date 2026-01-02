@@ -1,6 +1,8 @@
 import TinyGrad4
 import TinyGrad4.Data.MNIST
 import TinyGrad4.Backend.Metal
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 /-!
 # MNIST GPU vs CPU Benchmark

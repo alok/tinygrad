@@ -1,4 +1,5 @@
 import TinyGrad4.UOp.UOp
+import TinyGrad4.UOp.Typed
 import TinyGrad4.Backend.MetalRenderer
 
 /-!
@@ -16,85 +17,29 @@ open TinyGrad4.Backend.MetalRenderer
 /-! ## UOp Graph Construction for Benchmarks -/
 
 /-- Build a simple binary elementwise UOp graph: out = a op b -/
-def mkBinaryEwiseGraph (op : Ops) : List UOp × UOpId := Id.run do
-  -- Buffer a (input 0)
-  let bufA : UOp := {
-    uid := ⟨0⟩
-    op := .BUFFER
-    dtype := .float32
-    src := []
-    arg := .bufferIdx 0
-    shape := []
-  }
-  -- Buffer b (input 1)
-  let bufB : UOp := {
-    uid := ⟨1⟩
-    op := .BUFFER
-    dtype := .float32
-    src := []
-    arg := .bufferIdx 1
-    shape := []
-  }
-  -- Buffer out (output 2) - needed for proper 3-buffer signature
-  let bufOut : UOp := {
-    uid := ⟨2⟩
-    op := .BUFFER
-    dtype := .float32
-    src := []
-    arg := .bufferIdx 2
-    shape := []
-  }
-  -- Operation: a op b
-  let result : UOp := {
-    uid := ⟨3⟩
-    op := op
-    dtype := .float32
-    src := [bufA, bufB]
-    arg := .empty
-    shape := []
-  }
-  ([bufA, bufB, bufOut, result], ⟨3⟩)
+def mkBinaryEwiseGraph (op : Ops) : List UOp × UOpId := runUOpM do
+  let bufA ← TUOp.buffer .float32 []
+  let bufB ← TUOp.buffer .float32 []
+  let bufOut ← TUOp.buffer .float32 []
+  let result ← TUOp.binaryOp op bufA bufB
+  pure ([bufA.raw, bufB.raw, bufOut.raw, result.raw], result.raw.uid)
 
 /-- Build a unary elementwise UOp graph: out = op(a) -/
-def mkUnaryEwiseGraph (op : Ops) : List UOp × UOpId := Id.run do
-  -- Buffer a (input 0)
-  let bufA : UOp := {
-    uid := ⟨0⟩
-    op := .BUFFER
-    dtype := .float32
-    src := []
-    arg := .bufferIdx 0
-    shape := []
-  }
-  -- Buffer out (output 1)
-  let bufOut : UOp := {
-    uid := ⟨1⟩
-    op := .BUFFER
-    dtype := .float32
-    src := []
-    arg := .bufferIdx 1
-    shape := []
-  }
-  -- Operation: op(a)
-  let result : UOp := {
-    uid := ⟨2⟩
-    op := op
-    dtype := .float32
-    src := [bufA]
-    arg := .empty
-    shape := []
-  }
-  ([bufA, bufOut, result], ⟨2⟩)
+def mkUnaryEwiseGraph (op : Ops) : List UOp × UOpId := runUOpM do
+  let bufA ← TUOp.buffer .float32 []
+  let bufOut ← TUOp.buffer .float32 []
+  let result ← TUOp.unaryOp op bufA
+  pure ([bufA.raw, bufOut.raw, result.raw], result.raw.uid)
 
 /-- Build a fused add-mul graph: out = (a + b) * c -/
-def mkFusedAddMulGraph : List UOp × UOpId := Id.run do
-  let bufA : UOp := { uid := ⟨0⟩, op := .BUFFER, dtype := .float32, src := [], arg := .bufferIdx 0, shape := [] }
-  let bufB : UOp := { uid := ⟨1⟩, op := .BUFFER, dtype := .float32, src := [], arg := .bufferIdx 1, shape := [] }
-  let bufC : UOp := { uid := ⟨2⟩, op := .BUFFER, dtype := .float32, src := [], arg := .bufferIdx 2, shape := [] }
-  let bufOut : UOp := { uid := ⟨3⟩, op := .BUFFER, dtype := .float32, src := [], arg := .bufferIdx 3, shape := [] }
-  let add : UOp := { uid := ⟨4⟩, op := .ADD, dtype := .float32, src := [bufA, bufB], arg := .empty, shape := [] }
-  let mul : UOp := { uid := ⟨5⟩, op := .MUL, dtype := .float32, src := [add, bufC], arg := .empty, shape := [] }
-  ([bufA, bufB, bufC, bufOut, add, mul], ⟨5⟩)
+def mkFusedAddMulGraph : List UOp × UOpId := runUOpM do
+  let bufA ← TUOp.buffer .float32 []
+  let bufB ← TUOp.buffer .float32 []
+  let bufC ← TUOp.buffer .float32 []
+  let bufOut ← TUOp.buffer .float32 []
+  let add ← TUOp.add bufA bufB
+  let mul ← TUOp.mul add bufC
+  pure ([bufA.raw, bufB.raw, bufC.raw, bufOut.raw, add.raw, mul.raw], mul.raw.uid)
 
 /-! ## Kernel Types for Benchmarks -/
 

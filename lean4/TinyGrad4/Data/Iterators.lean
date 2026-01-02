@@ -151,6 +151,14 @@ def iterM (p : IteratorPrefetcher T) : IterM (α := IteratorPrefetcher T) IO T :
 
 end IteratorPrefetcher
 
+namespace BatchPrefetcher
+
+/-- Monadic iterator view for `BatchPrefetcher`. -/
+def iterM (p : BatchPrefetcher B) : IterM (α := BatchPrefetcher B) IO B :=
+  ⟨p⟩
+
+end BatchPrefetcher
+
 instance : Iterator (Prefetcher T) IO T where
   IsPlausibleStep _ _ := True
   step it := do
@@ -212,6 +220,24 @@ instance : ForIn IO (IteratorPrefetcher T) T where
               return a
           | .yield a => acc := a
     pure acc
+
+instance : Iterator (BatchPrefetcher B) IO B where
+  IsPlausibleStep _ _ := True
+  step it := do
+    match ← BatchPrefetcher.next it.internalState with
+    | some x =>
+        pure <| Std.Shrink.deflate <| PlausibleIterStep.yield it x (by trivial)
+    | none =>
+        pure <| Std.Shrink.deflate <| PlausibleIterStep.done (by trivial)
+
+instance : IteratorLoop (BatchPrefetcher B) IO IO :=
+  IteratorLoop.defaultImplementation
+
+instance : IteratorCollect (BatchPrefetcher B) IO IO :=
+  IteratorCollect.defaultImplementation
+
+instance : ToIterator (BatchPrefetcher B) IO (BatchPrefetcher B) B :=
+  ToIterator.ofM (BatchPrefetcher B) (fun p => ⟨p⟩)
 
 namespace GPUDataLoader
 

@@ -326,6 +326,15 @@ def profileIteratorPrefetcherNext (profiler : Profiler) (name : String)
   profiler.recordSampleSpan name start stop waitNs
   pure result
 
+/-- Profile a BatchPrefetcher `next` with wait time attribution. -/
+def profileBatchPrefetcherNext (profiler : Profiler) (name : String)
+    (p : BatchPrefetcher B) : IO (Option B) := do
+  let start ← IO.monoNanosNow
+  let (result, waitNs) ← p.nextWithWait
+  let stop ← IO.monoNanosNow
+  profiler.recordSampleSpan name start stop waitNs
+  pure result
+
 /-- Profile a GPU loader's `next` with wait time attribution. -/
 def profileGPULoaderNext (profiler : Profiler) (name : String)
     (loader : GPULoader.GPUDataLoader) : IO (Option GPULoader.GPUBuffer) := do

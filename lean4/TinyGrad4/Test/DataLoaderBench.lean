@@ -37,6 +37,15 @@ def main : IO Unit := do
   IO.println ""
   IO.println "=== Stagewise Profiling (iterator/prefetch/transfer/compute) ==="
 
+  let concatByteArrays (chunks : Array ByteArray) : ByteArray := Id.run do
+    let total := chunks.foldl (fun acc b => acc + b.size) 0
+    let mut out := ByteArray.emptyWithCapacity total
+    let mut offset := 0
+    for chunk in chunks do
+      out := ByteArray.copySlice chunk 0 out offset chunk.size false
+      offset := offset + chunk.size
+    out
+
   let profiler ← TinyGrad4.Data.Profiler.new
   let sampleSize := 4096
   let sampleCount := 512
@@ -44,7 +53,8 @@ def main : IO Unit := do
   let ds := TinyGrad4.Data.ofArray (Array.replicate sampleCount sample)
   let iterDs := TinyGrad4.Data.IterDataset.ofDataset ds (TinyGrad4.Data.RandKey.new 7) 1
   let profiled := TinyGrad4.Data.IterDataset.profile profiler "iterator" iterDs
-  let prefetcher ← profiled.toPrefetcher 8
+  let batchSize := 32
+  let prefetcher ← profiled.toBatchPrefetcher batchSize (fun chunks => pure (concatByteArrays chunks)) true 8
 
   let devices ← TinyGrad4.Data.GPULoader.discoverDevices
   let gpuDevice? :=
@@ -58,7 +68,7 @@ def main : IO Unit := do
 
   let mut count := 0
   repeat do
-    match ← TinyGrad4.Data.profileIteratorPrefetcherNext profiler "prefetch" prefetcher with
+    match ← TinyGrad4.Data.profileBatchPrefetcherNext profiler "prefetch" prefetcher with
     | none => break
     | some bytes =>
         let start ← IO.monoNanosNow
@@ -78,5 +88,5 @@ def main : IO Unit := do
         count := count + 1
 
   prefetcher.cancel
-  IO.println s!"  samples={count}"
+  IO.println s!"  batches={count}"
   IO.println (← profiler.summaryWithConcurrencyByStage)

@@ -8,9 +8,6 @@ import TinyGrad4.Backend.Fusion
 import TinyGrad4.Backend.FusedEwise
 import TinyGrad4.Backend.FusedReduce
 import TinyGrad4.Backend.FusedContract
-
--- Disable IO.monoNanosNow linter: interpreter instrumentation uses raw monotonic clocks.
-set_option linter.monoNanosNow false
 import TinyGrad4.Backend.FusedSGD
 import TinyGrad4.Backend.FusedMatmul
 import TinyGrad4.Backend.FusedSoftmax
@@ -20,6 +17,9 @@ import TinyGrad4.Backend.MetalEwise
 import TinyGrad4.Backend.DeviceBuffer
 import TinyGrad4.Tags
 import Std.Data.HashMap
+
+-- Disable IO.monoNanosNow linter: interpreter instrumentation uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 namespace TinyGrad4
 

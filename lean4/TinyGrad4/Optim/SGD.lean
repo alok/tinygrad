@@ -42,7 +42,11 @@ def buildUpdateTUOp {opP opG : Ops} {s : Shape} {r : Nat} {d : DType}
   let lrConst ← TUOp.const d lr.toFloat32
   let lrB ← TUOp.expand lrConst s
   let scaledGrad ← TUOp.binaryOp .MUL lrB grad
-  TUOp.binaryOp .SUB param scaledGrad
+  let updated ← TUOp.binaryOp .SUB param scaledGrad
+  let updated := TUOp.castShape updated s
+  let updated := TUOp.castDType updated d
+  let updated : TUOp .SUB s r d := TUOp.mkUnsafe updated.raw
+  pure updated
 
 def buildUpdateUOp (param grad : UOp) (lr : Float) : TensorM UOp := do
   let shape := param.shape

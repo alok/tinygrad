@@ -252,7 +252,8 @@ private def createFromIterator (iter : DataIterator ByteArray) (initState : Iter
       | some (batchData, state) =>
           let gpuBuf ← ByteArray.toGPUBuffer batchData device dtype
           gpuBuf.assertDevice device
-          queue.push { buffer := gpuBuf, state }
+          let ok ← queue.push { buffer := gpuBuf, state }
+          if !ok then break
       | none => break
     queue.finish
 
@@ -297,7 +298,8 @@ def fromSlices (slices : Array ByteSlice) (device : DeviceId)
       gpuBuf.assertDevice device
       pos := pos + 1
       let state : IteratorState := { position := pos, epoch := 0, key := RandKey.new 0 }
-      queue.push { buffer := gpuBuf, state }
+      let ok ← queue.push { buffer := gpuBuf, state }
+      if !ok then break
     queue.finish
 
   pure { queue, worker, device, numBatches := slices.size, lastState }
@@ -450,7 +452,8 @@ def createFromIteratorCfg [Dataset D ByteArray] (cfg : IteratorConfig D) (device
         | some (batchData, state) =>
             let gpuBuf ← ByteArray.toGPUBuffer batchData init.device dtype
             gpuBuf.assertDevice init.device
-            queue.push { buffer := gpuBuf, state }
+            let ok ← queue.push { buffer := gpuBuf, state }
+            if !ok then break
         | none => break
 
       queue.finish

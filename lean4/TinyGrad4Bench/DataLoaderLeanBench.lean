@@ -185,12 +185,8 @@ private def runPrefetchItems (cfg : BenchParams) : IO ProfileSnapshot := do
   let shuffled := profileDs profiler "shuffle" ds
   let sharded := profileDs profiler "shard" (shardDs 0 1 .interleaved true shuffled)
   let n := Dataset.len sharded
-  let fullCount :=
-    if cfg.batchSize == 0 then 0 else (n / cfg.batchSize) * cfg.batchSize
-  let totalBatches :=
-    if cfg.batchSize == 0 then 0 else fullCount / cfg.batchSize
-  let trimmed := takeDs fullCount sharded
-  let prefetcher ← Prefetcher.create trimmed cfg.prefetchBuffer
+  let totalBatches := if cfg.batchSize == 0 then 0 else n / cfg.batchSize
+  let prefetcher ← Prefetcher.create sharded cfg.prefetchBuffer
   let mut batches := 0
   while batches < totalBatches do
     let startBatch ← IO.monoNanosNow
@@ -204,6 +200,7 @@ private def runPrefetchItems (cfg : BenchParams) : IO ProfileSnapshot := do
     let stopBatch ← IO.monoNanosNow
     profiler.recordSample "batch" (stopBatch - startBatch)
     batches := batches + 1
+  prefetcher.cancel
   let (stages, concurrency, stageConcurrency) ← profiler.snapshotWithConcurrencyByStage
   pure { stages, concurrency, stageConcurrency }
 

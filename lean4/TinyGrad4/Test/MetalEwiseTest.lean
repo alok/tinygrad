@@ -11,6 +11,8 @@ Tests the Metal GPU dispatch for elementwise operations.
 
 -- Disable RawBuffer linter for test files
 set_option linter.useRawBuffer false
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 namespace TinyGrad4.Test.MetalEwiseTest
 

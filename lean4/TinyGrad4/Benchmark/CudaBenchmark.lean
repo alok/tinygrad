@@ -4,6 +4,8 @@ import TinyGrad4.Backend.Vectorization
 
 -- Disable RawBuffer linter for benchmark files that need FloatArray for data generation
 set_option linter.useRawBuffer false
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 /-!
 # CUDA Benchmark Kernels
@@ -20,16 +22,15 @@ open TinyGrad4.Backend.Vectorization
 
 /-! ## Vector Add Benchmark -/
 
-/-- CUDA kernel source for vector add (scalar) -/
-def vectorAddSource : String :=
+/-- CUDA kernel source for vector add (scalar) - size baked in at compile time -/
+def vectorAddSource (size : Nat) : String :=
 "extern \"C\" __global__ void bench_add(
     const float* __restrict__ a,
     const float* __restrict__ b,
-    float* __restrict__ out,
-    int n
+    float* __restrict__ out
 ) {
     int gid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (gid < n) {
+    if (gid < " ++ toString size ++ ") {
         out[gid] = a[gid] + b[gid];
     }
 }"
@@ -83,54 +84,31 @@ structure VectorAddState where
 
 /-- Create vector add benchmark kernel for given size -/
 def makeVectorAddKernel (size : Nat) : IO BenchmarkKernel := do
-  IO.println s!"  DEBUG: makeVectorAddKernel({size}) - creating IO.Ref..."
-  
   -- Mutable state holder
   let stateRef : IO.Ref (Option VectorAddState) ← IO.mkRef none
-  IO.println "  DEBUG: makeVectorAddKernel - IO.Ref created, returning BenchmarkKernel..."
-  
 
   return {
     setup := do
-      IO.println "  DEBUG: setup - allocating buffers..."
-      
       -- Allocate buffers (size * 4 bytes for float32)
       let bufA ← cudaAllocBytes (size * 4)
       let bufB ← cudaAllocBytes (size * 4)
       let bufOut ← cudaAllocBytes (size * 4)
-      IO.println "  DEBUG: setup - buffers allocated"
-      
 
       -- Initialize host data
-      IO.println "  DEBUG: setup - initializing host data..."
-      
       let hostA := FloatArray.mk ((Array.range size).map fun i =>
         (i % 1000).toFloat / 1000.0)
       let hostB := FloatArray.mk ((Array.range size).map fun i =>
         ((i + 500) % 1000).toFloat / 1000.0)
-      IO.println "  DEBUG: setup - host data initialized"
-      
 
       -- Copy to GPU
-      IO.println "  DEBUG: setup - copying to GPU..."
-      
       cudaCopyInBytes bufA (floatArrayToBytes hostA)
       cudaCopyInBytes bufB (floatArrayToBytes hostB)
-      IO.println "  DEBUG: setup - data copied to GPU"
-      
 
-      -- Compile kernel
-      IO.println "  DEBUG: setup - compiling kernel..."
-      
-      let prog ← cudaCompile "bench_add" vectorAddSource
-      IO.println "  DEBUG: setup - kernel compiled!"
-      
+      -- Compile kernel (size baked in)
+      let prog ← cudaCompile "bench_add" (vectorAddSource size)
 
       -- Store state
-      IO.println "  DEBUG: setup - storing state..."
-      
       stateRef.set (some { bufA, bufB, bufOut, prog, size, hostA, hostB })
-      IO.println "  DEBUG: setup - done!"
       
 
     runOnce := do
@@ -235,11 +213,7 @@ def makeVectorAddFloat4Kernel (size : Nat)
 
 /-- Run vector add benchmark with standard spec -/
 def runVectorAdd1M : IO BenchmarkResult := do
-  IO.println "  DEBUG: runVectorAdd1M - creating kernel..."
-  
   let kernel ← makeVectorAddKernel 1_000_000
-  IO.println "  DEBUG: runVectorAdd1M - kernel created, running benchmark..."
-  
   runBenchmarkKernel vectorAdd1M kernel
 
 /-- Run vectorized (float4) vector add benchmark -/
@@ -264,10 +238,7 @@ def runAllBenchmarks : IO (Array BenchmarkResult) := do
   IO.println "Running CUDA benchmarks..."
   IO.println ""
 
-  IO.println "  DEBUG: About to create kernel..."
-  
   IO.println "  [1/4] vector_add_1m (scalar)..."
-  
   results := results.push (← runVectorAdd1M)
   IO.println s!"        Done: {results[results.size - 1]!.stats.mean.toMicros} μs mean"
 
@@ -284,6 +255,208 @@ def runAllBenchmarks : IO (Array BenchmarkResult) := do
   IO.println s!"        Done: {results[results.size - 1]!.stats.mean.toMicros} μs mean"
 
   IO.println ""
+  return results
+
+/-! ## Matmul Benchmarks -/
+
+/-- CUDA kernel source for naive matmul (for reference) -/
+def matmulNaiveSource (m k n : Nat) : String :=
+"extern \"C\" __global__ void sgemm_naive(
+    const float* __restrict__ A,
+    const float* __restrict__ B,
+    float* __restrict__ C
+) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < " ++ toString m ++ " && col < " ++ toString n ++ ") {
+        float sum = 0.0f;
+        for (int k = 0; k < " ++ toString k ++ "; k++) {
+            sum += A[row * " ++ toString k ++ " + k] * B[k * " ++ toString n ++ " + col];
+        }
+        C[row * " ++ toString n ++ " + col] = sum;
+    }
+}"
+
+/-- CUDA kernel source for tiled matmul (better memory access pattern) -/
+def matmulTiledSource (m k n : Nat) (tileSize : Nat := 16) : String :=
+  let ts := toString tileSize
+"extern \"C\" __global__ void sgemm_tiled(
+    const float* __restrict__ A,
+    const float* __restrict__ B,
+    float* __restrict__ C
+) {
+    __shared__ float As[" ++ ts ++ "][" ++ ts ++ "];
+    __shared__ float Bs[" ++ ts ++ "][" ++ ts ++ "];
+
+    int bx = blockIdx.x, by = blockIdx.y;
+    int tx = threadIdx.x, ty = threadIdx.y;
+
+    int row = by * " ++ ts ++ " + ty;
+    int col = bx * " ++ ts ++ " + tx;
+
+    float sum = 0.0f;
+    int numTiles = (" ++ toString k ++ " + " ++ ts ++ " - 1) / " ++ ts ++ ";
+
+    for (int t = 0; t < numTiles; t++) {
+        int aCol = t * " ++ ts ++ " + tx;
+        int bRow = t * " ++ ts ++ " + ty;
+
+        As[ty][tx] = (row < " ++ toString m ++ " && aCol < " ++ toString k ++ ") ?
+                      A[row * " ++ toString k ++ " + aCol] : 0.0f;
+        Bs[ty][tx] = (bRow < " ++ toString k ++ " && col < " ++ toString n ++ ") ?
+                      B[bRow * " ++ toString n ++ " + col] : 0.0f;
+
+        __syncthreads();
+
+        for (int i = 0; i < " ++ ts ++ "; i++) {
+            sum += As[ty][i] * Bs[i][tx];
+        }
+        __syncthreads();
+    }
+
+    if (row < " ++ toString m ++ " && col < " ++ toString n ++ ") {
+        C[row * " ++ toString n ++ " + col] = sum;
+    }
+}"
+
+/-- State for matmul benchmark -/
+structure MatmulState where
+  bufA : CUDABuffer
+  bufB : CUDABuffer
+  bufC : CUDABuffer
+  prog : CUDAProgram
+  m : Nat
+  k : Nat
+  n : Nat
+
+/-- Create matmul benchmark kernel -/
+def makeMatmulKernel (spec : MatmulSpec) (useTiled : Bool := true) : IO BenchmarkKernel := do
+  let stateRef : IO.Ref (Option MatmulState) ← IO.mkRef none
+  let m := spec.m
+  let k := spec.k
+  let n := spec.n
+
+  return {
+    setup := do
+      -- Allocate buffers
+      let bufA ← cudaAllocBytes (m * k * 4)
+      let bufB ← cudaAllocBytes (k * n * 4)
+      let bufC ← cudaAllocBytes (m * n * 4)
+
+      -- Initialize with simple pattern
+      let hostA := FloatArray.mk ((Array.range (m * k)).map fun i =>
+        ((i % 100).toFloat - 50.0) / 100.0)
+      let hostB := FloatArray.mk ((Array.range (k * n)).map fun i =>
+        ((i % 100).toFloat - 50.0) / 100.0)
+
+      cudaCopyInBytes bufA (floatArrayToBytes hostA)
+      cudaCopyInBytes bufB (floatArrayToBytes hostB)
+
+      -- Compile kernel
+      let kernelName := if useTiled then "sgemm_tiled" else "sgemm_naive"
+      let source := if useTiled then matmulTiledSource m k n else matmulNaiveSource m k n
+      let prog ← cudaCompile kernelName source
+
+      stateRef.set (some { bufA, bufB, bufC, prog, m, k, n })
+
+    runOnce := do
+      match ← stateRef.get with
+      | none => throw (IO.Error.userError "benchmark not set up")
+      | some s =>
+        let bufs := #[s.bufA, s.bufB, s.bufC]
+        let tileSize := 16
+        let gridX := (s.n + tileSize - 1) / tileSize
+        let gridY := (s.m + tileSize - 1) / tileSize
+        cudaLaunch2D s.prog bufs gridX gridY tileSize tileSize
+
+    sync := cudaSync
+
+    verify := do
+      match ← stateRef.get with
+      | none => return false
+      | some s =>
+        let resultBytes ← cudaCopyOutBytes s.bufC (s.m * s.n * 4)
+        return resultBytes.size == s.m * s.n * 4
+
+    cleanup := do
+      match ← stateRef.get with
+      | none => pure ()
+      | some s =>
+        cudaFree s.bufA
+        cudaFree s.bufB
+        cudaFree s.bufC
+        stateRef.set none
+
+    backendName := if useTiled then "CUDA (tiled)" else "CUDA (naive)"
+
+    deviceName := cudaDeviceName
+  }
+
+/-- Run matmul benchmark and compute proper metrics -/
+def runMatmulBenchmark (spec : MatmulSpec) (useTiled : Bool := true) : IO BenchmarkResult := do
+  let kernel ← makeMatmulKernel spec useTiled
+
+  -- Setup
+  kernel.setup
+
+  -- Warmup
+  for _ in [:spec.warmupRuns] do
+    kernel.runOnce
+    kernel.sync
+
+  -- Timed runs
+  let mut timings : Array Timing := #[]
+  for _ in [:spec.iterations] do
+    let start ← IO.monoNanosNow
+    kernel.runOnce
+    kernel.sync
+    let stop ← IO.monoNanosNow
+    timings := timings.push ⟨stop - start⟩
+
+  -- Verify
+  let verified ← kernel.verify
+
+  -- Compute stats with matmul-specific metrics
+  let stats := TimingStats.compute timings
+  let timeUs := stats.min.toMicros
+  let bandwidth := spec.computeBandwidth timeUs
+  let throughput := spec.computeThroughput timeUs
+
+  -- Get metadata
+  let device ← kernel.deviceName
+  let timestamp ← IO.monoMsNow
+
+  -- Cleanup
+  kernel.cleanup
+
+  return {
+    spec := spec.toBenchmarkSpec
+    backend := kernel.backendName
+    device := device
+    stats := stats
+    bandwidth_gb_s := bandwidth
+    throughput_gflops := throughput
+    verified := verified
+    timestamp := timestamp
+    gitCommit := none
+  }
+
+/-- Run all matmul sizes -/
+def runMatmulBenchmarks : IO (Array BenchmarkResult) := do
+  let mut results := #[]
+
+  IO.println "  [matmul] 512x512 (tiled)..."
+  results := results.push (← runMatmulBenchmark matmul512)
+  IO.println s!"        Done: {results[results.size - 1]!.stats.mean.toMicros} μs mean, {results[results.size - 1]!.throughput_gflops} GFLOP/s"
+
+  IO.println "  [matmul] 1024x1024 (tiled)..."
+  results := results.push (← runMatmulBenchmark matmul1024)
+  IO.println s!"        Done: {results[results.size - 1]!.stats.mean.toMicros} μs mean, {results[results.size - 1]!.throughput_gflops} GFLOP/s"
+
+  IO.println "  [matmul] 2048x2048 (tiled)..."
+  results := results.push (← runMatmulBenchmark matmul2048)
+  IO.println s!"        Done: {results[results.size - 1]!.stats.mean.toMicros} μs mean, {results[results.size - 1]!.throughput_gflops} GFLOP/s"
+
   return results
 
 end TinyGrad4.Benchmark.Cuda

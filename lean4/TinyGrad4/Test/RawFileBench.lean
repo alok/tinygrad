@@ -1,5 +1,7 @@
 import TinyGrad4.Backend.Accelerate
 import TinyGrad4.Data.Prefetch
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 /-!
 # Raw File Bench

@@ -6,6 +6,8 @@ import TinyGrad4.Data.Prefetch
 import TinyGrad4.Data.Shard
 import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Transform
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 namespace TinyGrad4Bench
 

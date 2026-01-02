@@ -1,4 +1,7 @@
 import TinyGrad4.Data.GPULoader
+import TinyGrad4.Data.Shard
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
 
 /-!
 # GPU Data Loader Benchmark
@@ -13,6 +16,52 @@ open TinyGrad4.Data.GPULoader
 open TinyGrad4.Data
 
 namespace TinyGrad4.Test
+
+private instance : Inhabited TinyGrad4.Data.ByteSlice :=
+  ⟨TinyGrad4.Data.ByteSlice.mk' ByteArray.empty 0 0⟩
+
+private def getEnvNat (key : String) (default : Nat) : IO Nat := do
+  match (← IO.getEnv key) with
+  | some v =>
+    match v.toNat? with
+    | some n => pure n
+    | none => pure default
+  | none => pure default
+
+private def getEnvString (key : String) (default : String) : IO String := do
+  match (← IO.getEnv key) with
+  | some v => pure v
+  | none => pure default
+
+private def getEnvBool (key : String) (default : Bool) : IO Bool := do
+  match (← IO.getEnv key) with
+  | some v =>
+    let v' := v.trimAscii.toString.toLower
+    pure (v' == "1" || v' == "true" || v' == "yes")
+  | none => pure default
+
+private def parseDevice (raw : String) : Option DeviceId :=
+  let s := raw.trimAscii.toString.toLower
+  if s == "auto" then
+    none
+  else if s == "metal" then
+    some .metal
+  else if s == "cpu" then
+    some .cpu
+  else if s.startsWith "cuda" then
+    let parts := s.splitOn ":"
+    let idx := match parts with
+      | _ :: v :: _ => (String.toNat? v).getD 0
+      | _ => 0
+    some (.cuda idx)
+  else if s.startsWith "tpu" then
+    let parts := s.splitOn ":"
+    let idx := match parts with
+      | _ :: v :: _ => (String.toNat? v).getD 0
+      | _ => 0
+    some (.tpu idx)
+  else
+    none
 
 /-- Measure time in milliseconds -/
 def timeMs (action : IO α) : IO (Float × α) := do
@@ -51,8 +100,11 @@ def benchBufferAlloc (device : DeviceId) (sizes : Array Nat) (iters : Nat := 100
   IO.println ""
 
 /-- Benchmark zero-copy vs regular copy on Metal -/
-def benchZeroCopy (imageData : ByteArray) (batchSize : Nat := 64) (iters : Nat := 100) : IO Unit := do
-  IO.println "=== Zero-Copy vs Regular Copy (Metal) ==="
+def benchZeroCopy (device : DeviceId) (imageData : ByteArray) (batchSize : Nat := 64) (iters : Nat := 100) : IO Unit := do
+  let label := if device == .metal then "Metal" else s!"{device}"
+  IO.println s!"=== Zero-Copy vs Regular Copy ({label}) ==="
+  if device != .metal then
+    IO.println "  note: zero-copy only supported on Metal (fallback copy on other backends)"
 
   let numImages := imageData.size / 784
   let numBatches := numImages / batchSize
@@ -70,7 +122,7 @@ def benchZeroCopy (imageData : ByteArray) (batchSize : Nat := 64) (iters : Nat :
     for i in [:testCount] do
       if h : i < slices.size then
         let slice := slices[i]
-        let buf ← ByteSlice.toGPUBuffer slice .metal .uint8
+        let buf ← ByteSlice.toGPUBuffer slice device .uint8
         buf.free
 
   let copyBatchPerSec := testCount.toFloat * 1000.0 / copyMs
@@ -84,7 +136,7 @@ def benchZeroCopy (imageData : ByteArray) (batchSize : Nat := 64) (iters : Nat :
     for i in [:testCount] do
       if h : i < slices.size then
         let slice := slices[i]
-        let buf ← ByteSlice.toGPUBufferZeroCopy slice .metal .uint8
+        let buf ← ByteSlice.toGPUBufferZeroCopy slice device .uint8
         buf.free
 
   let zcBatchPerSec := testCount.toFloat * 1000.0 / zcMs
@@ -105,38 +157,52 @@ instance : Dataset ByteChunkDataset ByteArray where
   len ds := ds.chunks.size
   getItem ds idx _ := pure ds.chunks[idx]!
 
+/-- Dataset adapter for image-sized ByteArray slices. -/
+structure ByteImageDataset where
+  data : ByteArray
+  imageSize : Nat
+  numImages : Nat
+  deriving Inhabited
+
+instance : Dataset ByteImageDataset ByteArray where
+  len ds := ds.numImages
+  getItem ds idx _ :=
+    let start := idx * ds.imageSize
+    pure (ds.data.extract start (start + ds.imageSize))
+
 /-- Benchmark GPUDataLoader throughput -/
-def benchGPULoader (imageData : ByteArray) (batchSize : Nat := 64) (bufferSize : Nat := 4) : IO Unit := do
+def benchGPULoader (device : DeviceId) (imageData : ByteArray) (batchSize : Nat := 64) (bufferSize : Nat := 4)
+    (world? : Option WorldConfig := none) : IO Unit := do
   IO.println s!"=== GPUDataLoader Throughput (batch={batchSize}, buffer={bufferSize}) ==="
 
   let numImages := imageData.size / 784
-  let numBatches := numImages / batchSize
   let batchBytes := batchSize * 784
 
-  -- Create chunked dataset
-  let chunks := Array.range numBatches |>.map fun i =>
-    let start := i * batchBytes
-    imageData.extract start (start + batchBytes)
-
-  let ds : ByteChunkDataset := { chunks }
+  -- Sample-level dataset (GPUDataLoader batches internally)
+  let baseDs : ByteImageDataset := { data := imageData, imageSize := 784, numImages }
+  let cfg := match world? with
+    | some world => world.toShardConfig .interleaved true
+    | none => { shardIndex := 0, numShards := 1, mode := .interleaved, dropRemainder := true }
+  let ds : ShardedDataset ByteImageDataset ByteArray := shardWithConfig cfg baseDs
 
   -- Create loader and consume all batches
-  let (totalMs, _) ← timeMs do
-    let loader ← GPUDataLoader.create ds .metal batchSize bufferSize .uint8
+  let (totalMs, totalBatches) ← timeMs do
+    let loader ← GPUDataLoader.create ds device batchSize bufferSize .uint8
     let mut count := 0
     for buf in loader do
       count := count + 1
       buf.free
     pure count
 
-  let batchPerSec := numBatches.toFloat * 1000.0 / totalMs
-  let mbPerSec := numBatches.toFloat * batchBytes.toFloat / totalMs / 1000.0
-  IO.println s!"  {numBatches} batches in {totalMs.toString.take 6}ms"
+  let batchPerSec := totalBatches.toFloat * 1000.0 / totalMs
+  let mbPerSec := totalBatches.toFloat * batchBytes.toFloat / totalMs / 1000.0
+  IO.println s!"  {totalBatches} batches in {totalMs.toString.take 6}ms"
   IO.println s!"  {batchPerSec.toString.take 6} batch/s, {mbPerSec.toString.take 6} MB/s"
   IO.println ""
 
 /-- Benchmark ByteSlice loader with zero-copy -/
-def benchSliceLoader (imageData : ByteArray) (batchSize : Nat := 64) (bufferSize : Nat := 4) : IO Unit := do
+def benchSliceLoader (device : DeviceId) (imageData : ByteArray) (batchSize : Nat := 64) (bufferSize : Nat := 4)
+    (world? : Option WorldConfig := none) : IO Unit := do
   IO.println s!"=== GPUDataLoader from Slices (zero-copy, batch={batchSize}) ==="
 
   let numImages := imageData.size / 784
@@ -144,21 +210,71 @@ def benchSliceLoader (imageData : ByteArray) (batchSize : Nat := 64) (bufferSize
   let batchBytes := batchSize * 784
 
   -- Create slices (zero-copy views)
-  let slices := Array.range numBatches |>.map fun i =>
+  let baseSlices := Array.range numBatches |>.map fun i =>
     ByteSlice.mk' imageData (i * batchBytes) batchBytes
+  let cfg := match world? with
+    | some world => world.toShardConfig .interleaved true
+    | none => { shardIndex := 0, numShards := 1, mode := .interleaved, dropRemainder := true }
+  let indices : Array Nat := TinyGrad4.Data.allShardIndices cfg numBatches
+  let slices := indices.map fun idx => baseSlices[idx]!
 
   -- Create loader and consume all batches
   let (totalMs, _) ← timeMs do
-    let loader ← GPUDataLoader.fromSlices slices .metal bufferSize .uint8
+    let loader ← GPUDataLoader.fromSlices slices device bufferSize .uint8
     let mut count := 0
     for buf in loader do
       count := count + 1
       buf.free
     pure count
 
-  let batchPerSec := numBatches.toFloat * 1000.0 / totalMs
-  let mbPerSec := numBatches.toFloat * batchBytes.toFloat / totalMs / 1000.0
-  IO.println s!"  {numBatches} batches in {totalMs.toString.take 6}ms"
+  let sliceCount := slices.size
+  let batchPerSec := sliceCount.toFloat * 1000.0 / totalMs
+  let mbPerSec := sliceCount.toFloat * batchBytes.toFloat / totalMs / 1000.0
+  IO.println s!"  {sliceCount} batches in {totalMs.toString.take 6}ms"
+  IO.println s!"  {batchPerSec.toString.take 6} batch/s, {mbPerSec.toString.take 6} MB/s"
+  IO.println ""
+
+/-- Benchmark MultiGPULoader throughput across devices. -/
+def benchMultiGPULoader (devices : Array DeviceId) (imageData : ByteArray)
+    (imageSize : Nat) (batchSize : Nat) (bufferSize : Nat)
+    (world? : Option WorldConfig := none) : IO Unit := do
+  if devices.size < 2 then
+    IO.println "MultiGPULoader: need at least 2 devices"
+    return
+
+  IO.println s!"=== MultiGPULoader Throughput (devices={devices.size}, batch={batchSize}, buffer={bufferSize}) ==="
+
+  let numImages := imageData.size / imageSize
+  let baseDs : ByteImageDataset := { data := imageData, imageSize, numImages }
+  let batchBytes := batchSize * imageSize
+
+  let (totalMs, totalBatches) ← timeMs do
+    let pool ← MultiGPULoader.create baseDs devices batchSize bufferSize .uint8 world?
+    let rounds := pool.numBatchesPerDevice
+    let mut count := 0
+    if rounds == 0 then
+      pool.stop
+      pure count
+    else
+      for _ in [:rounds] do
+        let batches ← pool.nextAll
+        for (_, buf?) in batches do
+          match buf? with
+          | some buf =>
+              count := count + 1
+              buf.free
+          | none => pure ()
+      pool.stop
+      pure count
+
+  if totalBatches == 0 then
+    IO.println "  skipped (dataset too small for sharding)"
+    IO.println ""
+    return
+
+  let batchPerSec := totalBatches.toFloat * 1000.0 / totalMs
+  let mbPerSec := totalBatches.toFloat * batchBytes.toFloat / totalMs / 1000.0
+  IO.println s!"  {totalBatches} batches in {totalMs.toString.take 6}ms"
   IO.println s!"  {batchPerSec.toString.take 6} batch/s, {mbPerSec.toString.take 6} MB/s"
   IO.println ""
 
@@ -169,31 +285,68 @@ def main : IO Unit := do
   IO.println "╚═══════════════════════════════════════════════════════════════╝"
   IO.println ""
 
-  -- Discover devices
-  let devices ← discoverDevices
-  if devices.isEmpty then
+  let quick ← getEnvBool "TINYGRAD4_BENCH_QUICK" false
+  let defaultImages := if quick then 2000 else 10000
+  let defaultBatch := if quick then 32 else 64
+  let defaultBuffer := if quick then 2 else 4
+  let defaultIters := if quick then 20 else 100
+
+  let deviceEnv ← getEnvString "TG4_GPU_DEVICE" "auto"
+  let allDevices ← discoverDevices
+  if allDevices.isEmpty then
     IO.println "No GPU devices available!"
     return
 
-  for dev in devices do
-    let name ← dev.name
-    IO.println s!"Found device: {name}"
+  let world ← WorldConfig.fromEnv
+  let worldShard := if world.worldSize > 1 then some world else none
+  if world.worldSize > 1 then
+    IO.println s!"World shard: rank={world.rank} world={world.worldSize}"
+
+  let device ← match parseDevice deviceEnv with
+    | some dev => do
+        match dev with
+        | .cuda idx =>
+            let count ← TinyGrad4.Backend.Cuda.deviceCount
+            if idx >= count then
+              throw (IO.userError s!"TG4_GPU_DEVICE={deviceEnv} not in [0, {count})")
+        | _ => pure ()
+        if !(← dev.isAvailable) then
+          throw (IO.userError s!"TG4_GPU_DEVICE={deviceEnv} is not available")
+        pure dev
+    | none => pure allDevices[0]!
+
+  let deviceName ← device.name
+  IO.println s!"Using device: {deviceName}"
   IO.println ""
 
   -- Generate synthetic data (similar to MNIST: 10k images of 784 bytes)
-  IO.println "Generating synthetic data (10k x 784 bytes = 7.84MB)..."
-  let numImages := 10000
-  let imageSize := 784
+  let numImages ← getEnvNat "TG4_GPU_NUM_IMAGES" defaultImages
+  let imageSize ← getEnvNat "TG4_GPU_IMAGE_SIZE" 784
+  let batchSize ← getEnvNat "TG4_GPU_BATCH" defaultBatch
+  let bufferSize ← getEnvNat "TG4_GPU_BUFFER" defaultBuffer
+  let iters ← getEnvNat "TG4_GPU_ITERS" defaultIters
+  if numImages < batchSize then
+    throw (IO.userError s!"TG4_GPU_NUM_IMAGES={numImages} must be >= batch size {batchSize}")
   let totalBytes := numImages * imageSize
+  IO.println s!"Generating synthetic data ({numImages} x {imageSize} bytes = {totalBytes / 1024}KB)..."
   let imageData := ByteArray.mk (Array.replicate totalBytes 42)
   IO.println s!"Generated {numImages} images ({totalBytes / 1024}KB)"
   IO.println ""
 
   -- Run benchmarks
-  benchBufferAlloc .metal #[1024, 4096, 16384, 65536, 262144] 100
-  benchZeroCopy imageData 64 100
-  benchGPULoader imageData 64 4
-  benchSliceLoader imageData 64 4
+  benchBufferAlloc device #[1024, 4096, 16384, 65536, 262144] iters
+  benchZeroCopy device imageData batchSize iters
+  benchGPULoader device imageData batchSize bufferSize worldShard
+  benchSliceLoader device imageData batchSize bufferSize worldShard
+
+  let multiEnabled ← getEnvBool "TG4_GPU_MULTI" true
+  let multiDevices := allDevices.filter fun d =>
+    match d with
+    | .cuda _ => true
+    | .metal => true
+    | _ => false
+  if multiEnabled && multiDevices.size >= 2 then
+    benchMultiGPULoader multiDevices imageData imageSize batchSize bufferSize worldShard
 
   -- Larger batch sizes
   IO.println "=== Batch Size Scaling ==="
@@ -205,7 +358,7 @@ def main : IO Unit := do
       ByteSlice.mk' imageData (i * batchBytes) batchBytes
 
     let (ms, _) ← timeMs do
-      let loader ← GPUDataLoader.fromSlices slices .metal 4 .uint8
+      let loader ← GPUDataLoader.fromSlices slices device bufferSize .uint8
       for buf in loader do
         buf.free
 

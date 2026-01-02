@@ -32,6 +32,7 @@ class TrainResult:
     data_wait_s: list[float]
     h2d_s: list[float]
     step_s: list[float]
+    loop_s: list[float]
     cpu_pct: float
     rss_bytes: int
     checksum: float
@@ -222,6 +223,7 @@ def train_loop(
     data_wait_s: list[float] = []
     h2d_s: list[float] = []
     step_s: list[float] = []
+    loop_s: list[float] = []
     checksum = 0.0
     total_bytes = 0
 
@@ -259,6 +261,7 @@ def train_loop(
             torch.cuda.synchronize()
         t5 = time.perf_counter()
         step_s.append(t5 - t4)
+        loop_s.append(t5 - t0)
 
         total_bytes += len(buf)
         if isinstance(raw, memoryview):
@@ -271,13 +274,32 @@ def train_loop(
     cpu_pct = sampler.mean()
     rss = proc.memory_info().rss
 
-    return TrainResult(name, steps, total_bytes, wall, data_wait_s, h2d_s, step_s, cpu_pct, rss, checksum)
+    return TrainResult(
+        name,
+        steps,
+        total_bytes,
+        wall,
+        data_wait_s,
+        h2d_s,
+        step_s,
+        loop_s,
+        cpu_pct,
+        rss,
+        checksum,
+    )
 
 
 def print_result(r: TrainResult) -> None:
     gb = r.total_bytes / (1024 ** 3)
     steps_per_s = r.steps / r.wall_s if r.wall_s else 0.0
     gbps = gb / r.wall_s if r.wall_s else 0.0
+    total_wait = sum(r.data_wait_s)
+    total_h2d = sum(r.h2d_s)
+    total_step = sum(r.step_s)
+    total_loop = sum(r.loop_s)
+    stall_frac = total_wait / total_loop if total_loop else 0.0
+    compute_frac = total_step / total_loop if total_loop else 0.0
+    h2d_frac = total_h2d / total_loop if total_loop else 0.0
 
     print(f"== {r.name} ==")
     print(f"steps: {r.steps}  wall: {r.wall_s:.3f}s  steps/s: {steps_per_s:.2f}  GB/s: {gbps:.2f}")
@@ -292,6 +314,14 @@ def print_result(r: TrainResult) -> None:
     print(
         "step p50/p90/p99 (ms): "
         f"{pct(r.step_s, 50)*1e3:.2f} / {pct(r.step_s, 90)*1e3:.2f} / {pct(r.step_s, 99)*1e3:.2f}"
+    )
+    print(
+        "loop p50/p90/p99 (ms): "
+        f"{pct(r.loop_s, 50)*1e3:.2f} / {pct(r.loop_s, 90)*1e3:.2f} / {pct(r.loop_s, 99)*1e3:.2f}"
+    )
+    print(
+        "util: wait/step/h2d (%): "
+        f"{stall_frac*100:.1f} / {compute_frac*100:.1f} / {h2d_frac*100:.1f}"
     )
     print(f"cpu%: {r.cpu_pct:.1f}  rss: {r.rss_bytes/1e9:.2f} GB  checksum: {r.checksum:.1f}")
 

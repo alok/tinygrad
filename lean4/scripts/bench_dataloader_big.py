@@ -251,7 +251,8 @@ def bench_grain(
     try:
         sys.path.append(os.path.expanduser("~/grain"))
         import grain  # type: ignore
-    except Exception:
+    except Exception as e:
+        print(f"grain import failed: {e}", file=sys.stderr)
         return None
 
     ds = MMapDataSource(
@@ -311,7 +312,8 @@ def bench_torch(
 ) -> Optional[BenchResult]:
     try:
         from torch.utils.data import DataLoader, Dataset  # type: ignore
-    except Exception:
+    except Exception as e:
+        print(f"torch import failed: {e}", file=sys.stderr)
         return None
 
     class FileDataset(Dataset):
@@ -353,6 +355,7 @@ def bench_torch(
         num_workers=num_workers,
         prefetch_factor=prefetch if num_workers > 0 else None,
         persistent_workers=num_workers > 0,
+        collate_fn=lambda x: x,
     )
 
     return run_loop(

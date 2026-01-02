@@ -16,6 +16,9 @@ Designed to mirror Grain's "wait time" signals without heavy dependencies.
 
 namespace TinyGrad4.Data
 
+-- Disable IO.monoNanosNow linter: profiling needs raw monotonic timestamps.
+set_option linter.monoNanosNow false
+
 /-! ## StageStat -/
 
 /-- Aggregate timing stats for a pipeline stage. -/

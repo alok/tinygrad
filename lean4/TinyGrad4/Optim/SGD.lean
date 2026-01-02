@@ -1,5 +1,6 @@
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
+import TinyGrad4.UOp.Typed
 import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Gradient.Autodiff
 
@@ -36,19 +37,20 @@ def create (lr : Float := 0.01) (momentum : Float := 0.0) : SGD :=
 
 /-- Build UOps for SGD update formula.
     Returns new_param as UOp: param - lr * grad -/
+def buildUpdateTUOp {opP opG : Ops} {s : Shape} {r : Nat} {d : DType}
+    (param : TUOp opP s r d) (grad : TUOp opG s r d) (lr : Float) : TUOpM (TUOp .SUB s r d) := do
+  let lrConst ← TUOp.const d lr.toFloat32
+  let lrB ← TUOp.expand lrConst s
+  let scaledGrad ← TUOp.binaryOp .MUL lrB grad
+  TUOp.binaryOp .SUB param scaledGrad
+
 def buildUpdateUOp (param grad : UOp) (lr : Float) : TensorM UOp := do
-  let dtype := param.dtype
   let shape := param.shape
-
-  -- Create lr constant and expand to param shape
-  let lrConst ← UOp.const dtype lr.toFloat32
-  let lrB ← UOp.expand lrConst shape
-
-  -- lr * grad
-  let scaledGrad ← UOp.binaryOp .MUL lrB grad
-
-  -- param - lr * grad
-  UOp.binaryOp .SUB param scaledGrad
+  let dtype := param.dtype
+  let paramT : TUOp param.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe param
+  let gradT : TUOp grad.op shape (TUOp.rankOf shape) dtype := TUOp.mkUnsafe grad
+  let updated ← buildUpdateTUOp paramT gradT lr
+  pure updated.raw
 
 /-- Single step update using UOps.
     Returns: updated param RawBuffer -/

@@ -108,6 +108,13 @@ instance : Inhabited UOp where
 
 namespace UOp
 
+/-!
+Raw (untyped) UOp alias.
+
+We plan to make `UOp` a typed wrapper; keep `UOp.Raw` to refer to the current raw node.
+-/
+abbrev Raw := UOp
+
 def numSrc (u : UOp) : Nat := u.src.length
 def isConst (u : UOp) : Bool := u.op == .CONST || u.op == .VCONST
 def isBuffer (u : UOp) : Bool := u.op == .BUFFER
@@ -154,6 +161,8 @@ def clearIntern : UOpM Unit := do
 def runUOpMWith (st : UOpState) (m : UOpM α) : α := (m.run st).1
 
 namespace UOp
+
+abbrev RawM := UOpM
 
 private def keyOf (op : Ops) (dtype : DType) (src : List UOp) (arg : UArg) (shape : Shape) : UOpKey :=
   { op, dtype, src := src.map (·.uid), arg, shape }

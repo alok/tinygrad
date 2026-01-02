@@ -8,6 +8,7 @@ import TinyGrad4.Data.ArrayN
 import TinyGrad4.Data.Loader
 import TinyGrad4.Ops
 import TinyGrad4.UOp.UOp
+import TinyGrad4.UOp.Typed
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Notation

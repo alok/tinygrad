@@ -1,6 +1,7 @@
 -- Import linters early so they run on all files that import Basic
 import TinyGrad4.Linter.FloatLinter
 import TinyGrad4.Linter.RawBufferLinter
+import TinyGrad4.Linter.ByteArrayCapacityLinter
 
 namespace TinyGrad4
 

@@ -38,6 +38,16 @@ def castShape {op : Ops} {s : Shape} {r : Nat} {d : DType} (t : TUOp op s r d) (
     TUOp op s' (rankOf s') d :=
   { raw := t.raw, h_op := sorry_proof, h_shape := sorry_proof, h_rank := sorry_proof, h_dtype := sorry_proof }
 
+inductive TUOpList (d : DType) : List Shape -> Type where
+  | nil : TUOpList d []
+  | cons {op : Ops} {s : Shape} {r : Nat} {ss : List Shape} :
+      TUOp op s r d -> TUOpList d ss -> TUOpList d (s :: ss)
+
+def TUOpList.toUOps {d : DType} {shapes : List Shape} (xs : TUOpList d shapes) : List UOp :=
+  match xs with
+  | .nil => []
+  | .cons x xs => x.raw :: xs.toUOps
+
 def castDType {op : Ops} {s : Shape} {r : Nat} {d : DType} (t : TUOp op s r d) (d' : DType) :
     TUOp op s r d' :=
   { raw := t.raw, h_op := sorry_proof, h_shape := sorry_proof, h_rank := sorry_proof, h_dtype := sorry_proof }
@@ -116,9 +126,11 @@ def cat {opx opy : Ops} {sx sy : Shape} {rx ry : Nat} {d : DType} {out : Shape} 
   let raw ← UOp.cat [x.raw, y.raw] axis
   pure (mkUnsafe raw)
 
-def catList {d : DType} (xs : List UOp) (outShape : Shape) (axis : Nat) :
-    TUOpM (TUOp .CAT outShape (rankOf outShape) d) := do
-  let raw ← UOp.cat xs axis
+def catList {d : DType} {shapes : List Shape} {axis : Nat} {out : Shape}
+    [h : Shape.ConcatListShape shapes axis out] (xs : TUOpList d shapes) :
+    TUOpM (TUOp .CAT out (rankOf out) d) := do
+  let _ := h
+  let raw ← UOp.cat xs.toUOps axis
   pure (mkUnsafe raw)
 
 def reshape {opx : Ops} {s : Shape} {r : Nat} {d : DType} (x : TUOp opx s r d) (newShape : Shape) :

@@ -28,6 +28,12 @@ def toUOps {d : DType} {shapes : List Shape} : TensorList d shapes → List UOp
   | .nil => []
   | .cons t rest => t.uop :: toUOps rest
 
+def toTUOpList {d : DType} {shapes : List Shape} : TensorList d shapes → TUOp.TUOpList d shapes
+  | .nil => .nil
+  | .cons (s := s) t rest =>
+    let base : TUOp t.uop.op s (TUOp.rankOf s) d := TUOp.mkUnsafe t.uop
+    .cons base (toTUOpList rest)
+
 end TensorList
 
 namespace StaticTensor

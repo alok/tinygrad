@@ -1,8 +1,13 @@
+import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.GPULoader
 
 /-! Simple smoke test for GPULoader -/
 
 open TinyGrad4.Data.GPULoader
+
+def assert (cond : Bool) (msg : String) : IO Unit := do
+  if !cond then
+    throw (IO.userError s!"Assertion failed: {msg}")
 
 def main : IO Unit := do
   IO.println "Starting GPU loader smoke test..."
@@ -18,10 +23,16 @@ def main : IO Unit := do
 
   for dev in devices do
     let name ← dev.name
-    IO.println s!"  - {name}"
+    IO.println s!"  - {name} ({dev}, {repr dev})"
 
   IO.println "Testing buffer allocation..."
-  let buf ← GPUBuffer.alloc .metal 1024 .uint8
+  let target := devices[0]!
+  IO.println s!"  Allocating on {target} ({repr target})"
+  let buf ← try
+    GPUBuffer.alloc target 1024 .uint8
+  catch e =>
+    IO.println s!"  ✗ Allocation failed on {target}: {e}"
+    throw e
   IO.println s!"Allocated {buf.byteSize} bytes"
 
   let testData := ByteArray.mk (Array.replicate 1024 42)
@@ -30,5 +41,27 @@ def main : IO Unit := do
 
   buf.free
   IO.println "Buffer freed"
+
+  IO.println "Testing GPUDataLoader device placement..."
+  let sample : Array ByteArray := #[ByteArray.mk (Array.replicate 16 1), ByteArray.mk (Array.replicate 16 2)]
+  let ds := TinyGrad4.Data.ofArray sample
+  let loader ← GPUDataLoader.create ds devices[0]! (batchSize := 1) (bufferSize := 2) (dtype := .uint8)
+  for _ in [:2] do
+    match ← loader.next with
+    | some batch => assert (batch.device == devices[0]!) "Batch on wrong device"
+    | none => break
+  loader.stop
+  IO.println "GPUDataLoader device placement ok"
+
+  if devices.size >= 2 then
+    IO.println "Testing MultiGPULoader device placement..."
+    let pool ← MultiGPULoader.create ds devices (batchSize := 1) (bufferSize := 2) (dtype := .uint8)
+    let batches ← pool.nextAll
+    for (device, buf?) in batches do
+      match buf? with
+      | some buf => assert (buf.device == device) "MultiGPULoader batch on wrong device"
+      | none => pure ()
+    pool.stop
+    IO.println "MultiGPULoader device placement ok"
 
   IO.println "✓ GPU loader smoke test passed"

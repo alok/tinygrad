@@ -19,7 +19,11 @@ It is intentionally operational and test-backed rather than proof-heavy.
 
 ## Ordering Semantics (MultiIteratorPrefetcher)
 
-Default ordering is **strict round-robin** across workers:
+MultiIteratorPrefetcher supports explicit ordering policies.
+
+### Strict (default)
+
+Strict ordering is **round-robin** across workers:
 
 1. Visit workers in index order `0..N-1`.
 2. Yield the next item from the current worker.
@@ -29,12 +33,23 @@ Default ordering is **strict round-robin** across workers:
 This is deterministic even with uneven shard lengths (`dropRemainder=false`).
 It also defines a clear global order for comparisons and tests.
 
+### Best-effort (optional)
+
+Best-effort ordering trades determinism for throughput. The policy:
+
+- Scans workers non-blocking and yields the first available item.
+- Enforces a bounded lead (`maxLead`) relative to the slowest active worker.
+- Caps empty scans per round (`maxSkipsPerRound`) before blocking.
+
+This mode is explicitly **not** deterministic across schedules.
+
 ## Resume Semantics
 
 Checkpoint state is:
 
 - `nextWorker`: the next worker index to attempt.
 - `workerStates`: per-worker `IteratorState` after the last **consumed** item from that worker.
+- `produced`: per-worker count of consumed items (used by best-effort policy).
 
 On resume:
 
@@ -67,6 +82,5 @@ and the resumed stream matches the baseline order from that point onward.
 
 ## Future Extensions
 
-- Optional "best-effort" ordering policy for max throughput.
 - Separate control of worker queue size vs consumer queue size.
 - Backpressure propagation across stages (IO, transform, transfer).

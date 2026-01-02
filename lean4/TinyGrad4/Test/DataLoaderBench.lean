@@ -1,3 +1,4 @@
+import TinyGrad4.Shape
 import TinyGrad4.Data.MNISTRaw
 import TinyGrad4.Data.MNISTDataset
 import TinyGrad4.Data.Prefetch
@@ -8,6 +9,8 @@ import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Transform
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
+
+open TinyGrad4
 
 def main : IO Unit := do
   let dataDir := "../data"
@@ -33,6 +36,25 @@ def main : IO Unit := do
   let (baseline, prefetched) ← TinyGrad4.Data.benchmarkComparison pipeline 8
   IO.println s!"Prefetch throughput: baseline={baseline} items/s, prefetched={prefetched} items/s"
 
+  -- 3b) Multi-worker prefetch throughput (interleaved shards)
+  let workers :=
+    match (← IO.getEnv "TG4_MULTI_PREFETCH_WORKERS") with
+    | some v => v.trimAscii.toString.toNat?.getD 4
+    | none => 4
+  let iterDs := TinyGrad4.Data.IterDataset.ofDataset pipeline (TinyGrad4.Data.RandKey.new 7) 1
+  let multiPrefetcher ← iterDs.toMultiPrefetcher workers 8 .interleaved true
+  let startMulti ← IO.monoNanosNow
+  let mut countMulti := 0
+  repeat do
+    match ← multiPrefetcher.next with
+    | some _ => countMulti := countMulti + 1
+    | none => break
+  let stopMulti ← IO.monoNanosNow
+  multiPrefetcher.cancel
+  let secondsMulti := (stopMulti - startMulti).toFloat / 1e9
+  let rateMulti := if secondsMulti == 0.0 then 0.0 else countMulti.toFloat / secondsMulti
+  IO.println s!"Multi-prefetch throughput: workers={workers} rate={rateMulti} items/s"
+
   -- 4) Stagewise profiling: iterator/prefetch/transfer/compute
   IO.println ""
   IO.println "=== Stagewise Profiling (iterator/prefetch/transfer/compute) ==="
@@ -54,6 +76,7 @@ def main : IO Unit := do
   let iterDs := TinyGrad4.Data.IterDataset.ofDataset ds (TinyGrad4.Data.RandKey.new 7) 1
   let profiled := TinyGrad4.Data.IterDataset.profile profiler "iterator" iterDs
   let batchSize := 32
+  let batchShape : Shape := [batchSize, sampleSize]
   let prefetcher ← profiled.toBatchPrefetcher batchSize (fun chunks => pure (concatByteArrays chunks)) true 8
 
   let devices ← TinyGrad4.Data.GPULoader.discoverDevices
@@ -74,7 +97,7 @@ def main : IO Unit := do
         let start ← IO.monoNanosNow
         match gpuDevice? with
         | some dev =>
-            let buf ← TinyGrad4.Data.GPULoader.ByteArray.toGPUBuffer bytes dev .uint8
+            let buf ← TinyGrad4.Data.GPULoader.ByteArray.toGPUBuffer bytes dev batchShape .uint8
             let stop ← IO.monoNanosNow
             profiler.recordSampleSpan "transfer" start stop
             buf.free

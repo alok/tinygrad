@@ -54,6 +54,18 @@ def toPrefetcher [Dataset D T] (ds : IterDataset D T) (bufferSize : Nat := 8) :
     IO (IteratorPrefetcher T) :=
   IteratorPrefetcher.createFromIteratorCfg ds.cfg bufferSize
 
+/-- Create a multi-worker prefetcher from this dataset. -/
+def toMultiPrefetcher [Dataset D T] (ds : IterDataset D T) (numWorkers : Nat) (bufferSize : Nat := 8)
+    (mode : ShardMode := .interleaved) (dropRemainder : Bool := true) :
+    IO (MultiIteratorPrefetcher T) :=
+  MultiIteratorPrefetcher.createFromIteratorCfg ds.cfg numWorkers bufferSize mode dropRemainder
+
+/-- Create a multi-worker prefetcher from this dataset and explicit state. -/
+def toMultiPrefetcherFrom [Dataset D T] (ds : IterDataset D T) (state : MultiIteratorState) (numWorkers : Nat)
+    (bufferSize : Nat := 8) (mode : ShardMode := .interleaved) (dropRemainder : Bool := true) :
+    IO (MultiIteratorPrefetcher T) :=
+  MultiIteratorPrefetcher.createFromIteratorCfgState ds.cfg numWorkers state bufferSize mode dropRemainder
+
 /-- Create a stateful batch prefetcher from this dataset. -/
 def toBatchPrefetcher [Dataset D T] (ds : IterDataset D T) (batchSize : Nat)
     (collate : Array T → IO B) (dropLast : Bool := true) (bufferSize : Nat := 8) :

@@ -6,6 +6,9 @@ import TinyGrad4.Backend.Metal
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Typed
 
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
+
 /-!
 # MNIST Raw Data Loading (tinygrad-style)
 

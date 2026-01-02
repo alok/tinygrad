@@ -118,12 +118,14 @@ def runBenchmarks (p : Parsed) : IO UInt32 := do
   IO.println ""
 
   let mut allResults : Array BenchmarkResult := #[]
+  let mut resultsByBackend : Array (String × Array BenchmarkResult) := #[]
 
   -- Get backend runners
   let backends ← Runner.backendRegistry
   for backend in backends do
     if ← backend.isAvailable then
       IO.println s!"{out.bold backend.name}:"
+      let mut backendResults : Array BenchmarkResult := #[]
 
       for suite in Runner.allSuites do
         IO.println s!"  Suite: {suite.name}"
@@ -134,36 +136,38 @@ def runBenchmarks (p : Parsed) : IO UInt32 := do
           try
             let result ← backend.runSpec spec
             allResults := allResults.push result
+            backendResults := backendResults.push result
             IO.println s!"    {out.green "OK"} {result.stats.mean.toMicros} μs | {result.bandwidth_gb_s} GB/s | {result.throughput_gflops} GFLOP/s"
           catch e =>
             IO.println s!"    {out.red "ERR"} {e.toString}"
       IO.println ""
+      resultsByBackend := resultsByBackend.push (backend.name, backendResults)
 
   -- Output results
   let jsonPath := p.flag? "json" |>.map (·.as! String)
   let mdPath := p.flag? "markdown" |>.map (·.as! String)
 
-  if let some path := jsonPath then
-    out.info s!"Writing JSON report to {path}"
+  if jsonPath.isSome || mdPath.isSome then
+    let timestamp ← Runner.getUnixTimestamp
+    let allSpecs := Runner.allSuites.foldl (fun acc suite => acc ++ suite.specs) #[]
+    let comparisons := allSpecs.map fun spec =>
+      let results := allResults.filter (fun r => r.spec.name == spec.name)
+      Runner.BenchmarkComparison.fromResults spec results
     let report : Runner.BenchmarkReport := {
-      timestamp := 0  -- Would be actual timestamp
+      timestamp := timestamp
       gitCommit := gitCommit
       machineInfo := machineInfo
-      resultsByBackend := []
-      comparisons := #[]
+      resultsByBackend := resultsByBackend.toList
+      comparisons := comparisons
     }
-    Runner.writeJsonReport path report
 
-  if let some path := mdPath then
-    out.info s!"Writing Markdown report to {path}"
-    let report : Runner.BenchmarkReport := {
-      timestamp := 0
-      gitCommit := gitCommit
-      machineInfo := machineInfo
-      resultsByBackend := []
-      comparisons := #[]
-    }
-    Runner.writeMarkdownReport path report
+    if let some path := jsonPath then
+      out.info s!"Writing JSON report to {path}"
+      Runner.writeJsonReport path report
+
+    if let some path := mdPath then
+      out.info s!"Writing Markdown report to {path}"
+      Runner.writeMarkdownReport path report
 
   out.success "Benchmarks complete"
   return 0

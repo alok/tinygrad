@@ -300,6 +300,16 @@ def getGitCommit : IO (Option String) := do
   catch _ =>
     return none
 
+/-- Get Unix epoch timestamp in seconds. -/
+def getUnixTimestamp : IO Nat := do
+  try
+    let ts ← IO.Process.run { cmd := "date", args := #["+%s"] }
+    match ts.trimAscii.toString.toNat? with
+    | some n => return n
+    | none => return 0
+  catch _ =>
+    return 0
+
 /-- Detect available backends -/
 def detectBackends : IO (Array String) := do
   let backends ← backendRegistry

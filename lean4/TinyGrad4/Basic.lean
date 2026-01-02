@@ -2,6 +2,7 @@
 import TinyGrad4.Linter.FloatLinter
 import TinyGrad4.Linter.RawBufferLinter
 import TinyGrad4.Linter.ByteArrayCapacityLinter
+import TinyGrad4.Linter.MonoNanosNowLinter
 
 namespace TinyGrad4
 

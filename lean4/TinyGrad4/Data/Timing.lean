@@ -1,5 +1,8 @@
 import TinyGrad4.Data.Profile
 
+-- Disable IO.monoNanosNow linter: this module defines the timing monad instance.
+set_option linter.monoNanosNow false
+
 namespace TinyGrad4.Data
 
 /-! ## MonadTimeNS -/

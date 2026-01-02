@@ -45,15 +45,28 @@ structure TPUDataLoader where
 
 namespace TPUDataLoader
 
+/-! ## ByteArray helpers -/
+
+/-- Concatenate chunks into one ByteArray with a single allocation. -/
+private def concatByteArrays (chunks : Array ByteArray) : ByteArray := Id.run do
+  let total := chunks.foldl (fun acc b => acc + b.size) 0
+  let mut out := ByteArray.emptyWithCapacity total
+  let mut offset := 0
+  for chunk in chunks do
+    out := ByteArray.copySlice chunk 0 out offset chunk.size false
+    offset := offset + chunk.size
+  out
+
 /-- Build one batch from an iterator, returning the state after the batch. -/
 private def nextBatch (iter : DataIterator ByteArray) (batchSize : Nat) :
     IO (Option (ByteArray × IteratorState)) := do
-  let mut batchData := ByteArray.empty
+  let mut chunks := Array.mkEmpty batchSize
   for _ in [:batchSize] do
     match ← iter.next with
-    | some item => batchData := batchData.append item
+    | some item => chunks := chunks.push item
     | none => return none
   let state ← iter.checkpoint
+  let batchData := concatByteArrays chunks
   pure (some (batchData, state))
 
 /-- Create loader from an iterator config (supports checkpoint/resume). -/

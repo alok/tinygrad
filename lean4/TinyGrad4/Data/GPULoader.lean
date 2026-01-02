@@ -215,8 +215,8 @@ structure GPUDataLoader where
   numBatches : Nat
   /-- Last consumed iterator state for checkpointing -/
   lastState : IO.Ref IteratorState
-  /-- Optional iterator prefetcher (for staged CPU → GPU pipelines). -/
-  prefetcher? : Option (IteratorPrefetcher ByteArray)
+  /-- Optional batch prefetcher (for staged CPU → GPU pipelines). -/
+  prefetcher? : Option (BatchPrefetcher ByteArray)
 
 namespace GPUDataLoader
 
@@ -232,17 +232,12 @@ private def nextBatch (iter : DataIterator ByteArray) (batchSize : Nat) :
   let batchData := concatByteArrays chunks
   pure (some (batchData, state))
 
-/-- Build one batch from a prefetcher, returning the state after the batch. -/
-private def nextBatchFromPrefetcher (prefetcher : IteratorPrefetcher ByteArray) (batchSize : Nat) :
+/-- Fetch one prefetched batch with its checkpoint state. -/
+private def nextBatchFromPrefetcher (prefetcher : BatchPrefetcher ByteArray) :
     IO (Option (ByteArray × IteratorState)) := do
-  let mut chunks := Array.mkEmpty batchSize
-  for _ in [:batchSize] do
-    match ← prefetcher.next with
-    | some item => chunks := chunks.push item
-    | none => return none
-  let state ← prefetcher.checkpoint
-  let batchData := concatByteArrays chunks
-  pure (some (batchData, state))
+  match ← prefetcher.nextWithState with
+  | some (batch, state) => pure (some (batch, state))
+  | none => pure none
 
 /-- Create loader from a pre-built iterator. -/
 private def createFromIterator (iter : DataIterator ByteArray) (initState : IteratorState)
@@ -274,7 +269,7 @@ private def createFromIterator (iter : DataIterator ByteArray) (initState : Iter
   pure { queue, worker, device, numBatches, lastState, prefetcher? := none }
 
 /-- Create loader from a pre-built iterator prefetcher (staged CPU → GPU). -/
-private def createFromPrefetcher (prefetcher : IteratorPrefetcher ByteArray) (initState : IteratorState)
+private def createFromPrefetcher (prefetcher : BatchPrefetcher ByteArray) (initState : IteratorState)
     (totalItems : Nat) (device : DeviceId) (batchSize : Nat) (bufferSize : Nat) (dtype : DType)
     : IO GPUDataLoader := do
   match device with
@@ -291,7 +286,7 @@ private def createFromPrefetcher (prefetcher : IteratorPrefetcher ByteArray) (in
     | _ => pure ()
     for _ in [:numBatches] do
       if ← IO.checkCanceled then break
-      match ← nextBatchFromPrefetcher prefetcher batchSize with
+      match ← nextBatchFromPrefetcher prefetcher with
       | some (batchData, state) =>
           let gpuBuf ← ByteArray.toGPUBuffer batchData device dtype
           gpuBuf.assertDevice device
@@ -312,11 +307,13 @@ def createFromIteratorCfg [Dataset D ByteArray] (cfg : IteratorConfig D) (device
   let remaining := remainingItems n cfg.epochs initState
   createFromIterator iter initState remaining device batchSize bufferSize dtype
 
-/-- Create loader from an iterator config with a CPU-side prefetcher. -/
+/-- Create loader from an iterator config with a CPU-side batch prefetcher.
+    `prefetchSize` counts batches (not individual items). -/
 def createFromIteratorCfgPrefetch [Dataset D ByteArray] (cfg : IteratorConfig D) (device : DeviceId)
     (batchSize : Nat) (prefetchSize : Nat := 8) (bufferSize : Nat := 4) (dtype : DType := .float32)
     : IO GPUDataLoader := do
-  let prefetcher ← IteratorPrefetcher.createFromIteratorCfg cfg prefetchSize
+  let prefetcher ← BatchPrefetcher.createFromIteratorCfg cfg batchSize
+    (fun chunks => pure (concatByteArrays chunks)) true prefetchSize
   let initState ← prefetcher.checkpoint
   let n := Dataset.len cfg.base
   let remaining := remainingItems n cfg.epochs initState
@@ -419,7 +416,7 @@ structure DeviceWorker where
   queue : IOQueue QueuedBuffer
   worker : Task (Except IO.Error Unit)
   lastState : IO.Ref IteratorState
-  prefetcher? : Option (IteratorPrefetcher ByteArray)
+  prefetcher? : Option (BatchPrefetcher ByteArray)
 
 /-- Pool of loaders across multiple GPUs -/
 structure MultiGPULoader where
@@ -440,17 +437,12 @@ private def nextBatch (iter : DataIterator ByteArray) (batchSize : Nat) :
   let batchData := concatByteArrays chunks
   pure (some (batchData, state))
 
-/-- Build one batch from a prefetcher, returning the state after the batch. -/
-private def nextBatchFromPrefetcher (prefetcher : IteratorPrefetcher ByteArray) (batchSize : Nat) :
+/-- Fetch one prefetched batch with its checkpoint state. -/
+private def nextBatchFromPrefetcher (prefetcher : BatchPrefetcher ByteArray) :
     IO (Option (ByteArray × IteratorState)) := do
-  let mut chunks := Array.mkEmpty batchSize
-  for _ in [:batchSize] do
-    match ← prefetcher.next with
-    | some item => chunks := chunks.push item
-    | none => return none
-  let state ← prefetcher.checkpoint
-  let batchData := concatByteArrays chunks
-  pure (some (batchData, state))
+  match ← prefetcher.nextWithState with
+  | some (batch, state) => pure (some (batch, state))
+  | none => pure none
 
 /-- Initialization bundle for a device worker. -/
 private structure WorkerInit where
@@ -463,7 +455,7 @@ private structure WorkerInit where
 private structure WorkerInitPrefetch where
   device : DeviceId
   shard : ShardConfig
-  prefetcher : IteratorPrefetcher ByteArray
+  prefetcher : BatchPrefetcher ByteArray
   initState : IteratorState
   shardBatches : Nat
 
@@ -551,7 +543,8 @@ def createFromIteratorCfg [Dataset D ByteArray] (cfg : IteratorConfig D) (device
 
   pure { workers, numBatchesPerDevice }
 
-/-- Create multi-GPU loader from an iterator config with CPU-side prefetchers. -/
+/-- Create multi-GPU loader from an iterator config with CPU-side batch prefetchers.
+    `prefetchSize` counts batches (not individual items). -/
 def createFromIteratorCfgPrefetch [Dataset D ByteArray] (cfg : IteratorConfig D) (devices : Array DeviceId)
     (batchSize : Nat) (prefetchSize : Nat := 8) (bufferSize : Nat := 4) (dtype : DType := .float32)
     (world? : Option WorldConfig := none)
@@ -586,7 +579,8 @@ def createFromIteratorCfgPrefetch [Dataset D ByteArray] (cfg : IteratorConfig D)
       updateKey := cfg.updateKey
       datasetAtEpoch := fun ds k epoch => shardWithConfig shard (cfg.datasetAtEpoch ds.inner k epoch)
     }
-    let prefetcher ← IteratorPrefetcher.createFromIteratorCfg shardCfg prefetchSize
+    let prefetcher ← BatchPrefetcher.createFromIteratorCfg shardCfg batchSize
+      (fun chunks => pure (concatByteArrays chunks)) true prefetchSize
     let initState ← prefetcher.checkpoint
     let shardItems := Dataset.len shardBase
     let remaining := remainingItems shardItems cfg.epochs initState
@@ -614,7 +608,7 @@ def createFromIteratorCfgPrefetch [Dataset D ByteArray] (cfg : IteratorConfig D)
       -- Process this shard's batches (synchronized across devices).
       for _ in [:numBatchesPerDevice] do
         if ← IO.checkCanceled then break
-        match ← nextBatchFromPrefetcher prefetcher batchSize with
+        match ← nextBatchFromPrefetcher prefetcher with
         | some (batchData, state) =>
             let gpuBuf ← ByteArray.toGPUBuffer batchData init.device dtype
             gpuBuf.assertDevice init.device

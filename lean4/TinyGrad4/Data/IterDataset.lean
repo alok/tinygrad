@@ -54,6 +54,12 @@ def toPrefetcher [Dataset D T] (ds : IterDataset D T) (bufferSize : Nat := 8) :
     IO (IteratorPrefetcher T) :=
   IteratorPrefetcher.createFromIteratorCfg ds.cfg bufferSize
 
+/-- Create a stateful batch prefetcher from this dataset. -/
+def toBatchPrefetcher [Dataset D T] (ds : IterDataset D T) (batchSize : Nat)
+    (collate : Array T → IO B) (dropLast : Bool := true) (bufferSize : Nat := 8) :
+    IO (BatchPrefetcher B) :=
+  BatchPrefetcher.createFromIteratorCfg ds.cfg batchSize collate dropLast bufferSize
+
 private def mapCfg (cfg : IteratorConfig D) (f : D → D2) : IteratorConfig D2 :=
   {
     cfg with

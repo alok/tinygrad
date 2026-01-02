@@ -274,6 +274,149 @@ def toArray (p : IteratorPrefetcher T) : IO (Array T) := do
 
 end IteratorPrefetcher
 
+/-! ## BatchPrefetcher -/
+
+/-- Queue item with iterator state after this batch. -/
+structure QueuedBatch (B : Type) where
+  batch : B
+  state : IteratorState
+
+/-- Prefetcher that yields collated batches with checkpoint state. -/
+structure BatchPrefetcher (B : Type) where
+  queue : IOQueue (QueuedBatch B)
+  worker : Task (Except IO.Error Unit)
+  totalBatches : Nat
+  lastState : IO.Ref IteratorState
+
+namespace BatchPrefetcher
+
+private def batchCount (totalItems batchSize : Nat) (dropLast : Bool) : Nat :=
+  if batchSize == 0 then
+    0
+  else if dropLast then
+    totalItems / batchSize
+  else
+    let full := totalItems / batchSize
+    let rem := totalItems % batchSize
+    if rem == 0 then full else full + 1
+
+private def nextBatchFromIterator (iter : DataIterator T) (batchSize : Nat) (dropLast : Bool)
+    (collate : Array T → IO B) : IO (Option (B × IteratorState)) := do
+  if batchSize == 0 then
+    return none
+  let mut items := Array.mkEmpty batchSize
+  for _ in [:batchSize] do
+    match ← iter.next with
+    | some item => items := items.push item
+    | none =>
+        if dropLast || items.isEmpty then
+          return none
+        else
+          let state ← iter.checkpoint
+          let batch ← collate items
+          return some (batch, state)
+  let state ← iter.checkpoint
+  let batch ← collate items
+  pure (some (batch, state))
+
+private def createFromIterator (iter : DataIterator T) (initState : IteratorState) (totalItems : Nat)
+    (batchSize : Nat) (collate : Array T → IO B) (dropLast : Bool := true) (bufferSize : Nat := 8) :
+    IO (BatchPrefetcher B) := do
+  if batchSize == 0 then
+    throw (IO.userError "BatchPrefetcher: batchSize must be > 0")
+  let queue ← IOQueue.new bufferSize
+  let lastState ← IO.mkRef initState
+  let totalBatches := batchCount totalItems batchSize dropLast
+
+  let worker ← IO.asTask (prio := .dedicated) do
+    repeat do
+      if ← IO.checkCanceled then break
+      match ← nextBatchFromIterator iter batchSize dropLast collate with
+      | some (batch, state) =>
+          let ok ← queue.push { batch, state }
+          if !ok then break
+      | none => break
+    queue.finish
+
+  pure { queue, worker, totalBatches, lastState }
+
+/-- Create a stateful batch prefetcher from an iterator config. -/
+def createFromIteratorCfg [Dataset D T] (cfg : IteratorConfig D) (batchSize : Nat)
+    (collate : Array T → IO B) (dropLast : Bool := true) (bufferSize : Nat := 8) :
+    IO (BatchPrefetcher B) := do
+  let iter ← Dataset.toIteratorCfg cfg
+  let initState ← iter.checkpoint
+  let n := Dataset.len cfg.base
+  let remaining := remainingItems n cfg.epochs initState
+  createFromIterator iter initState remaining batchSize collate dropLast bufferSize
+
+/-- Get next prefetched batch. -/
+def next (p : BatchPrefetcher B) : IO (Option B) := do
+  match ← p.queue.pop with
+  | some item =>
+      p.lastState.set item.state
+      pure (some item.batch)
+  | none => pure none
+
+/-- Get next batch and its checkpoint state. -/
+def nextWithState (p : BatchPrefetcher B) : IO (Option (B × IteratorState)) := do
+  match ← p.queue.pop with
+  | some item =>
+      p.lastState.set item.state
+      pure (some (item.batch, item.state))
+  | none => pure none
+
+/-- Get next batch and time spent waiting (ns). -/
+def nextWithWait (p : BatchPrefetcher B) : IO (Option B × Nat) := do
+  let (item?, waitNs) ← p.queue.popWithWait
+  match item? with
+  | some item =>
+      p.lastState.set item.state
+      pure (some item.batch, waitNs)
+  | none => pure (none, waitNs)
+
+/-- Get checkpoint state for deterministic resume. -/
+def checkpoint (p : BatchPrefetcher B) : IO IteratorState :=
+  p.lastState.get
+
+/-- Cancel the prefetcher. -/
+def cancel (p : BatchPrefetcher B) : IO Unit := do
+  p.queue.finish
+  IO.cancel p.worker
+
+/-- Check if worker is done. -/
+def isDone (p : BatchPrefetcher B) : IO Bool :=
+  IO.hasFinished p.worker
+
+/-- Wait for worker completion. -/
+def wait (p : BatchPrefetcher B) : IO Unit := do
+  let _ ← IO.wait p.worker
+
+/-- Drain any queued batches. -/
+def drain (p : BatchPrefetcher B) : IO Unit := do
+  repeat do
+    match ← p.queue.pop with
+    | some _ => pure ()
+    | none => break
+
+/-- Iterate through all batches. -/
+def forEach (p : BatchPrefetcher B) (f : B → IO Unit) : IO Unit := do
+  repeat do
+    match ← p.next with
+    | some batch => f batch
+    | none => break
+
+/-- Collect all remaining batches. -/
+def toArray (p : BatchPrefetcher B) : IO (Array B) := do
+  let mut arr := Array.mkEmpty p.totalBatches
+  repeat do
+    match ← p.next with
+    | some batch => arr := arr.push batch
+    | none => break
+  pure arr
+
+end BatchPrefetcher
+
 /-! ## ForIn Instances -/
 
 instance : ForIn IO (Prefetcher T) T where
@@ -300,6 +443,20 @@ instance : ForIn IO (IteratorPrefetcher T) T where
           match ← f x acc with
           | .done a =>
               IteratorPrefetcher.cancel p
+              return a
+          | .yield a => acc := a
+    pure acc
+
+instance : ForIn IO (BatchPrefetcher B) B where
+  forIn p init f := do
+    let mut acc := init
+    repeat do
+      match ← BatchPrefetcher.next p with
+      | none => break
+      | some x =>
+          match ← f x acc with
+          | .done a =>
+              BatchPrefetcher.cancel p
               return a
           | .yield a => acc := a
     pure acc

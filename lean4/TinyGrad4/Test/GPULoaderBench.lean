@@ -200,6 +200,35 @@ def benchGPULoader (device : DeviceId) (imageData : ByteArray) (batchSize : Nat 
   IO.println s!"  {batchPerSec.toString.take 6} batch/s, {mbPerSec.toString.take 6} MB/s"
   IO.println ""
 
+/-- Benchmark GPUDataLoader throughput with batch prefetching. -/
+def benchGPULoaderPrefetch (device : DeviceId) (imageData : ByteArray) (batchSize : Nat := 64)
+    (prefetchSize : Nat := 8) (bufferSize : Nat := 4) (world? : Option WorldConfig := none) : IO Unit := do
+  IO.println s!"=== GPUDataLoader Prefetch Throughput (batch={batchSize}, prefetch={prefetchSize}, buffer={bufferSize}) ==="
+
+  let numImages := imageData.size / 784
+  let batchBytes := batchSize * 784
+
+  let baseDs : ByteImageDataset := { data := imageData, imageSize := 784, numImages }
+  let cfg := match world? with
+    | some world => world.toShardConfig .interleaved true
+    | none => { shardIndex := 0, numShards := 1, mode := .interleaved, dropRemainder := true }
+  let ds : ShardedDataset ByteImageDataset ByteArray := shardWithConfig cfg baseDs
+  let iterCfg : IteratorConfig (ShardedDataset ByteImageDataset ByteArray) := { base := ds }
+
+  let (totalMs, totalBatches) ← timeMs do
+    let loader ← GPUDataLoader.createFromIteratorCfgPrefetch iterCfg device batchSize prefetchSize bufferSize .uint8
+    let mut count := 0
+    for buf in loader do
+      count := count + 1
+      buf.free
+    pure count
+
+  let batchPerSec := totalBatches.toFloat * 1000.0 / totalMs
+  let mbPerSec := totalBatches.toFloat * batchBytes.toFloat / totalMs / 1000.0
+  IO.println s!"  {totalBatches} batches in {totalMs.toString.take 6}ms"
+  IO.println s!"  {batchPerSec.toString.take 6} batch/s, {mbPerSec.toString.take 6} MB/s"
+  IO.println ""
+
 /-- Benchmark ByteSlice loader with zero-copy -/
 def benchSliceLoader (device : DeviceId) (imageData : ByteArray) (batchSize : Nat := 64) (bufferSize : Nat := 4)
     (world? : Option WorldConfig := none) : IO Unit := do
@@ -337,6 +366,7 @@ def main : IO Unit := do
   benchBufferAlloc device #[1024, 4096, 16384, 65536, 262144] iters
   benchZeroCopy device imageData batchSize iters
   benchGPULoader device imageData batchSize bufferSize worldShard
+  benchGPULoaderPrefetch device imageData batchSize 8 bufferSize worldShard
   benchSliceLoader device imageData batchSize bufferSize worldShard
 
   let multiEnabled ← getEnvBool "TG4_GPU_MULTI" true

@@ -26,6 +26,7 @@ structure BenchParams where
 structure ProfileSnapshot where
   stages : Array (String × StageStat)
   concurrency : ConcurrencyStats
+  stageConcurrency : Array (String × ConcurrencyStats)
   deriving Inhabited
 
 private def getEnvNat (key : String) (default : Nat) : IO Nat := do
@@ -105,6 +106,14 @@ private def concurrencyJson (s : ConcurrencyStats) : Lean.Json :=
     ("peak_concurrency", Lean.Json.num s.peakConcurrency)
   ]
 
+private def stageConcurrencyJson (entries : Array (String × ConcurrencyStats)) : Lean.Json :=
+  Lean.Json.arr <|
+    entries.map (fun (name, stat) =>
+      Lean.Json.mkObj [
+        ("name", Lean.Json.str name),
+        ("concurrency", concurrencyJson stat)
+      ])
+
 private def extrasJson (cfg : BenchParams) (snap : ProfileSnapshot) : Lean.Json :=
   let stageArr := Lean.Json.arr (snap.stages.map (fun (name, stat) => stageStatJson name stat))
   let configObj := Lean.Json.mkObj [
@@ -117,6 +126,7 @@ private def extrasJson (cfg : BenchParams) (snap : ProfileSnapshot) : Lean.Json 
   Lean.Json.mkObj [
     ("config", configObj),
     ("concurrency", concurrencyJson snap.concurrency),
+    ("stage_concurrency", stageConcurrencyJson snap.stageConcurrency),
     ("stages", stageArr)
   ]
 
@@ -144,8 +154,8 @@ private def runBaseline (cfg : BenchParams) : IO ProfileSnapshot := do
   for i in [:n] do
     if h : i < n then
       let _ ← Dataset.getItem batched i h
-  let (stages, concurrency) ← profiler.snapshotWithConcurrency
-  pure { stages, concurrency }
+  let (stages, concurrency, stageConcurrency) ← profiler.snapshotWithConcurrencyByStage
+  pure { stages, concurrency, stageConcurrency }
 
 private def runPrefetch (cfg : BenchParams) : IO ProfileSnapshot := do
   let profiler ← Profiler.new
@@ -162,8 +172,8 @@ private def runPrefetch (cfg : BenchParams) : IO ProfileSnapshot := do
     match ← profilePrefetcherNext profiler "prefetch_next" prefetcher with
     | some _ => pure ()
     | none => break
-  let (stages, concurrency) ← profiler.snapshotWithConcurrency
-  pure { stages, concurrency }
+  let (stages, concurrency, stageConcurrency) ← profiler.snapshotWithConcurrencyByStage
+  pure { stages, concurrency, stageConcurrency }
 
 private def runPrefetchItems (cfg : BenchParams) : IO ProfileSnapshot := do
   let profiler ← Profiler.new
@@ -190,8 +200,8 @@ private def runPrefetchItems (cfg : BenchParams) : IO ProfileSnapshot := do
     let stopBatch ← IO.monoNanosNow
     profiler.recordSample "batch" (stopBatch - startBatch)
     batches := batches + 1
-  let (stages, concurrency) ← profiler.snapshotWithConcurrency
-  pure { stages, concurrency }
+  let (stages, concurrency, stageConcurrency) ← profiler.snapshotWithConcurrencyByStage
+  pure { stages, concurrency, stageConcurrency }
 
 initialize do
   let cfg ← readParams

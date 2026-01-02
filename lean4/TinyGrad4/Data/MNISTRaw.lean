@@ -446,64 +446,71 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   IO.println s!"  Metal normalize+matmul: {metalMedian} ms"
   IO.println s!"  Accel normalize-only:   {accelNormMedian} ms"
 
-  -- 7. Zero-copy Metal buffer benchmark
-  IO.println ""
-  IO.println "  Zero-copy benchmarks:"
+  -- 7/8. Zero-copy + shared memory benchmarks (Metal only)
+  let metalAvailable ← TinyGrad4.Backend.Metal.isAvailable
+  if !metalAvailable then
+    IO.println ""
+    IO.println "  Zero-copy benchmarks: skipped (Metal unavailable)"
+    IO.println "  Shared memory benchmarks: skipped (Metal unavailable)"
+  else
+    -- Zero-copy Metal buffer benchmark
+    IO.println ""
+    IO.println "  Zero-copy benchmarks:"
 
-  -- Check alignment
-  let isAligned ← TinyGrad4.Backend.Metal.metalIsAligned mnist.images.data.parent 0
-  IO.println s!"    Data page-aligned: {isAligned}"
+    -- Check alignment
+    let isAligned ← TinyGrad4.Backend.Metal.metalIsAligned mnist.images.data.parent 0
+    IO.println s!"    Data page-aligned: {isAligned}"
 
-  let mut zeroCopyTimes : Array Nat := #[]
-  for _ in [:iterations] do
-    let start ← IO.monoNanosNow
-    for i in [:numBatches] do
-      let batch := mnist.getBatch i batchSize
-      -- Create zero-copy Metal buffer from ByteSlice
-      let _buf ← TinyGrad4.Backend.Metal.metalFromByteSlice
-        batch.images.parent batch.images.offset batch.images.length
-      pure ()
-    let stop ← IO.monoNanosNow
-    zeroCopyTimes := zeroCopyTimes.push (stop - start)
+    let mut zeroCopyTimes : Array Nat := #[]
+    for _ in [:iterations] do
+      let start ← IO.monoNanosNow
+      for i in [:numBatches] do
+        let batch := mnist.getBatch i batchSize
+        -- Create zero-copy Metal buffer from ByteSlice
+        let _buf ← TinyGrad4.Backend.Metal.metalFromByteSlice
+          batch.images.parent batch.images.offset batch.images.length
+        pure ()
+      let stop ← IO.monoNanosNow
+      zeroCopyTimes := zeroCopyTimes.push (stop - start)
 
-  let zeroCopyMedian := (zeroCopyTimes[iterations / 2]!).toFloat / 1e6
-  IO.println s!"  Zero-copy buffer create: {zeroCopyMedian} ms ({numBatches.toFloat * 1000.0 / zeroCopyMedian} batch/s)"
+    let zeroCopyMedian := (zeroCopyTimes[iterations / 2]!).toFloat / 1e6
+    IO.println s!"  Zero-copy buffer create: {zeroCopyMedian} ms ({numBatches.toFloat * 1000.0 / zeroCopyMedian} batch/s)"
 
-  -- 8. Shared memory benchmark
-  IO.println ""
-  IO.println "  Shared memory benchmarks:"
+    -- Shared memory benchmark
+    IO.println ""
+    IO.println "  Shared memory benchmarks:"
 
-  -- Create shared memory region
-  let shmName := "/tg4_bench_shm"
-  let shmSize := mnist.images.byteSize
+    -- Create shared memory region
+    let shmName := "/tg4_bench_shm"
+    let shmSize := mnist.images.byteSize
 
-  let mut shmWriteTimes : Array Nat := #[]
-  let mut shmReadTimes : Array Nat := #[]
+    let mut shmWriteTimes : Array Nat := #[]
+    let mut shmReadTimes : Array Nat := #[]
 
-  for _ in [:iterations] do
-    -- Write benchmark
-    let shm ← TinyGrad4.Backend.Metal.SharedMemory.create shmName shmSize
-    let writeStart ← IO.monoNanosNow
-    shm.write mnist.images.data.parent
-    let writeStop ← IO.monoNanosNow
-    shmWriteTimes := shmWriteTimes.push (writeStop - writeStart)
+    for _ in [:iterations] do
+      -- Write benchmark
+      let shm ← TinyGrad4.Backend.Metal.SharedMemory.create shmName shmSize
+      let writeStart ← IO.monoNanosNow
+      shm.write mnist.images.data.parent
+      let writeStop ← IO.monoNanosNow
+      shmWriteTimes := shmWriteTimes.push (writeStop - writeStart)
 
-    -- Read benchmark
-    let readStart ← IO.monoNanosNow
-    let _data ← shm.read 0 shmSize
-    let readStop ← IO.monoNanosNow
-    shmReadTimes := shmReadTimes.push (readStop - readStart)
+      -- Read benchmark
+      let readStart ← IO.monoNanosNow
+      let _data ← shm.read 0 shmSize
+      let readStop ← IO.monoNanosNow
+      shmReadTimes := shmReadTimes.push (readStop - readStart)
 
-    shm.close
-    shm.unlink
+      shm.close
+      shm.unlink
 
-  let shmWriteMedian := (shmWriteTimes[iterations / 2]!).toFloat / 1e6
-  let shmReadMedian := (shmReadTimes[iterations / 2]!).toFloat / 1e6
-  let shmThroughputWrite := shmSize.toFloat / shmWriteMedian / 1e6  -- MB/s
-  let shmThroughputRead := shmSize.toFloat / shmReadMedian / 1e6   -- MB/s
+    let shmWriteMedian := (shmWriteTimes[iterations / 2]!).toFloat / 1e6
+    let shmReadMedian := (shmReadTimes[iterations / 2]!).toFloat / 1e6
+    let shmThroughputWrite := shmSize.toFloat / shmWriteMedian / 1e6  -- MB/s
+    let shmThroughputRead := shmSize.toFloat / shmReadMedian / 1e6   -- MB/s
 
-  IO.println s!"  SharedMem write: {shmWriteMedian} ms ({shmThroughputWrite} GB/s)"
-  IO.println s!"  SharedMem read:  {shmReadMedian} ms ({shmThroughputRead} GB/s)"
+    IO.println s!"  SharedMem write: {shmWriteMedian} ms ({shmThroughputWrite} GB/s)"
+    IO.println s!"  SharedMem read:  {shmReadMedian} ms ({shmThroughputRead} GB/s)"
 
   IO.println ""
   IO.println "============================================================"

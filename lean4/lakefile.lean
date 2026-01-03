@@ -163,7 +163,9 @@ extern_lib tg4c pkg := do
 -- Data loaders, benches, and experiments are opt-in to avoid work-in-progress build failures.
 @[default_target]
 lean_lib TinyGrad4 where
+  roots := #[`TinyGrad4]
   globs := #[
+    .one `TinyGrad4,
     .one `TinyGrad4.Basic,
     .one `TinyGrad4.DType,
     .one `TinyGrad4.Shape,
@@ -226,7 +228,7 @@ lean_lib TinyGrad4 where
     .one `TinyGrad4.Benchmark.MetalDirect,
     .andSubmodules `TinyGrad4.Spec
   ]
-  precompileModules := true
+  precompileModules := false
 
 lean_lib TinyGrad4Data where
   globs := #[.andSubmodules `TinyGrad4.Data]

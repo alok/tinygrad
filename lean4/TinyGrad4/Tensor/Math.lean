@@ -767,7 +767,7 @@ def mseLoss {s : List Nat} {d : DType}
 def matmul {m k n : Nat} {d : DType}
     (a : Matrix m k d) (b : Matrix k n d)
     : TensorM (Matrix m n d) := do
-  let outUop ← TUOp.contract2D a.tuop b.tuop
+  let outUop ← TUOp.contract2DB (out := Shape.matmulOut [m, k] [k, n]) a.tuop b.tuop
   let outUop := TUOp.castDType outUop d
   pure (ofTUCast outUop [m, n] (a.requiresGrad || b.requiresGrad))
 
@@ -790,7 +790,7 @@ def linearBias {batch inDim outDim : Nat} {d : DType}
 def bmatmul {b1 b2 m k n : Nat} {d : DType}
     (a : BMatrix b1 m k d) (b : BMatrix b2 k n d)
     : TensorM (BMatrix (Nat.max b1 b2) m n d) := do
-  let outUop ← TUOp.contract2D a.tuop b.tuop
+  let outUop ← TUOp.contract2DB (out := Shape.matmulOut [b1, m, k] [b2, k, n]) a.tuop b.tuop
   let outUop := TUOp.castDType outUop d
   pure (ofTUCast outUop [Nat.max b1 b2, m, n] (a.requiresGrad || b.requiresGrad))
 
@@ -1129,11 +1129,14 @@ def depthwiseConv2d {batch cin h w kH kW : Nat} {d : DType}
   -- This allows broadcasting with batch dimension
   let weightReshaped ← reshape weight [1, cin, kernelFlat, 1]
 
-  -- Step 5: Batched matmul using TUOp.contract2D
+  -- Step 5: Batched matmul using TUOp.contract2DB
   -- [batch, cin, hOut*wOut, kH*kW] @ [1, cin, kH*kW, 1]
   -- Batch dims [batch, cin] and [1, cin] broadcast to [batch, cin]
   -- Result: [batch, cin, hOut*wOut, 1]
-  let mmResult ← TUOp.contract2D patchesReshaped.tuop weightReshaped.tuop
+  let mmResult ← TUOp.contract2DB
+    (out := Shape.matmulOut [batch, cin, spatialOut, kernelFlat] [1, cin, kernelFlat, 1])
+    patchesReshaped.tuop
+    weightReshaped.tuop
   let mmResult := TUOp.castDType mmResult d
   let mmResultT : StaticTensor [batch, cin, spatialOut, 1] d :=
     ofTUCast mmResult [batch, cin, spatialOut, 1] (x.requiresGrad || weight.requiresGrad)

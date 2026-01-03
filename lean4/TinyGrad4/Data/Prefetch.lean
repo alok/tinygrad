@@ -1,3 +1,4 @@
+import Std.Sync.Channel
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Shard
 
@@ -26,79 +27,50 @@ namespace TinyGrad4.Data
 A circular buffer with producer-consumer semantics using IO.Ref.
 -/
 
-/-- Thread-safe queue using IO.Ref -/
+/-- Thread-safe queue backed by a bounded closeable channel. -/
 structure IOQueue (T : Type) where
-  /-- Buffer of items -/
-  items : IO.Ref (Array T)
-  /-- Is the queue closed? (No more items will be accepted.) -/
-  done : IO.Ref Bool
-  /-- Max buffer size for backpressure -/
-  maxSize : Nat
+  /-- Underlying channel (bounded for backpressure). -/
+  chan : Std.CloseableChannel.Sync T
 
 namespace IOQueue
 
 /-- Create a new IO queue -/
 def new (maxSize : Nat := 16) : IO (IOQueue T) := do
-  let items ← IO.mkRef #[]
-  let done ← IO.mkRef false
-  pure { items, done, maxSize }
+  let chan ← Std.CloseableChannel.Sync.new (some maxSize)
+  pure { chan }
 
-/-- Add item to queue (may spin if full for backpressure) -/
+/-- Add item to queue (blocks if full for backpressure). -/
 def push (q : IOQueue T) (item : T) : IO Bool := do
-  -- Simple spin-wait if buffer is full. Bail if closed.
-  repeat do
-    if ← q.done.get then
-      return false
-    let arr ← q.items.get
-    if arr.size < q.maxSize then
-      q.items.modify (·.push item)
-      return true
-    IO.sleep 1  -- 1ms backoff
-  return false
+  try
+    Std.CloseableChannel.Sync.send q.chan item
+    return true
+  catch _ =>
+    return false
 
 /-- Mark producer as done -/
 def finish (q : IOQueue T) : IO Unit :=
-  q.done.set true
+  try
+    Std.CloseableChannel.Sync.close q.chan
+  catch _ =>
+    pure ()
 
 /-- Try to pop an item without blocking. -/
 def tryPop (q : IOQueue T) : IO (Option T) := do
-  q.items.modifyGet fun arr =>
-    if h : arr.size > 0 then
-      let item := arr[0]'(by omega)
-      (some item, arr.eraseIdx 0)
-    else
-      (none, arr)
+  Std.CloseableChannel.Sync.tryRecv q.chan
 
 /-- Try to pop an item (returns none if empty and done) -/
 def pop (q : IOQueue T) : IO (Option T) := do
-  repeat do
-    let item? ← q.tryPop
-    match item? with
-    | some item => return some item
-    | none => pure ()
-    -- Empty - check if done
-    if ← q.done.get then
-      return none
-    -- Wait for more items
-    IO.sleep 1
-  -- Should never reach here
-  pure none
+  Std.CloseableChannel.Sync.recv q.chan
 
 /-- Pop an item and report time spent waiting (sleeping) in nanoseconds. -/
 def popWithWait (q : IOQueue T) : IO (Option T × Nat) := do
-  let mut waitNs : Nat := 0
-  repeat do
-    let item? ← q.tryPop
-    match item? with
-    | some item => return (some item, waitNs)
-    | none => pure ()
-    if ← q.done.get then
-      return (none, waitNs)
-    let start ← IO.monoNanosNow
-    IO.sleep 1
-    let stop ← IO.monoNanosNow
-    waitNs := waitNs + (stop - start)
-  pure (none, waitNs)
+  match ← q.tryPop with
+  | some item => pure (some item, 0)
+  | none =>
+      let start ← IO.monoNanosNow
+      let item? ← q.pop
+      let stop ← IO.monoNanosNow
+      pure (item?, stop - start)
 
 end IOQueue
 

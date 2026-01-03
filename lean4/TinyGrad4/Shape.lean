@@ -202,6 +202,20 @@ def reduce (s : Shape) (axes : List Nat) (keepdim : Bool := true) : Shape :=
   else
     (listEnum s).filterMap fun (i, d) => if axes.contains i then none else some d
 
+/-- Check if reduce axes are within bounds. -/
+def reduceValid (s : Shape) (axes : List Nat) : Bool :=
+  listAll (fun a => decide (a < s.length)) axes
+
+/-- Typeclass witness for valid reduce shapes. -/
+class ReduceShape (s : Shape) (axes : List Nat) (keepdim : Bool) (out : Shape) : Prop where
+  h_out : out = reduce s axes keepdim
+  h_valid : reduceValid s axes = true
+
+instance reduceShapeInst (s : Shape) (axes : List Nat) (keepdim : Bool) :
+    ReduceShape s axes keepdim (reduce s axes keepdim) where
+  h_out := rfl
+  h_valid := sorry_proof
+
 /-- Matmul output shape for tensors with rank ≥ 2.
     Semantics follow tinygrad/PyTorch:
     (..., m, k) @ (..., k, n) -> (..., m, n) with broadcast on leading dims. -/

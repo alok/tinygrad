@@ -95,6 +95,14 @@ def buildUpdateTUOps {opP opG opM opV : Ops} {s : Shape} {r : Nat} {d : DType}
     TUOpM (TUOp .SUB s r d × TUOp .ADD s r d × TUOp .ADD s r d) := do
   let asSRD {op : Ops} {s' : Shape} {r' : Nat} {d' : DType} (u : TUOp op s' r' d') : TUOp op s r d :=
     TUOp.mkUnsafe (TUOp.castDType (TUOp.castShape u s) d).raw
+  let bin {opx opy : Ops} {rx ry : Nat} (op : Ops) (x : TUOp opx s rx d) (y : TUOp opy s ry d) :
+      TUOpM (TUOp op s r d) := do
+    let x' : TUOp opx s r d := TUOp.mkUnsafe x.raw
+    let y' : TUOp opy s r d := TUOp.mkUnsafe y.raw
+    let res ← TUOp.binaryOpB (out := Shape.broadcastOut s s) op x' y'
+    let res := TUOp.castShape res s
+    let res := TUOp.castDType res d
+    pure (TUOp.mkUnsafe res.raw)
 
   -- Create scalar constants
   let beta1 ← TUOp.const d cfg.beta1.toFloat32
@@ -117,29 +125,29 @@ def buildUpdateTUOps {opP opG opM opV : Ops} {s : Shape} {r : Nat} {d : DType}
   let biasCorr2B ← TUOp.expand biasCorr2 s
 
   -- Update moments: m_new = beta1 * m + (1 - beta1) * grad
-  let oneMinusBeta1 ← TUOp.binaryOp .SUB oneB beta1B
-  let mScaled ← TUOp.binaryOp .MUL beta1B mBuf
-  let gScaled ← TUOp.binaryOp .MUL oneMinusBeta1 grad
-  let mNew := asSRD (← TUOp.binaryOp .ADD mScaled gScaled)
+  let oneMinusBeta1 ← bin .SUB oneB beta1B
+  let mScaled ← bin .MUL beta1B mBuf
+  let gScaled ← bin .MUL oneMinusBeta1 grad
+  let mNew := asSRD (← bin .ADD mScaled gScaled)
 
   -- v_new = beta2 * v + (1 - beta2) * grad^2
-  let oneMinusBeta2 ← TUOp.binaryOp .SUB oneB beta2B
-  let vScaled ← TUOp.binaryOp .MUL beta2B vBuf
-  let gradSq ← TUOp.binaryOp .MUL grad grad
-  let gSqScaled ← TUOp.binaryOp .MUL oneMinusBeta2 gradSq
-  let vNew := asSRD (← TUOp.binaryOp .ADD vScaled gSqScaled)
+  let oneMinusBeta2 ← bin .SUB oneB beta2B
+  let vScaled ← bin .MUL beta2B vBuf
+  let gradSq ← bin .MUL grad grad
+  let gSqScaled ← bin .MUL oneMinusBeta2 gradSq
+  let vNew := asSRD (← bin .ADD vScaled gSqScaled)
 
   -- Bias correction: m_hat = m_new / (1 - beta1^t)
-  let mHat := asSRD (← TUOp.binaryOp .IDIV mNew biasCorr1B)
-  let vHat := asSRD (← TUOp.binaryOp .IDIV vNew biasCorr2B)
+  let mHat := asSRD (← bin .IDIV mNew biasCorr1B)
+  let vHat := asSRD (← bin .IDIV vNew biasCorr2B)
 
   -- Weight decay (AdamW style - applied to param before update)
   let paramDecayedRaw ← if cfg.weightDecay > 0.0 then do
     let wd ← TUOp.const d cfg.weightDecay.toFloat32
     let wdB ← TUOp.expand wd s
-    let lrWd ← TUOp.binaryOp .MUL lrB wdB
-    let decay ← TUOp.binaryOp .SUB oneB lrWd
-    let decayed ← TUOp.binaryOp .MUL param decay
+    let lrWd ← bin .MUL lrB wdB
+    let decay ← bin .SUB oneB lrWd
+    let decayed ← bin .MUL param decay
     pure decayed.raw
   else
     pure param.raw
@@ -147,10 +155,10 @@ def buildUpdateTUOps {opP opG opM opV : Ops} {s : Shape} {r : Nat} {d : DType}
 
   -- Update: param_new = param - lr * m_hat / (sqrt(v_hat) + eps)
   let sqrtV ← TUOp.unaryOp .SQRT vHat
-  let denom ← TUOp.binaryOp .ADD sqrtV epsB
-  let update ← TUOp.binaryOp .IDIV mHat denom
-  let scaledUpdate ← TUOp.binaryOp .MUL lrB update
-  let paramNew := asSRD (← TUOp.binaryOp .SUB paramDecayed scaledUpdate)
+  let denom ← bin .ADD sqrtV epsB
+  let update ← bin .IDIV mHat denom
+  let scaledUpdate ← bin .MUL lrB update
+  let paramNew := asSRD (← bin .SUB paramDecayed scaledUpdate)
 
   pure (paramNew, mNew, vNew)
 

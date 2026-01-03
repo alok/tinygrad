@@ -39,10 +39,18 @@ def create (lr : Float := 0.01) (momentum : Float := 0.0) : SGD :=
     Returns new_param as UOp: param - lr * grad -/
 def buildUpdateTUOp {opP opG : Ops} {s : Shape} {r : Nat} {d : DType}
     (param : TUOp opP s r d) (grad : TUOp opG s r d) (lr : Float) : TUOpM (TUOp .SUB s r d) := do
+  let bin {opx opy : Ops} {rx ry : Nat} (op : Ops) (x : TUOp opx s rx d) (y : TUOp opy s ry d) :
+      TUOpM (TUOp op s r d) := do
+    let x' : TUOp opx s r d := TUOp.mkUnsafe x.raw
+    let y' : TUOp opy s r d := TUOp.mkUnsafe y.raw
+    let res ← TUOp.binaryOpB (out := Shape.broadcastOut s s) op x' y'
+    let res := TUOp.castShape res s
+    let res := TUOp.castDType res d
+    pure (TUOp.mkUnsafe res.raw)
   let lrConst ← TUOp.const d lr.toFloat32
   let lrB ← TUOp.expand lrConst s
-  let scaledGrad ← TUOp.binaryOp .MUL lrB grad
-  let updated ← TUOp.binaryOp .SUB param scaledGrad
+  let scaledGrad ← bin .MUL lrB grad
+  let updated ← bin .SUB param scaledGrad
   let updated := TUOp.castShape updated s
   let updated := TUOp.castDType updated d
   let updated : TUOp .SUB s r d := TUOp.mkUnsafe updated.raw

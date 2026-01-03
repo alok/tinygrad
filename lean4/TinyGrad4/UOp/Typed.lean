@@ -182,6 +182,13 @@ def reduce {opx : Ops} {s : Shape} {r : Nat} {d : DType} (x : TUOp opx s r d)
   let raw ← UOp.reduce x.raw reduceOp axes keepdim
   pure (mkUnsafe raw)
 
+def reduceB {opx : Ops} {s out : Shape} {r : Nat} {d : DType}
+    (x : TUOp opx s r d) (reduceOp : Ops) (axes : List Nat) (keepdim : Bool := true)
+    [Shape.ReduceShape s axes keepdim out] :
+    TUOpM (TUOp .REDUCE_AXIS out (rankOf out) d) := do
+  let raw ← UOp.reduce x.raw reduceOp axes keepdim
+  pure (mkUnsafe raw)
+
 def contract2D {opa opb : Ops} {sa sb : Shape} {ra rb : Nat} {da db : DType}
     (a : TUOp opa sa ra da) (b : TUOp opb sb rb db) :
     TUOpM
@@ -200,6 +207,13 @@ def where_ {opc opx opy : Ops} {sc sx sy : Shape} {rc rx ry : Nat} {dx : DType}
     TUOpM
       (TUOp .WHERE (broadcastShape sc (broadcastShape sx sy))
         (rankOf (broadcastShape sc (broadcastShape sx sy))) dx) := do
+  let raw ← UOp.where_ cond.raw x.raw y.raw
+  pure (mkUnsafe raw)
+
+def whereB {opc opx opy : Ops} {sc sx sy sxy out : Shape} {rc rx ry : Nat} {dx : DType}
+    [Shape.BroadcastShape sx sy sxy] [Shape.BroadcastShape sc sxy out]
+    (cond : TUOp opc sc rc .bool) (x : TUOp opx sx rx dx) (y : TUOp opy sy ry dx) :
+    TUOpM (TUOp .WHERE out (rankOf out) dx) := do
   let raw ← UOp.where_ cond.raw x.raw y.raw
   pure (mkUnsafe raw)
 

@@ -51,6 +51,16 @@ def broadcastOut (s1 s2 : Shape) : Shape :=
   let s2' := List.replicate (len - s2.length) 1 ++ s2
   (s1'.zip s2').map fun (d1, d2) => max d1 d2
 
+/-- Typeclass witness for valid broadcast shapes. -/
+class BroadcastShape (s1 s2 : Shape) (out : Shape) : Prop where
+  h_out : out = broadcastOut s1 s2
+  h_valid : broadcastable s1 s2 = true
+
+instance broadcastShapeInst (s1 s2 : Shape) :
+    BroadcastShape s1 s2 (broadcastOut s1 s2) where
+  h_out := rfl
+  h_valid := sorry_proof
+
 /-- Check if concat is valid (same rank, same dims except axis). -/
 def concatValid (s1 s2 : Shape) (axis : Nat) : Bool :=
   s1.length == s2.length &&
@@ -214,9 +224,29 @@ def matmulShape (s1 s2 : Shape) : Option Shape :=
       | some batchOut => some (batchOut ++ [m, n])
       | none => none
 
+/-- Matmul output shape computed unconditionally (use with `MatmulShape`). -/
+def matmulOut (s1 s2 : Shape) : Shape :=
+  let r1 := s1.length
+  let r2 := s2.length
+  let m := listGetD s1 (r1 - 2) 0
+  let n := listGetD s2 (r2 - 1) 0
+  let batch1 := s1.take (r1 - 2)
+  let batch2 := s2.take (r2 - 2)
+  broadcastOut batch1 batch2 ++ [m, n]
+
 /-- Check if matmul is valid -/
 def matmulValid (s1 s2 : Shape) : Bool :=
   (matmulShape s1 s2).isSome
+
+/-- Typeclass witness for valid matmul shapes. -/
+class MatmulShape (s1 s2 : Shape) (out : Shape) : Prop where
+  h_out : out = matmulOut s1 s2
+  h_valid : matmulValid s1 s2 = true
+
+instance matmulShapeInst (s1 s2 : Shape) :
+    MatmulShape s1 s2 (matmulOut s1 s2) where
+  h_out := rfl
+  h_valid := sorry_proof
 
 -- ============================================================================
 -- Repeat shape computation

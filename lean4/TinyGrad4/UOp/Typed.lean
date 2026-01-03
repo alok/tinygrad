@@ -117,6 +117,12 @@ def binaryOp {opx opy : Ops} {sx sy : Shape} {rx ry : Nat} {dx dy : DType}
   let raw ← UOp.binaryOp op x.raw y.raw
   pure (mkUnsafe raw)
 
+def binaryOpB {opx opy : Ops} {sx sy out : Shape} {rx ry : Nat} {dx dy : DType}
+    [Shape.BroadcastShape sx sy out] (op : Ops) (x : TUOp opx sx rx dx) (y : TUOp opy sy ry dy) :
+    TUOpM (TUOp op out (rankOf out) (if op.producesBoolean then .bool else DType.promote dx dy)) := do
+  let raw ← UOp.binaryOp op x.raw y.raw
+  pure (mkUnsafe raw)
+
 def cast {opx : Ops} {s : Shape} {r : Nat} {d : DType} (x : TUOp opx s r d) (dtype : DType) :
     TUOpM (TUOp .CAST s r dtype) := do
   let raw ← UOp.cast x.raw dtype
@@ -180,6 +186,12 @@ def contract2D {opa opb : Ops} {sa sb : Shape} {ra rb : Nat} {da db : DType}
     (a : TUOp opa sa ra da) (b : TUOp opb sb rb db) :
     TUOpM
       (TUOp .CONTRACT (matmulShape sa sb) (rankOf (matmulShape sa sb)) (DType.promote da db)) := do
+  let raw ← UOp.contract2D a.raw b.raw
+  pure (mkUnsafe raw)
+
+def contract2DB {opa opb : Ops} {sa sb out : Shape} {ra rb : Nat} {da db : DType}
+    [Shape.MatmulShape sa sb out] (a : TUOp opa sa ra da) (b : TUOp opb sb rb db) :
+    TUOpM (TUOp .CONTRACT out (rankOf out) (DType.promote da db)) := do
   let raw ← UOp.contract2D a.raw b.raw
   pure (mkUnsafe raw)
 

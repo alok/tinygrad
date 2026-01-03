@@ -11,13 +11,6 @@ namespace TinyGrad4.Data
 class MonadTimeNS (m : Type → Type) where
   monoNs : m Nat
 
-namespace MonadTimeNS
-
-def monoNs [MonadTimeNS m] : m Nat :=
-  MonadTimeNS.monoNs
-
-end MonadTimeNS
-
 instance : MonadTimeNS IO where
   monoNs := IO.monoNanosNow
 
@@ -26,13 +19,6 @@ instance : MonadTimeNS IO where
 /-- Provides access to a profiler for timing spans. -/
 class MonadTiming (m : Type → Type) where
   getProfiler : m Profiler
-
-namespace MonadTiming
-
-def getProfiler [MonadTiming m] : m Profiler :=
-  MonadTiming.getProfiler
-
-end MonadTiming
 
 /-! ## TimingT -/
 
@@ -51,7 +37,7 @@ instance [Monad m] : MonadTiming (TimingT m) where
   getProfiler := read
 
 instance [Monad m] [MonadTimeNS m] : MonadTimeNS (TimingT m) where
-  monoNs := lift MonadTimeNS.monoNs
+  monoNs := fun _ => MonadTimeNS.monoNs
 
 /-! ## Timing helpers -/
 

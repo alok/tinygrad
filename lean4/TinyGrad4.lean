@@ -4,8 +4,6 @@ import TinyGrad4.Linter.RawBufferLinter
 import TinyGrad4.SimpSets
 import TinyGrad4.DType
 import TinyGrad4.Shape
-import TinyGrad4.Data.ArrayN
-import TinyGrad4.Data.Loader
 import TinyGrad4.Ops
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Typed

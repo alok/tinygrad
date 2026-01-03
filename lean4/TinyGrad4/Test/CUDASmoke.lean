@@ -112,8 +112,8 @@ def testGPULoader : IO Bool := do
       pure (some true)
     else
       -- Allocate buffer via GPULoader API
-      let buf ← GPUBuffer.alloc (.cuda 0) 1024 .uint8
-      IO.println s!"  ✓ Allocated via GPULoader ({buf.byteSize} bytes)"
+      let buf ← GPUBuffer.alloc (.cuda 0) ([1024] : Shape) .uint8
+      IO.println s!"  ✓ Allocated via GPULoader ({buf.bytes} bytes)"
 
       let testData := ByteArray.mk (Array.replicate 1024 42)
       buf.copyIn testData

@@ -76,6 +76,27 @@ def localToGlobal (cfg : ShardConfig) (n : Nat) (localIdx : Nat) : Nat :=
         remainder * (baseSize + 1) + (cfg.shardIndex - remainder) * baseSize
     blockStart + localIdx
 
+/-! ## Shard Properties -/
+
+/-- shardSize is zero when the dataset size is zero. -/
+theorem shardSize_zero (cfg : ShardConfig) : cfg.shardSize 0 = 0 := by
+  cases cfg with
+  | mk shardIndex numShards mode dropRemainder =>
+      by_cases hDrop : dropRemainder
+      · simp [ShardConfig.shardSize, hDrop]
+      · cases mode with
+        | interleaved =>
+            by_cases hZero : numShards = 0
+            · simp [ShardConfig.shardSize, hDrop, hZero]
+            · have hPos : 0 < numShards := Nat.pos_of_ne_zero hZero
+              have h1 : numShards - 1 < numShards := Nat.sub_lt hPos (by decide)
+              have h2 : numShards - 1 - shardIndex ≤ numShards - 1 := Nat.sub_le _ _
+              have hlt : numShards - 1 - shardIndex < numShards := Nat.lt_of_le_of_lt h2 h1
+              have hdiv : (numShards - 1 - shardIndex) / numShards = 0 := Nat.div_eq_of_lt hlt
+              simp [ShardConfig.shardSize, hDrop, hdiv]
+        | contiguous =>
+            simp [ShardConfig.shardSize, hDrop, Nat.not_lt_zero]
+
 end ShardConfig
 
 /-! ## ShardedDataset -/
@@ -98,9 +119,21 @@ instance [Dataset D T] : Dataset (ShardedDataset D T) T where
     else
       -- This shouldn't happen if shardSize/localToGlobal are correct,
       -- but we fallback to a valid access
-      have hLocal : localIdx < Dataset.len ds.inner := by
-        sorry  -- In practice, shardSize ≤ n / numShards ≤ n
-      Dataset.getItem ds.inner localIdx hLocal
+      match hN : Dataset.len ds.inner with
+      | 0 =>
+          have hlt : localIdx < 0 := by
+            have h' := h
+            simp [hN, ShardConfig.shardSize_zero] at h'
+          let hFalse : False := Nat.not_lt_zero _ hlt
+          False.elim hFalse
+      | Nat.succ n' =>
+          let safeIdx := min localIdx n'
+          have hSafe : safeIdx < Nat.succ n' := by
+            have hLe : safeIdx ≤ n' := Nat.min_le_right _ _
+            exact Nat.lt_succ_of_le hLe
+          have hSafe' : safeIdx < Dataset.len ds.inner := by
+            simpa [hN] using hSafe
+          Dataset.getItem ds.inner safeIdx hSafe'
 
 /-- Shard a dataset for a specific worker -/
 def shardDs [Dataset D T] (shardIndex : Nat) (numShards : Nat)

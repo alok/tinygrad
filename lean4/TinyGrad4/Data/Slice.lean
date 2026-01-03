@@ -162,7 +162,17 @@ def mk' (rb : RawBuffer) (elemOffset numElems : Nat) : RawBufferSlice :=
     elemOffset := actualOffset
     numElems := actualNum
     h_valid := by
-      sorry  -- Proof that bounds are satisfied
+      have hOffset : actualOffset ≤ maxElems := Nat.min_le_right _ _
+      have hNum : actualNum ≤ maxElems - actualOffset := Nat.min_le_right _ _
+      have hsum' : actualOffset + actualNum ≤ actualOffset + (maxElems - actualOffset) :=
+        Nat.add_le_add_left hNum _
+      have hsum : actualOffset + actualNum ≤ maxElems := by
+        simpa [Nat.add_sub_of_le hOffset] using hsum'
+      have hmul : (actualOffset + actualNum) * rb.dtype.itemsize ≤ maxElems * rb.dtype.itemsize :=
+        Nat.mul_le_mul_right _ hsum
+      have hmax : maxElems * rb.dtype.itemsize ≤ rb.data.size :=
+        Nat.div_mul_le_self rb.data.size rb.dtype.itemsize
+      exact Nat.le_trans hmul hmax
   }
 
 /-- DType of this slice -/
@@ -199,8 +209,20 @@ def slice (s : RawBufferSlice) (start len : Nat) : RawBufferSlice :=
     elemOffset := s.elemOffset + actualStart
     numElems := actualLen
     h_valid := by
-      have := s.h_valid
-      sorry }
+      have hStart : actualStart ≤ s.numElems := Nat.min_le_right _ _
+      have hLen : actualLen ≤ s.numElems - actualStart := Nat.min_le_right _ _
+      have hsum' : actualStart + actualLen ≤ actualStart + (s.numElems - actualStart) :=
+        Nat.add_le_add_left hLen _
+      have hsum : actualStart + actualLen ≤ s.numElems := by
+        simpa [Nat.add_sub_of_le hStart] using hsum'
+      have hsum2 : s.elemOffset + actualStart + actualLen ≤ s.elemOffset + s.numElems := by
+        have h := Nat.add_le_add_left hsum s.elemOffset
+        simpa [Nat.add_assoc] using h
+      have hmul :
+          (s.elemOffset + actualStart + actualLen) * s.parent.dtype.itemsize ≤
+          (s.elemOffset + s.numElems) * s.parent.dtype.itemsize :=
+        Nat.mul_le_mul_right _ hsum2
+      exact Nat.le_trans hmul s.h_valid }
 
 /-- Get element at index as Float (for float32 dtype) -/
 def getF32 (s : RawBufferSlice) (i : Nat) : Float :=

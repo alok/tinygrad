@@ -66,7 +66,8 @@ structure BatchedDataset (D : Type) (T : Type) where
 /-- Number of batches in a batched dataset -/
 def BatchedDataset.numBatches [Dataset D T] (ds : BatchedDataset D T) : Nat :=
   let n := Dataset.len ds.inner
-  if ds.dropLast then n / ds.batchSize
+  if ds.batchSize == 0 then 0
+  else if ds.dropLast then n / ds.batchSize
   else (n + ds.batchSize - 1) / ds.batchSize
 
 instance [Dataset D T] : Dataset (BatchedDataset D T) (Array T) where

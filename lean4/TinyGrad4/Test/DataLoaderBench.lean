@@ -103,8 +103,10 @@ def main : IO Unit := do
   let ckptMs := (ckptStop - ckptStart).toFloat / 1e6
   let resumeSeconds := (resumeStop - resumeStart).toFloat / 1e9
   let resumeRate := if resumeSeconds == 0.0 then 0.0 else remainder.toFloat / resumeSeconds
-  IO.println s!"Multi-prefetch resume: workers={workers} interruptAt={interruptAt} total={totalResume} " ++
+  IO.println (
+    s!"Multi-prefetch resume: workers={workers} interruptAt={interruptAt} total={totalResume} " ++
     s!"ckptMs={ckptMs} resumeRate={resumeRate} items/s policy=strict"
+  )
 
   -- 4) Stagewise profiling: iterator/prefetch/transfer/compute
   IO.println ""

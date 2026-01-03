@@ -228,7 +228,7 @@ lean_lib TinyGrad4 where
     .one `TinyGrad4.Benchmark.MetalDirect,
     .andSubmodules `TinyGrad4.Spec
   ]
-  precompileModules := false
+  precompileModules := true
 
 lean_lib TinyGrad4Data where
   globs := #[.andSubmodules `TinyGrad4.Data]

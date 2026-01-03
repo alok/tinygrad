@@ -111,7 +111,7 @@ structure Sample where
   label : UInt8
   deriving Repr
 
-instance : Inhabited Sample := ⟨{ pixels := ByteSlice.mk' ByteArray.empty 0 0, label := 0 }⟩
+instance : Inhabited Sample := ⟨{ pixels := ByteSlice.mk' (ByteArray.emptyWithCapacity 0) 0 0, label := 0 }⟩
 
 /-- Get a single sample from MNIST (zero-copy for image) -/
 def MNISTRaw.getSample (mnist : MNISTRaw) (idx : Nat) : Sample :=
@@ -229,16 +229,17 @@ def imagesToTensorF32 (ib : ImageBuffer) (startIdx numImages : Nat) (shape : Sha
     Output shape: [batchSize, numClasses] -/
 def labelsToOneHot (lb : LabelBuffer) (startIdx numLabels : Nat) (numClasses : Nat := 10) : UOpM UOp := do
   let slice := lb.slice startIdx numLabels
-  -- For one-hot, we need to build the encoding
-  -- This is done lazily in the UOp graph
-  let labelTensor ← toTensorU8 slice [numLabels]
-  -- Cast to int and use for indexing into identity matrix
-  let labelInt ← TUOp.cast (TUOp.ofRaw labelTensor) .int32
-  -- Create one-hot via comparison with range
-  -- For each label l, one_hot[i] = (i == l) ? 1.0 : 0.0
-  -- This can be expressed as: eye(numClasses)[labels]
-  -- For now, we'll use a simpler approach: expand and compare
-  sorry  -- TODO: Implement one-hot via UOp graph
+  let vals : Array Float32 := Id.run do
+    let total := numLabels * numClasses
+    let mut out := Array.replicate total (0.0 : Float32)
+    for i in [:numLabels] do
+      let cls := (slice.get! i).toNat
+      if cls < numClasses then
+        let idx := i * numClasses + cls
+        out := out.set! idx 1.0
+    out
+  let flat ← UOp.vconstF32 vals
+  UOp.reshape flat [numLabels, numClasses]
 
 /-! ## Batch Iteration (Zero-Copy) -/
 

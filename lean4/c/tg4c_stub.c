@@ -3218,6 +3218,86 @@ LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b
 
   for (size_t i = 0; i < out_rank; ++i) out_dims[i] = nat_array_get(outShape, i);
 
+  int fast_ok = 1;
+  size_t stride = 1;
+  for (size_t rev = 0; rev < mask_rank; ++rev) {
+    size_t i = mask_rank - 1 - rev;
+    size_t dim = (i < axis_n) ? out_dims[i] : (i == axis_n ? class_n : out_dims[i - 1]);
+    int64_t x_stride = xView.strides[i];
+    if (i < axis_n) {
+      if (x_stride != 0) fast_ok = 0;
+    } else if (x_stride != (int64_t)stride) {
+      fast_ok = 0;
+    }
+    if (i >= axis_n && idxView.strides[i] != 0) {
+      fast_ok = 0;
+    }
+    stride *= dim;
+  }
+
+  if (fast_ok) {
+    size_t pre_rank = axis_n;
+    size_t* pre_dims = pre_rank == 0 ? NULL : malloc(pre_rank * sizeof(size_t));
+    size_t* pre_idx = pre_rank == 0 ? NULL : malloc(pre_rank * sizeof(size_t));
+    if ((pre_rank && (!pre_dims || !pre_idx))) {
+      view_info_free(&xView);
+      view_info_free(&idxView);
+      free(out_dims);
+      free(out_idx);
+      free(mask_idx);
+      free(pre_dims);
+      free(pre_idx);
+      memset(o, 0, out_numel * elem);
+      return out;
+    }
+    size_t pre_outer = 1;
+    for (size_t i = 0; i < pre_rank; ++i) {
+      pre_dims[i] = out_dims[i];
+      pre_outer *= pre_dims[i];
+    }
+    size_t tail = 1;
+    for (size_t i = axis_n; i < out_rank; ++i) tail *= out_dims[i];
+    size_t block_bytes = tail * elem;
+
+    for (size_t pre = 0; pre < pre_outer; ++pre) {
+      if (pre_rank) {
+        unflatten_index(pre, pre_dims, pre_rank, pre_idx);
+      }
+      for (size_t j = 0; j < mask_rank; ++j) {
+        if (j < axis_n) {
+          mask_idx[j] = pre_rank ? pre_idx[j] : 0;
+        } else {
+          mask_idx[j] = 0;
+        }
+      }
+      int64_t idx_off = 0;
+      if (!view_offset(&idxView, mask_idx, &idx_off) || (size_t)idx_off >= idx_numel) {
+        memset(o + pre * block_bytes, 0, block_bytes);
+        continue;
+      }
+      int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem);
+      if (idx_val < 0 || (size_t)idx_val >= class_n) {
+        memset(o + pre * block_bytes, 0, block_bytes);
+        continue;
+      }
+      int64_t x_off = xView.offset + (int64_t)idx_val * xView.strides[axis_n];
+      if (x_off < 0 || (size_t)x_off + tail > x_numel) {
+        memset(o + pre * block_bytes, 0, block_bytes);
+        continue;
+      }
+      memcpy(o + pre * block_bytes, x_data + ((size_t)x_off) * elem, block_bytes);
+    }
+
+    view_info_free(&xView);
+    view_info_free(&idxView);
+    free(out_dims);
+    free(out_idx);
+    free(mask_idx);
+    free(pre_dims);
+    free(pre_idx);
+    return out;
+  }
+
   for (size_t i = 0; i < out_numel; ++i) {
     unflatten_index(i, out_dims, out_rank, out_idx);
     for (size_t j = 0; j < mask_rank; ++j) {

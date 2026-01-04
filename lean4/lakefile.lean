@@ -4,6 +4,7 @@ open Lake DSL System
 
 package TinyGrad4 where
   version := v!"0.1.0"
+  testDriver := "tg4_test"
   -- Disable Float→Float64 linter warnings globally (intentional use of Float alias)
   leanOptions := #[⟨`weak.linter.floatExplicit, false⟩]
 
@@ -228,10 +229,15 @@ lean_lib TinyGrad4 where
     .one `TinyGrad4.Benchmark.MetalDirect,
     .andSubmodules `TinyGrad4.Spec
   ]
+  needs := #[tg4c]
   precompileModules := true
 
 lean_lib TinyGrad4Data where
   globs := #[.andSubmodules `TinyGrad4.Data]
+
+lean_lib TinyGrad4Test where
+  globs := #[.andSubmodules `TinyGrad4.Test]
+  needs := #[tg4c]
 
 @[default_target]
 lean_lib Tqdm where
@@ -251,6 +257,11 @@ lean_lib LeanBenchWandb where
 
 lean_lib TinyGrad4Bench where
   globs := #[.andSubmodules `TinyGrad4Bench]
+
+lean_exe tg4_test where
+  root := `TinyGrad4.Test.SmokeAllMain
+  needs := #[tg4c]
+  moreLinkArgs := metalLinkArgs
 
 lean_exe mnist_fusion_bench where
   root := `TinyGrad4Bench.MNISTFusionBenchMain

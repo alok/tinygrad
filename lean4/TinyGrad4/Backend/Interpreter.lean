@@ -15,6 +15,7 @@ import TinyGrad4.Backend.FusedGather
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.MetalMatmul
 import TinyGrad4.Backend.MetalEwise
+import TinyGrad4.Backend.MetalGather
 import TinyGrad4.Backend.DeviceBuffer
 import TinyGrad4.Tags
 import Std.Data.HashMap
@@ -620,6 +621,8 @@ private def evalFusedGather (u : UOp) (plan : FusedGather.Plan) (env : Env)
     Below this threshold, CPU is faster due to GPU copy overhead. -/
 private def gpuEwiseMinElements : Nat := 16384
 
+private def gpuGatherMinElements : Nat := 16384
+
 /-- Check if kernel type is suitable for GPU dispatch -/
 private def isGpuDispatchableKernel (k : FusedEwise.Kernel) : Bool :=
   match k with
@@ -661,6 +664,29 @@ private def evalFusedEwiseIO (u : UOp) (plan : FusedEwise.Plan) (env : Env)
 
   -- Fall back to CPU implementation (small tensors or non-GPU kernels)
   return evalFusedEwise u plan env cache
+
+private def evalFusedGatherIO (u : UOp) (plan : FusedGather.Plan) (env : Env)
+    (cache : HashMap UOpId RawBuffer) : IO RawBuffer := do
+  let numel := listProd u.shape
+  if numel == 0 then
+    return RawBuffer.zeros u.dtype 0
+
+  let xFallback := env.getD plan.xBase (RawBuffer.zeros u.dtype 0)
+  let xBuf := cache.getD plan.xBase xFallback
+  let idxFallback := env.getD plan.idxBase (RawBuffer.zeros .int32 0)
+  let idxBuf := cache.getD plan.idxBase idxFallback
+
+  if numel < gpuGatherMinElements then
+    return evalFusedGather u plan env cache
+
+  let available ← Metal.isAvailable
+  if available then
+    try
+      return ← MetalGather.runFusedGatherWithFallback plan xBuf idxBuf u.shape u.dtype
+    catch _ =>
+      return evalFusedGather u plan env cache
+  else
+    return evalFusedGather u plan env cache
 
 private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cache : HashMap UOpId RawBuffer) : RawBuffer :=
   if u.dtype != .float32 then
@@ -2518,7 +2544,7 @@ def evalCompiledRawIO (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) 
           match impl with
           | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
           | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
-          | .fusedGather plan => pure (evalFusedGather u plan env cache)
+          | .fusedGather plan => evalFusedGatherIO u plan env cache
           | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
           | .fusedEwise plan => evalFusedEwiseIO u plan env cache
           | .fusedContract plan => evalFusedContractIO u plan env cache
@@ -2794,7 +2820,7 @@ def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffe
             match impl with
             | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
             | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
-            | .fusedGather plan => pure (evalFusedGather u plan env cache)
+            | .fusedGather plan => evalFusedGatherIO u plan env cache
             | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
             | .fusedEwise plan => evalFusedEwiseIO u plan env cache
             | .fusedContract plan => evalFusedContractIO u plan env cache

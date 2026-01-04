@@ -3124,6 +3124,122 @@ static float view_read_f32(const uint8_t* data, const view_info* v, const size_t
   return view_read_value(data, v, idx, 0);
 }
 
+static int view_offset(const view_info* v, const size_t* idx, int64_t* out) {
+  int64_t off = v->offset;
+  for (size_t i = 0; i < v->rank; ++i) {
+    size_t ix = idx[i];
+    if (ix < v->mask_start[i] || ix >= v->mask_end[i]) return 0;
+    off += (int64_t)ix * v->strides[i];
+  }
+  if (off < 0) return 0;
+  *out = off;
+  return 1;
+}
+
+static int64_t read_index_value(const uint8_t* data, size_t elem, size_t elem_size) {
+  const uint8_t* p = data + elem * elem_size;
+  if (elem_size == 4) {
+    int32_t v;
+    memcpy(&v, p, 4);
+    return (int64_t)v;
+  } else if (elem_size == 8) {
+    int64_t v;
+    memcpy(&v, p, 8);
+    return v;
+  } else if (elem_size == 2) {
+    int16_t v;
+    memcpy(&v, p, 2);
+    return (int64_t)v;
+  } else if (elem_size == 1) {
+    int8_t v = (int8_t)p[0];
+    return (int64_t)v;
+  }
+  return 0;
+}
+
+LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b_lean_obj_arg outShape,
+    b_lean_obj_arg xStrides, b_lean_obj_arg xOffset, b_lean_obj_arg xMaskStarts, b_lean_obj_arg xMaskEnds,
+    b_lean_obj_arg idxStrides, b_lean_obj_arg idxOffset, b_lean_obj_arg idxMaskStarts, b_lean_obj_arg idxMaskEnds,
+    b_lean_obj_arg axis, b_lean_obj_arg classDim, b_lean_obj_arg elemSize, b_lean_obj_arg idxElemSize) {
+  size_t out_rank = array_size(outShape);
+  size_t axis_n = nat_to_size(axis);
+  size_t class_n = nat_to_size(classDim);
+  size_t elem = nat_to_size(elemSize);
+  size_t idx_elem = nat_to_size(idxElemSize);
+  size_t out_numel = shape_numel(outShape);
+  lean_object* out = mk_byte_array(out_numel * elem);
+  uint8_t* o = byte_array_cptr(out);
+  const uint8_t* x_data = byte_array_cptr((lean_object*)x);
+  const uint8_t* idx_data = byte_array_cptr((lean_object*)idx);
+
+  if (out_numel == 0 || out_rank == 0 || elem == 0 || axis_n > out_rank) {
+    return out;
+  }
+
+  view_info xView = {0}, idxView = {0};
+  if (!view_info_init(&xView, xStrides, unbox_int64(xOffset), xMaskStarts, xMaskEnds) ||
+      !view_info_init(&idxView, idxStrides, unbox_int64(idxOffset), idxMaskStarts, idxMaskEnds)) {
+    view_info_free(&xView);
+    view_info_free(&idxView);
+    memset(o, 0, out_numel * elem);
+    return out;
+  }
+
+  size_t* out_dims = out_rank == 0 ? NULL : malloc(out_rank * sizeof(size_t));
+  size_t* out_idx = out_rank == 0 ? NULL : malloc(out_rank * sizeof(size_t));
+  size_t mask_rank = out_rank + 1;
+  size_t* mask_idx = malloc(mask_rank * sizeof(size_t));
+  if ((out_rank && (!out_dims || !out_idx)) || !mask_idx) {
+    view_info_free(&xView);
+    view_info_free(&idxView);
+    free(out_dims);
+    free(out_idx);
+    free(mask_idx);
+    memset(o, 0, out_numel * elem);
+    return out;
+  }
+
+  for (size_t i = 0; i < out_rank; ++i) out_dims[i] = nat_array_get(outShape, i);
+
+  for (size_t i = 0; i < out_numel; ++i) {
+    unflatten_index(i, out_dims, out_rank, out_idx);
+    for (size_t j = 0; j < mask_rank; ++j) {
+      if (j < axis_n) {
+        mask_idx[j] = out_idx[j];
+      } else if (j == axis_n) {
+        mask_idx[j] = 0;
+      } else {
+        mask_idx[j] = out_idx[j - 1];
+      }
+    }
+
+    int64_t idx_off = 0;
+    if (!view_offset(&idxView, mask_idx, &idx_off)) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem);
+    if (idx_val < 0 || (size_t)idx_val >= class_n) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    mask_idx[axis_n] = (size_t)idx_val;
+    int64_t x_off = 0;
+    if (!view_offset(&xView, mask_idx, &x_off)) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    memcpy(o + i * elem, x_data + ((size_t)x_off) * elem, elem);
+  }
+
+  view_info_free(&xView);
+  view_info_free(&idxView);
+  free(out_dims);
+  free(out_idx);
+  free(mask_idx);
+  return out;
+}
+
 static void view_stack_free(view_stack* v) {
   if (!v) return;
   if (v->views) {

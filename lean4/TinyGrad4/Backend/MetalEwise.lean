@@ -75,8 +75,19 @@ private def isBroadcast (strides : Array Int64) : Bool :=
     For broadcast inputs (all strides = 0), we read from index 0 instead of gid
     to avoid out-of-bounds access on scalar buffers.
 -/
+private def inputType (dtCode : Nat) : String :=
+  if dtCode == 1 || dtCode == 2 then "uchar" else "float"
+
+private def loadExpr (arg : Nat) (idx : String) (dtCode : Nat) : String :=
+  if dtCode == 1 then
+    s!"(in{arg}[{idx}] ? 1.0f : 0.0f)"
+  else if dtCode == 2 then
+    s!"(float)(in{arg}[{idx}])"
+  else
+    s!"in{arg}[{idx}]"
+
 private def renderEwiseBody (prog : Array UInt64) (numInputs : Nat)
-    (leafStrides : Array (Array Int64)) : String := Id.run do
+    (leafStrides : Array (Array Int64)) (leafDtypes : Array Nat) : String := Id.run do
   let mut lines := ""
 
   for instr in prog do
@@ -89,7 +100,9 @@ private def renderEwiseBody (prog : Array UInt64) (numInputs : Nat)
         -- Check if this input is broadcast (all strides = 0)
         let strides := leafStrides.getD arg #[]
         let idx := if isBroadcast strides then "0" else "gid"
-        lines := lines ++ s!"  stack[sp++] = in{arg}[{idx}];\n"
+        let dtCode := leafDtypes.getD arg 0
+        let expr := loadExpr arg idx dtCode
+        lines := lines ++ s!"  stack[sp++] = {expr};\n"
       else
         lines := lines ++ s!"  stack[sp++] = 0.0f; // invalid input {arg}\n"
     | 1 => -- NEG
@@ -133,13 +146,15 @@ private def renderEwiseKernelFromPlan (name : String) (plan : FusedEwise.Plan)
   -- Generate buffer parameters
   let mut params := ""
   for i in [:numInputs] do
-    params := params ++ s!"  device const float* in{i} [[buffer({i})]],\n"
+    let dtCode := plan.leafDtypes.getD i 0
+    let ty := inputType dtCode
+    params := params ++ s!"  device const {ty}* in{i} [[buffer({i})]],\n"
   params := params ++ s!"  device float* out [[buffer({numInputs})]],\n"
   params := params ++ "  uint gid [[thread_position_in_grid]]"
 
   -- Generate kernel body from FusedEwise program
   -- Pass leafStrides to handle broadcast inputs correctly
-  let body := renderEwiseBody plan.prog numInputs plan.leafStrides
+  let body := renderEwiseBody plan.prog numInputs plan.leafStrides plan.leafDtypes
 
   s!"#include <metal_stdlib>
 using namespace metal;
@@ -263,20 +278,27 @@ def runFusedEwise (plan : FusedEwise.Plan) (inputs : Array RawBuffer)
     (outShape : Shape) (dtype : DType := .float32) : IO RawBuffer := do
   let numel := listProd outShape
 
+  let useBytecode := plan.kernel == .bytecode || plan.leafDtypes.any (· != 0)
+
   -- Generate unique kernel name from plan hash and kernel type
   -- IMPORTANT: Include numel and leafStrides in hash since they affect shader generation
-  let kernelId := match plan.kernel with
-    | .bytecode => 0 | .negContiguous => 1 | .sqrtContiguous => 2 | .recipContiguous => 3
-    | .exp2Contiguous => 4 | .log2Contiguous => 5 | .sinContiguous => 6 | .cosContiguous => 7
-    | .tanContiguous => 8 | .addContiguous => 9 | .subContiguous => 10 | .mulContiguous => 11
-    | .divContiguous => 12 | .maxContiguous => 13 | .powContiguous => 14
-  let progHash := hash (plan.prog, plan.leafBases.size, kernelId, numel, plan.leafStrides)
+  let kernelId := if useBytecode then
+      0
+    else
+      match plan.kernel with
+      | .bytecode => 0 | .negContiguous => 1 | .sqrtContiguous => 2 | .recipContiguous => 3
+      | .exp2Contiguous => 4 | .log2Contiguous => 5 | .sinContiguous => 6 | .cosContiguous => 7
+      | .tanContiguous => 8 | .addContiguous => 9 | .subContiguous => 10 | .mulContiguous => 11
+      | .divContiguous => 12 | .maxContiguous => 13 | .powContiguous => 14
+  let progHash := hash (plan.prog, plan.leafBases.size, kernelId, numel, plan.leafStrides, plan.leafDtypes)
   let name := s!"fused_ewise_{progHash}"
 
   -- Render Metal kernel based on kernel type
-  let shader := match plan.kernel with
-    | .bytecode => renderEwiseKernelFromPlan name plan outShape
-    | k => renderSpecializedKernel name k numel
+  let shader :=
+    if useBytecode then
+      renderEwiseKernelFromPlan name plan outShape
+    else
+      renderSpecializedKernel name plan.kernel numel
 
   runEwiseKernel name shader inputs numel dtype
 
@@ -368,20 +390,27 @@ def runFusedEwiseDevice (plan : FusedEwise.Plan) (inputs : Array DeviceBuffer)
     (outShape : Shape) (dtype : DType := .float32) : IO DeviceBuffer := do
   let numel := listProd outShape
 
+  let useBytecode := plan.kernel == .bytecode || plan.leafDtypes.any (· != 0)
+
   -- Generate unique kernel name
   -- IMPORTANT: Include numel and leafStrides in hash since they affect shader generation
-  let kernelId := match plan.kernel with
-    | .bytecode => 0 | .negContiguous => 1 | .sqrtContiguous => 2 | .recipContiguous => 3
-    | .exp2Contiguous => 4 | .log2Contiguous => 5 | .sinContiguous => 6 | .cosContiguous => 7
-    | .tanContiguous => 8 | .addContiguous => 9 | .subContiguous => 10 | .mulContiguous => 11
-    | .divContiguous => 12 | .maxContiguous => 13 | .powContiguous => 14
-  let progHash := hash (plan.prog, plan.leafBases.size, kernelId, numel, plan.leafStrides)
+  let kernelId := if useBytecode then
+      0
+    else
+      match plan.kernel with
+      | .bytecode => 0 | .negContiguous => 1 | .sqrtContiguous => 2 | .recipContiguous => 3
+      | .exp2Contiguous => 4 | .log2Contiguous => 5 | .sinContiguous => 6 | .cosContiguous => 7
+      | .tanContiguous => 8 | .addContiguous => 9 | .subContiguous => 10 | .mulContiguous => 11
+      | .divContiguous => 12 | .maxContiguous => 13 | .powContiguous => 14
+  let progHash := hash (plan.prog, plan.leafBases.size, kernelId, numel, plan.leafStrides, plan.leafDtypes)
   let name := s!"fused_ewise_device_{progHash}"
 
   -- Render Metal kernel
-  let shader := match plan.kernel with
-    | .bytecode => renderEwiseKernelFromPlan name plan outShape
-    | k => renderSpecializedKernel name k numel
+  let shader :=
+    if useBytecode then
+      renderEwiseKernelFromPlan name plan outShape
+    else
+      renderSpecializedKernel name plan.kernel numel
 
   runEwiseKernelDevice name shader inputs numel dtype
 

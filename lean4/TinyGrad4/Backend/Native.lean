@@ -311,8 +311,8 @@ opaque unpackF64FromF32 (a : @& ByteArray) : FloatArray
 
 @[extern "tg4_gather_view"]
 opaque gatherView (x idx : @& ByteArray) (outShape : @& Array Nat)
-    (xStrides : @& Array Int64) (xOffset : @& Int64) (xMaskStarts xMaskEnds : @& Array Nat)
-    (idxStrides : @& Array Int64) (idxOffset : @& Int64) (idxMaskStarts idxMaskEnds : @& Array Nat)
+    (xStrides : @& Array Int64) (xOffset : Int64) (xMaskStarts xMaskEnds : @& Array Nat)
+    (idxStrides : @& Array Int64) (idxOffset : Int64) (idxMaskStarts idxMaskEnds : @& Array Nat)
     (axis classDim elemSize idxElemSize : @& Nat) : ByteArray
 
 @[extern "tg4_matmul_f32"]

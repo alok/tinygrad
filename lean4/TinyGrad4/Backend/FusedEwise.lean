@@ -409,7 +409,11 @@ private def compileWith (u : UOp) (keep : UOpIdSet) (refCnt : HashMap UOpId Nat)
     return none
   if st.prog.isEmpty then
     return none
-  let kernel := detectKernel st.prog st.fast st.leafBases.size st.leafShapes
+  let kernel :=
+    if st.leafDtypes.all (· == 0) then
+      detectKernel st.prog st.fast st.leafBases.size st.leafShapes
+    else
+      .bytecode
   return some
     { root := u.uid
       cover := st.cover

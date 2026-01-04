@@ -5,6 +5,7 @@ open Lake DSL System
 package TinyGrad4 where
   version := v!"0.1.0"
   testDriver := "tg4_test"
+  defaultTargets := #[`TinyGrad4, `Tqdm, `LeanBenchNew, `LeanBenchWandb]
   -- Disable Float→Float64 linter warnings globally (intentional use of Float alias)
   leanOptions := #[⟨`weak.linter.floatExplicit, false⟩]
 
@@ -12,6 +13,7 @@ require batteries from git "https://github.com/leanprover-community/batteries" @
 require strata from git "https://github.com/strata-org/Strata" @ "main"
 require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
 require LeanBench from git "https://github.com/alok/leanbench" @ "ae0820b"
+require scilean from "../../scilean"
 
 def cFlags : Array String :=
   if System.Platform.isWindows then
@@ -162,7 +164,6 @@ extern_lib tg4c pkg := do
 -- Use `.andSubmodules` to include the root module plus every submodule in the namespace.
 -- TinyGrad4 excludes TinyGrad4.Test.* and TinyGrad4.Backend.Engine to keep `lake build` green; build those explicitly when needed.
 -- Data loaders, benches, and experiments are opt-in to avoid work-in-progress build failures.
-@[default_target]
 lean_lib TinyGrad4 where
   roots := #[`TinyGrad4]
   globs := #[
@@ -234,29 +235,24 @@ lean_lib TinyGrad4 where
 
 lean_lib TinyGrad4Data where
   globs := #[.andSubmodules `TinyGrad4.Data]
+  needs := #[tg4c]
 
 lean_lib TinyGrad4Test where
   globs := #[.andSubmodules `TinyGrad4.Test]
   needs := #[tg4c]
 
-@[default_target]
 lean_lib Tqdm where
   globs := #[.andSubmodules `Tqdm]
 
-@[default_target]
 lean_lib LeanBenchNew where
   globs := #[.andSubmodules `LeanBenchNew]
 
-@[default_target]
-lean_lib Wandb where
-  globs := #[.andSubmodules `Wandb]
-
-@[default_target]
 lean_lib LeanBenchWandb where
   globs := #[.andSubmodules `LeanBenchWandb]
 
 lean_lib TinyGrad4Bench where
   globs := #[.andSubmodules `TinyGrad4Bench]
+  needs := #[tg4c]
 
 lean_exe tg4_test where
   root := `TinyGrad4.Test.SmokeAllMain

@@ -53,4 +53,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.DataLoaderSmoke
 
-#eval! TinyGrad4.Test.DataLoaderSmoke.runAll

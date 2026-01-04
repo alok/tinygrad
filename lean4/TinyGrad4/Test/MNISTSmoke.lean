@@ -56,4 +56,3 @@ def smoke : IO Unit := do
 
 end TinyGrad4.Test.MNISTSmoke
 
-#eval! TinyGrad4.Test.MNISTSmoke.smoke

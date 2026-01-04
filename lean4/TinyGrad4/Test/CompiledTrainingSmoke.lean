@@ -120,4 +120,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.CompiledTrainingSmoke
 
-#eval! TinyGrad4.Test.CompiledTrainingSmoke.runAll

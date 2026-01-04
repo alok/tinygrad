@@ -252,4 +252,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.ShapeTrackerSmoke
 
-#eval! TinyGrad4.Test.ShapeTrackerSmoke.runAll

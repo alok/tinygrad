@@ -78,4 +78,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.KernelExprSmoke
 
-#eval! TinyGrad4.Test.KernelExprSmoke.runAll

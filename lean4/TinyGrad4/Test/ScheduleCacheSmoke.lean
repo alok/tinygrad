@@ -54,4 +54,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.ScheduleCacheSmoke
 
-#eval! TinyGrad4.Test.ScheduleCacheSmoke.runAll

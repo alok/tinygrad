@@ -50,4 +50,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.WeightInitSmoke
 
-#eval! TinyGrad4.Test.WeightInitSmoke.runAll

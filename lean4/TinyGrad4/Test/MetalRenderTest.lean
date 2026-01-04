@@ -46,87 +46,92 @@ private def mkBinary (id : Nat) (op : Ops) (a b : UOp) : UOp :=
     arg := .empty
     shape := a.shape }
 
--- Test simple add kernel
-#eval do
-  let a := mkBuffer 0 [1024]
-  let b := mkBuffer 1 [1024]
-  let c := mkBinary 2 .ADD a b
-  let nodes := [a, b, c]
+def runAll : IO Unit := do
+  -- Test simple add kernel
+  do
+    let a := mkBuffer 0 [1024]
+    let b := mkBuffer 1 [1024]
+    let c := mkBinary 2 .ADD a b
+    let nodes := [a, b, c]
 
-  let kernel := renderEwiseKernel "test_add" nodes ⟨2⟩
-  IO.println "=== Simple Add Kernel ==="
-  IO.println kernel
+    let kernel := renderEwiseKernel "test_add" nodes ⟨2⟩
+    IO.println "=== Simple Add Kernel ==="
+    IO.println kernel
 
--- Test fused add+mul kernel
-#eval do
-  let a := mkBuffer 0 [1024]
-  let b := mkBuffer 1 [1024]
-  let c := mkBinary 2 .ADD a b
-  let d := mkBinary 3 .MUL c b
-  let nodes := [a, b, c, d]
+  -- Test fused add+mul kernel
+  do
+    let a := mkBuffer 0 [1024]
+    let b := mkBuffer 1 [1024]
+    let c := mkBinary 2 .ADD a b
+    let d := mkBinary 3 .MUL c b
+    let nodes := [a, b, c, d]
 
-  let kernel := renderEwiseKernel "test_add_mul" nodes ⟨3⟩
-  IO.println "=== Fused Add+Mul Kernel ==="
-  IO.println kernel
+    let kernel := renderEwiseKernel "test_add_mul" nodes ⟨3⟩
+    IO.println "=== Fused Add+Mul Kernel ==="
+    IO.println kernel
 
--- Test unary ops (neg, exp2, sin)
-#eval do
-  let a := mkBuffer 0 [1024]
-  let b := mkUnary 1 .NEG a
-  let c := mkUnary 2 .EXP2 b
-  let d := mkUnary 3 .SIN c
-  let nodes := [a, b, c, d]
+  -- Test unary ops (neg, exp2, sin)
+  do
+    let a := mkBuffer 0 [1024]
+    let b := mkUnary 1 .NEG a
+    let c := mkUnary 2 .EXP2 b
+    let d := mkUnary 3 .SIN c
+    let nodes := [a, b, c, d]
 
-  let kernel := renderEwiseKernel "test_unary_chain" nodes ⟨3⟩
-  IO.println "=== Unary Chain Kernel ==="
-  IO.println kernel
+    let kernel := renderEwiseKernel "test_unary_chain" nodes ⟨3⟩
+    IO.println "=== Unary Chain Kernel ==="
+    IO.println kernel
 
--- Test complex expression: (a + b) * exp2(a - b)
-#eval do
-  let a := mkBuffer 0 [1024]
-  let b := mkBuffer 1 [1024]
-  let sum := mkBinary 2 .ADD a b
-  let diff := mkBinary 3 .SUB a b
-  let expDiff := mkUnary 4 .EXP2 diff
-  let result := mkBinary 5 .MUL sum expDiff
-  let nodes := [a, b, sum, diff, expDiff, result]
+  -- Test complex expression: (a + b) * exp2(a - b)
+  do
+    let a := mkBuffer 0 [1024]
+    let b := mkBuffer 1 [1024]
+    let sum := mkBinary 2 .ADD a b
+    let diff := mkBinary 3 .SUB a b
+    let expDiff := mkUnary 4 .EXP2 diff
+    let result := mkBinary 5 .MUL sum expDiff
+    let nodes := [a, b, sum, diff, expDiff, result]
 
-  let kernel := renderEwiseKernel "test_complex" nodes ⟨5⟩
-  IO.println "=== Complex Expression Kernel ==="
-  IO.println kernel
+    let kernel := renderEwiseKernel "test_complex" nodes ⟨5⟩
+    IO.println "=== Complex Expression Kernel ==="
+    IO.println kernel
 
--- Test softmax kernel generation
-#eval do
-  let info : SoftmaxInfo := {
-    input := mkBuffer 0 [32, 1024]
-    axis := 1
-    axes := [1]
-    isLog := false
-  }
-  let kernel := renderSoftmaxKernel "test_softmax" info
-  IO.println "=== Softmax Kernel ==="
-  IO.println kernel
+  -- Test softmax kernel generation
+  do
+    let info : SoftmaxInfo := {
+      input := mkBuffer 0 [32, 1024]
+      axis := 1
+      axes := [1]
+      isLog := false
+    }
+    let kernel := renderSoftmaxKernel "test_softmax" info
+    IO.println "=== Softmax Kernel ==="
+    IO.println kernel
 
--- Test with constants
-#eval do
-  let a := mkBuffer 0 [1024]
-  let two := mkConst 1 2.0
-  let scaled := mkBinary 2 .MUL a two
-  let nodes := [a, two, scaled]
+  -- Test with constants
+  do
+    let a := mkBuffer 0 [1024]
+    let two := mkConst 1 2.0
+    let scaled := mkBinary 2 .MUL a two
+    let nodes := [a, two, scaled]
 
-  let kernel := renderEwiseKernel "test_scale" nodes ⟨2⟩
-  IO.println "=== Scale by Constant Kernel ==="
-  IO.println kernel
+    let kernel := renderEwiseKernel "test_scale" nodes ⟨2⟩
+    IO.println "=== Scale by Constant Kernel ==="
+    IO.println kernel
 
--- Test relu: max(x, 0)
-#eval do
-  let a := mkBuffer 0 [1024]
-  let zero := mkConst 1 0.0
-  let relu := mkBinary 2 .MAX a zero
-  let nodes := [a, zero, relu]
+  -- Test relu: max(x, 0)
+  do
+    let a := mkBuffer 0 [1024]
+    let zero := mkConst 1 0.0
+    let relu := mkBinary 2 .MAX a zero
+    let nodes := [a, zero, relu]
 
-  let kernel := renderEwiseKernel "test_relu" nodes ⟨2⟩
-  IO.println "=== ReLU Kernel ==="
-  IO.println kernel
+    let kernel := renderEwiseKernel "test_relu" nodes ⟨2⟩
+    IO.println "=== ReLU Kernel ==="
+    IO.println kernel
+
+  IO.println "=== MetalRenderTest OK ==="
+
+def main : IO Unit := runAll
 
 end TinyGrad4.Test.MetalRenderTest

@@ -160,4 +160,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.ExpandPermute
 
-#eval! TinyGrad4.Test.ExpandPermute.runAll

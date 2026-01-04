@@ -395,4 +395,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.MatmulViewFusionSmoke
 
-#eval! TinyGrad4.Test.MatmulViewFusionSmoke.runAll

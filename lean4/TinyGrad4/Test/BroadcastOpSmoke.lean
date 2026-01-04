@@ -67,4 +67,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.BroadcastOpSmoke
 
-#eval! TinyGrad4.Test.BroadcastOpSmoke.runAll

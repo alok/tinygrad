@@ -212,4 +212,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.ViewFusionSmoke
 
-#eval! TinyGrad4.Test.ViewFusionSmoke.runAll

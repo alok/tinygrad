@@ -11,6 +11,7 @@ package TinyGrad4 where
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
 require strata from git "https://github.com/strata-org/Strata" @ "main"
 require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
+require mathlib from git "https://github.com/leanprover-community/mathlib4" @ "v4.27.0-rc1"
 require LeanBench from git "https://github.com/alok/leanbench" @ "ae0820b"
 require scilean from "../../scilean"
 

@@ -247,13 +247,13 @@ static void view_info_free(view_info* v);
 static int view_info_init(view_info* v, b_lean_obj_arg strides, int64_t offset,
   b_lean_obj_arg mask_start, b_lean_obj_arg mask_end);
 static float view_read_value(const uint8_t* data, const view_info* v, const size_t* idx,
-  int is_bool);
+  uint8_t dtype);
 static float view_read_f32(const uint8_t* data, const view_info* v, const size_t* idx);
 static void view_stack_free(view_stack* v);
 static int view_stack_init(view_stack* v, b_lean_obj_arg shapes, b_lean_obj_arg strides,
   b_lean_obj_arg offsets, b_lean_obj_arg mask_start, b_lean_obj_arg mask_end);
 static float view_stack_read_value(const uint8_t* data, const view_stack* v, const size_t* idx,
-  size_t* idx_buf, size_t* tmp_buf, int is_bool);
+  size_t* idx_buf, size_t* tmp_buf, uint8_t dtype);
 static float view_stack_read_f32(const uint8_t* data, const view_stack* v, const size_t* idx,
   size_t* idx_buf, size_t* tmp_buf);
 
@@ -893,7 +893,7 @@ static int fused_ewise_init(fused_ewise_ctx* ctx, b_lean_obj_arg inputs, b_lean_
     lean_object* inp = lean_array_get_core(inputs, i);
     lean_object* sh = lean_array_get_core(inputShapes, i);
     ctx->inputs[i] = byte_array_cptr(inp);
-    ctx->in_is_bool[i] = nat_array_get(inputDtypes, i) == 1 ? 1 : 0;
+    ctx->in_is_bool[i] = (uint8_t)nat_array_get(inputDtypes, i);
     size_t rank = array_size(sh);
     ctx->in_ranks[i] = rank;
     if (rank == 0) {
@@ -930,8 +930,9 @@ static float fused_ewise_eval_at(const fused_ewise_ctx* ctx, const size_t* out_i
         size_t idx = (size_t)imm;
         size_t flat = broadcast_flat_index(out_idx, ctx->out_rank, ctx->in_dims[idx],
           ctx->in_ranks[idx], ctx->in_strides[idx]);
-        float v = ctx->in_is_bool[idx] ? (ctx->inputs[idx][flat] ? 1.0f : 0.0f)
-                                       : read_f32(ctx->inputs[idx], flat);
+        uint8_t dtype = ctx->in_is_bool[idx];
+        float v = dtype == 1 ? (ctx->inputs[idx][flat] ? 1.0f : 0.0f)
+                   : (dtype == 2 ? (float)ctx->inputs[idx][flat] : read_f32(ctx->inputs[idx], flat));
         stack[sp++] = v;
         break;
       }
@@ -1100,7 +1101,7 @@ static int fused_ewise_stack_init(fused_ewise_stack_ctx* ctx, b_lean_obj_arg inp
     lean_object* maskStartArr = lean_array_get_core(stackMaskStarts, i);
     lean_object* maskEndArr = lean_array_get_core(stackMaskEnds, i);
     ctx->inputs[i] = byte_array_cptr(inp);
-    ctx->in_is_bool[i] = nat_array_get(inputDtypes, i) == 1 ? 1 : 0;
+    ctx->in_is_bool[i] = (uint8_t)nat_array_get(inputDtypes, i);
     if (!view_stack_init(&ctx->stacks[i], shapesArr, stridesArr, offsetsArr, maskStartArr,
         maskEndArr)) {
       fused_ewise_stack_free(ctx);
@@ -1150,7 +1151,7 @@ static int fused_ewise_view_init(fused_ewise_view_ctx* ctx, b_lean_obj_arg input
     lean_object* maskStart = lean_array_get_core(inputMaskStarts, i);
     lean_object* maskEnd = lean_array_get_core(inputMaskEnds, i);
     ctx->inputs[i] = byte_array_cptr(inp);
-    ctx->in_is_bool[i] = nat_array_get(inputDtypes, i) == 1 ? 1 : 0;
+    ctx->in_is_bool[i] = (uint8_t)nat_array_get(inputDtypes, i);
     size_t rank = array_size(strides);
     if (rank != ctx->out_rank) {
       fused_ewise_view_free(ctx);
@@ -1209,7 +1210,7 @@ static int fused_ewise_view_init_stack(fused_ewise_view_ctx* ctx, b_lean_obj_arg
     lean_object* maskEnd = lean_array_get_core(maskEndArr, 0);
     int64_t off = int64_array_get(offsetsArr, 0);
     ctx->inputs[i] = byte_array_cptr(inp);
-    ctx->in_is_bool[i] = nat_array_get(inputDtypes, i) == 1 ? 1 : 0;
+    ctx->in_is_bool[i] = (uint8_t)nat_array_get(inputDtypes, i);
     size_t rank = array_size(strides);
     if (rank != ctx->out_rank) {
       fused_ewise_view_free(ctx);
@@ -3056,6 +3057,17 @@ LEAN_EXPORT lean_obj_res tg4_unpack_f64_from_f32(b_lean_obj_arg a) {
   return out;
 }
 
+LEAN_EXPORT lean_obj_res tg4_cast_u8_f32(b_lean_obj_arg a) {
+  size_t n = byte_array_size(a);
+  lean_object* out = mk_byte_array(n * 4);
+  uint8_t* o = byte_array_cptr(out);
+  const uint8_t* x = byte_array_cptr((lean_object*)a);
+  for (size_t i = 0; i < n; ++i) {
+    write_f32(o, i, (float)x[i]);
+  }
+  return out;
+}
+
 LEAN_EXPORT lean_obj_res tg4_matmul_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n) {
   size_t m_n = nat_to_size(m);
@@ -3108,7 +3120,7 @@ static int view_info_init(view_info* v, b_lean_obj_arg strides, int64_t offset,
 }
 
 static float view_read_value(const uint8_t* data, const view_info* v, const size_t* idx,
-    int is_bool) {
+    uint8_t dtype) {
   int64_t off = v->offset;
   for (size_t i = 0; i < v->rank; ++i) {
     size_t ix = idx[i];
@@ -3116,7 +3128,8 @@ static float view_read_value(const uint8_t* data, const view_info* v, const size
     off += (int64_t)ix * v->strides[i];
   }
   if (off < 0) return 0.0f;
-  if (is_bool) return data[(size_t)off] ? 1.0f : 0.0f;
+  if (dtype == 1) return data[(size_t)off] ? 1.0f : 0.0f;
+  if (dtype == 2) return (float)data[(size_t)off];
   return read_f32(data, (size_t)off);
 }
 
@@ -3319,7 +3332,7 @@ static int view_stack_init(view_stack* v, b_lean_obj_arg shapes, b_lean_obj_arg 
 }
 
 static float view_stack_read_value(const uint8_t* data, const view_stack* v, const size_t* idx,
-    size_t* idx_buf, size_t* tmp_buf, int is_bool) {
+    size_t* idx_buf, size_t* tmp_buf, uint8_t dtype) {
   if (!v || v->depth == 0) return 0.0f;
   size_t top = v->depth - 1;
   size_t top_rank = v->views[top].rank;
@@ -3338,7 +3351,8 @@ static float view_stack_read_value(const uint8_t* data, const view_stack* v, con
     if (off < 0) return 0.0f;
     if (level == 0) {
       size_t flat = (size_t)off;
-      if (is_bool) return data[flat] ? 1.0f : 0.0f;
+      if (dtype == 1) return data[flat] ? 1.0f : 0.0f;
+      if (dtype == 2) return (float)data[flat];
       return read_f32(data, flat);
     }
     size_t flat = (size_t)off;

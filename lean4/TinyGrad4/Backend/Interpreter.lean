@@ -490,7 +490,7 @@ private def evalFusedEwise (u : UOp) (plan : FusedEwise.Plan) (env : Env) (cache
       let mut inputs : Array ByteArray := Array.emptyWithCapacity n
       for i in [:n] do
         let dtCode := plan.leafDtypes[i]!
-        let dtype : DType := if dtCode == 1 then .bool else .float32
+        let dtype : DType := if dtCode == 1 then .bool else if dtCode == 2 then .uint8 else .float32
         let uid := plan.leafBases[i]!
         let fallback := env.getD uid (RawBuffer.zeros dtype 0)
         let buf := cache.getD uid fallback
@@ -647,7 +647,7 @@ private def evalFusedEwiseIO (u : UOp) (plan : FusedEwise.Plan) (env : Env)
     let mut rawInputs : Array RawBuffer := #[]
     for i in [:n] do
       let dtCode := plan.leafDtypes[i]!
-      let dtype : DType := if dtCode == 1 then .bool else .float32
+      let dtype : DType := if dtCode == 1 then .bool else if dtCode == 2 then .uint8 else .float32
       let uid := plan.leafBases[i]!
       let fallback := env.getD uid (RawBuffer.zeros dtype 0)
       let buf := cache.getD uid fallback
@@ -671,7 +671,7 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
       let mut inputs : Array ByteArray := Array.emptyWithCapacity n
       for i in [:n] do
         let dtCode := plan.ewise.leafDtypes[i]!
-        let dtype : DType := if dtCode == 1 then .bool else .float32
+        let dtype : DType := if dtCode == 1 then .bool else if dtCode == 2 then .uint8 else .float32
         let uid := plan.ewise.leafBases[i]!
         let fallback := env.getD uid (RawBuffer.zeros dtype 0)
         let buf := cache.getD uid fallback
@@ -1906,10 +1906,17 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
       let numel := listProd u.shape
       match u.dtype with
       | .float32 =>
-        let mut out : Array Float := Array.emptyWithCapacity numel
-        for i in [:numel] do
-          out := out.push (readAsFloat src.dtype src.data i)
-        return { dtype := .float32, data := RawBuffer.packFloatsToF32Bytes out }
+        match src.dtype with
+        | .uint8 =>
+          if src.data.size != numel then
+            return RawBuffer.zeros u.dtype numel
+          else
+            return { dtype := .float32, data := Native.castU8ToF32 src.data }
+        | _ =>
+          let mut out : Array Float := Array.emptyWithCapacity numel
+          for i in [:numel] do
+            out := out.push (readAsFloat src.dtype src.data i)
+          return { dtype := .float32, data := RawBuffer.packFloatsToF32Bytes out }
       | .bool =>
         let mut out := ByteArray.emptyWithCapacity numel
         for i in [:numel] do
@@ -2655,7 +2662,7 @@ private def evalFusedReduceGPU (u : UOp) (plan : FusedReduce.Plan)
     | none =>
       -- Get from CPU cache or env, upload to GPU
       let dtCode := plan.ewise.leafDtypes[i]!
-      let dtype : DType := if dtCode == 1 then .bool else .float32
+      let dtype : DType := if dtCode == 1 then .bool else if dtCode == 2 then .uint8 else .float32
       let fallback := env.getD uid (RawBuffer.zeros dtype 0)
       let buf := cache.getD uid fallback
       let db := fromCPU buf

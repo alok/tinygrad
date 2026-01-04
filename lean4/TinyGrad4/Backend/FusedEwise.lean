@@ -229,6 +229,8 @@ private def addLeaf (u : UOp) (outShape : Shape) : BuildM (Option Nat) := do
         some 1
       else if u.dtype == .float32 then
         some 0
+      else if u.dtype == .uint8 then
+        some 2
       else
         none
     match dtCode with
@@ -290,6 +292,8 @@ private def canFuseNode (u : UOp) : Bool :=
     false
   else
     match u.op with
+    | .CAST =>
+        u.src.length == 1 && u.src[0]!.dtype == .uint8
     | .NEG | .SQRT | .RECIPROCAL | .EXP2 | .LOG2 | .SIN | .COS | .TAN =>
         u.src.length == 1 && allFloat32 u.src
     | .ADD | .SUB | .MUL | .FDIV | .MAX =>
@@ -305,6 +309,18 @@ private def canFuseNode (u : UOp) : Bool :=
 
 private partial def emitExpr (rootId : UOpId) (u : UOp) (outShape : Shape) (keep : UOpIdSet)
     (refCnt : HashMap UOpId Nat) (allowRootShared : Bool) : BuildM Bool := do
+  if u.op == .CAST then
+    match u.src with
+    | [s] =>
+        if u.dtype == .float32 && s.dtype == .uint8 then
+          if (← emitExpr rootId s outShape keep refCnt allowRootShared) then
+            addCover u.uid
+            return true
+          else
+            return false
+        else
+          return false
+    | _ => return false
   let fusable := canFuseNode u
   let shouldFuse :=
     if !fusable then

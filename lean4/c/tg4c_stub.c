@@ -3158,8 +3158,8 @@ static int64_t read_index_value(const uint8_t* data, size_t elem, size_t elem_si
 }
 
 LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b_lean_obj_arg outShape,
-    b_lean_obj_arg xStrides, b_lean_obj_arg xOffset, b_lean_obj_arg xMaskStarts, b_lean_obj_arg xMaskEnds,
-    b_lean_obj_arg idxStrides, b_lean_obj_arg idxOffset, b_lean_obj_arg idxMaskStarts, b_lean_obj_arg idxMaskEnds,
+    b_lean_obj_arg xStrides, int64_t xOffset, b_lean_obj_arg xMaskStarts, b_lean_obj_arg xMaskEnds,
+    b_lean_obj_arg idxStrides, int64_t idxOffset, b_lean_obj_arg idxMaskStarts, b_lean_obj_arg idxMaskEnds,
     b_lean_obj_arg axis, b_lean_obj_arg classDim, b_lean_obj_arg elemSize, b_lean_obj_arg idxElemSize) {
   size_t out_rank = array_size(outShape);
   size_t axis_n = nat_to_size(axis);
@@ -3167,6 +3167,10 @@ LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b
   size_t elem = nat_to_size(elemSize);
   size_t idx_elem = nat_to_size(idxElemSize);
   size_t out_numel = shape_numel(outShape);
+  size_t x_bytes = byte_array_size(x);
+  size_t idx_bytes = byte_array_size(idx);
+  size_t x_numel = elem == 0 ? 0 : (x_bytes / elem);
+  size_t idx_numel = idx_elem == 0 ? 0 : (idx_bytes / idx_elem);
   lean_object* out = mk_byte_array(out_numel * elem);
   uint8_t* o = byte_array_cptr(out);
   const uint8_t* x_data = byte_array_cptr((lean_object*)x);
@@ -3177,8 +3181,8 @@ LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b
   }
 
   view_info xView = {0}, idxView = {0};
-  if (!view_info_init(&xView, xStrides, unbox_int64(xOffset), xMaskStarts, xMaskEnds) ||
-      !view_info_init(&idxView, idxStrides, unbox_int64(idxOffset), idxMaskStarts, idxMaskEnds)) {
+  if (!view_info_init(&xView, xStrides, xOffset, xMaskStarts, xMaskEnds) ||
+      !view_info_init(&idxView, idxStrides, idxOffset, idxMaskStarts, idxMaskEnds)) {
     view_info_free(&xView);
     view_info_free(&idxView);
     memset(o, 0, out_numel * elem);
@@ -3218,6 +3222,10 @@ LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b
       memset(o + i * elem, 0, elem);
       continue;
     }
+    if ((size_t)idx_off >= idx_numel) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
     int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem);
     if (idx_val < 0 || (size_t)idx_val >= class_n) {
       memset(o + i * elem, 0, elem);
@@ -3226,6 +3234,10 @@ LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b
     mask_idx[axis_n] = (size_t)idx_val;
     int64_t x_off = 0;
     if (!view_offset(&xView, mask_idx, &x_off)) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    if ((size_t)x_off >= x_numel) {
       memset(o + i * elem, 0, elem);
       continue;
     }

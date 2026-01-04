@@ -11,6 +11,7 @@ import TinyGrad4.Backend.FusedContract
 import TinyGrad4.Backend.FusedSGD
 import TinyGrad4.Backend.FusedMatmul
 import TinyGrad4.Backend.FusedSoftmax
+import TinyGrad4.Backend.FusedGather
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.MetalMatmul
 import TinyGrad4.Backend.MetalEwise
@@ -542,6 +543,78 @@ private def evalFusedEwise (u : UOp) (plan : FusedEwise.Plan) (env : Env) (cache
       if outBytes.isEmpty then
         return RawBuffer.zeros u.dtype (listProd u.shape)
       return { dtype := .float32, data := outBytes }
+
+private def unitStridesArray (shape : Array Nat) : Array Nat :=
+  (Shape.unitStrides shape.toList).map (fun i => Int.toNat i) |>.toArray
+
+private def unravelIndex (shape : Array Nat) (strides : Array Nat) (idx : Nat) : Array Nat := Id.run do
+  let mut out := Array.emptyWithCapacity shape.size
+  let mut rem := idx
+  for i in [:shape.size] do
+    let stride := strides[i]!
+    if stride == 0 then
+      out := out.push 0
+    else
+      let coord := rem / stride
+      out := out.push coord
+      rem := rem % stride
+  return out
+
+private def insertAxis (idx : Array Nat) (axis : Nat) (value : Nat) : Array Nat := Id.run do
+  let mut out := Array.emptyWithCapacity (idx.size + 1)
+  let mut j := 0
+  for i in [:idx.size + 1] do
+    if i == axis then
+      out := out.push value
+    else
+      out := out.push idx[j]!
+      j := j + 1
+  return out
+
+private def viewOffset (v : Backend.View) (idx : Array Nat) : Option Nat := Id.run do
+  if idx.size != v.strides.size then
+    return none
+  let mut off : Int64 := v.offset
+  for i in [:idx.size] do
+    off := off + v.strides[i]! * (Int64.ofInt (Int.ofNat idx[i]!))
+  let offI := off.toInt
+  if offI < 0 then none else some offI.toNat
+
+private def pushZeros (out : ByteArray) (n : Nat) : ByteArray := Id.run do
+  let mut acc := out
+  for _ in [:n] do
+    acc := acc.push 0
+  return acc
+
+private def copyElem (src : ByteArray) (srcElem : Nat) (itemsize : Nat) (out : ByteArray) : ByteArray := Id.run do
+  let mut acc := out
+  let base := srcElem * itemsize
+  for i in [:itemsize] do
+    acc := acc.push (src.get! (base + i))
+  return acc
+
+private def evalFusedGather (u : UOp) (plan : FusedGather.Plan) (env : Env)
+    (cache : HashMap UOpId RawBuffer) : RawBuffer := Id.run do
+  let numel := listProd u.shape
+  let itemsize := u.dtype.itemsize
+  if numel == 0 then
+    return RawBuffer.zeros u.dtype 0
+
+  let xFallback := env.getD plan.xBase (RawBuffer.zeros u.dtype 0)
+  let xBuf := cache.getD plan.xBase xFallback
+  let idxFallback := env.getD plan.idxBase (RawBuffer.zeros .int32 0)
+  let idxBuf := cache.getD plan.idxBase idxFallback
+
+  let maskShape := plan.maskShape
+  if plan.reduceAxis >= maskShape.size then
+    return RawBuffer.zeros u.dtype numel
+  let classDim := maskShape[plan.reduceAxis]!
+  let outBytes :=
+    Native.gatherView xBuf.data idxBuf.data u.shape.toArray
+      plan.xView.strides plan.xView.offset plan.xView.maskStart plan.xView.maskEnd
+      plan.idxView.strides plan.idxView.offset plan.idxView.maskStart plan.idxView.maskEnd
+      plan.reduceAxis classDim itemsize plan.idxItemsize
+  return { dtype := u.dtype, data := outBytes }
 
 /-- Minimum number of elements for GPU dispatch to be beneficial.
     Below this threshold, CPU is faster due to GPU copy overhead. -/
@@ -2190,6 +2263,7 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
             match impl with
             | .fusedMatmul plan => evalFusedMatmulBias u plan env cache
             | .fusedSoftmax plan => evalFusedSoftmax u plan env cache
+            | .fusedGather plan => evalFusedGather u plan env cache
             | .fusedReduce plan => evalFusedReduce u plan env cache
             | .fusedEwise plan => evalFusedEwise u plan env cache
             | .fusedContract plan => evalFusedContract u plan env cache
@@ -2244,6 +2318,7 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
               match impl with
               | .fusedMatmul plan => evalFusedMatmulBias u plan env cache
               | .fusedSoftmax plan => evalFusedSoftmax u plan env cache
+              | .fusedGather plan => evalFusedGather u plan env cache
               | .fusedReduce plan => evalFusedReduce u plan env cache
               | .fusedEwise plan => evalFusedEwise u plan env cache
               | .fusedContract plan => evalFusedContract u plan env cache
@@ -2436,6 +2511,7 @@ def evalCompiledRawIO (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) 
           match impl with
           | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
           | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
+          | .fusedGather plan => pure (evalFusedGather u plan env cache)
           | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
           | .fusedEwise plan => evalFusedEwiseIO u plan env cache
           | .fusedContract plan => evalFusedContractIO u plan env cache
@@ -2711,6 +2787,7 @@ def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffe
             match impl with
             | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
             | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
+            | .fusedGather plan => pure (evalFusedGather u plan env cache)
             | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
             | .fusedEwise plan => evalFusedEwiseIO u plan env cache
             | .fusedContract plan => evalFusedContractIO u plan env cache

@@ -1,11 +1,14 @@
 import Lean.Data.Json
 import LeanBench
 import TinyGrad4.Data.MNISTDataset
+import TinyGrad4.Data.MNISTRaw
 import TinyGrad4.Data.Profile
 import TinyGrad4.Data.Prefetch
 import TinyGrad4.Data.Shard
 import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Transform
+import TinyGrad4.Backend.Interpreter
+import TinyGrad4.Tensor.Math
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -13,11 +16,14 @@ namespace TinyGrad4Bench
 
 open LeanBench
 open TinyGrad4.Data
+open TinyGrad4
 
 structure BenchParams where
   dataDir : String := "../data"
   maxImages : Nat := 10000
   batchSize : Nat := 64
+  indexSelectMaxImages : Nat := 256
+  indexSelectBatchSize : Nat := 32
   prefetchBuffer : Nat := 8
   warmup : Nat := 1
   samples : Nat := 3
@@ -29,6 +35,11 @@ structure ProfileSnapshot where
   stages : Array (String × StageStat)
   concurrency : ConcurrencyStats
   stageConcurrency : Array (String × ConcurrencyStats)
+  deriving Inhabited
+
+structure IndexSelectSnapshot where
+  batches : Nat
+  total : Float
   deriving Inhabited
 
 private def getEnvNat (key : String) (default : Nat) : IO Nat := do
@@ -55,14 +66,20 @@ private def readParams : IO BenchParams := do
   let dataDir := ← getEnvString "TG4_DATA_DIR" "../data"
   let maxImages := ← getEnvNat "TG4_MAX_IMAGES" 10000
   let batchSize := ← getEnvNat "TG4_BATCH" 64
+  let indexSelectMaxImages := ← getEnvNat "TG4_INDEXSELECT_MAX_IMAGES" 256
+  let indexSelectBatchSize := ← getEnvNat "TG4_INDEXSELECT_BATCH" 32
   let prefetchBuffer := ← getEnvNat "TG4_PREFETCH_BUF" 8
   let warmup := ← getEnvNat "TG4_BENCH_WARMUP" 1
   let samples := ← getEnvNat "TG4_BENCH_SAMPLES" 3
   let seed := ← getEnvNat "TG4_BENCH_SEED" 42
   let useCachedShuffle := ← getEnvBool "TG4_BENCH_CACHED_SHUFFLE" true
-  pure { dataDir, maxImages, batchSize, prefetchBuffer, warmup, samples, seed, useCachedShuffle }
+  pure {
+    dataDir, maxImages, batchSize, indexSelectMaxImages, indexSelectBatchSize,
+    prefetchBuffer, warmup, samples, seed, useCachedShuffle
+  }
 
 initialize mnistCache : IO.Ref (Option MNISTDataset) <- IO.mkRef none
+initialize mnistRawCache : IO.Ref (Option TinyGrad4.Data.MNISTRaw.MNISTRaw) <- IO.mkRef none
 
 private def getMnist (cfg : BenchParams) : IO MNISTDataset := do
   match (← mnistCache.get) with
@@ -72,8 +89,19 @@ private def getMnist (cfg : BenchParams) : IO MNISTDataset := do
       mnistCache.set (some ds)
       pure ds
 
+private def getMnistRaw (cfg : BenchParams) : IO TinyGrad4.Data.MNISTRaw.MNISTRaw := do
+  match (← mnistRawCache.get) with
+  | some ds => pure ds
+  | none =>
+      let ds ← TinyGrad4.Data.MNISTRaw.loadTrain cfg.dataDir (some cfg.indexSelectMaxImages)
+      mnistRawCache.set (some ds)
+      pure ds
+
 private def batchCount (cfg : BenchParams) : Nat :=
   if cfg.batchSize == 0 then 0 else cfg.maxImages / cfg.batchSize
+
+private def indexSelectBatchCount (cfg : BenchParams) : Nat :=
+  if cfg.indexSelectBatchSize == 0 then 0 else cfg.indexSelectMaxImages / cfg.indexSelectBatchSize
 
 private def baseConfig (cfg : BenchParams) (tags : List String := []) : BenchConfig :=
   { suite := some "data"
@@ -81,6 +109,13 @@ private def baseConfig (cfg : BenchParams) (tags : List String := []) : BenchCon
     warmup := cfg.warmup
     samples := cfg.samples
     items := some (batchCount cfg) }
+
+private def indexSelectConfig (cfg : BenchParams) (tags : List String := []) : BenchConfig :=
+  { suite := some "data"
+    tags := tags
+    warmup := cfg.warmup
+    samples := cfg.samples
+    items := some (indexSelectBatchCount cfg) }
 
 private def jsonNumOfFloat (x : Float) : Lean.Json :=
   match Lean.JsonNumber.fromFloat? x with
@@ -131,6 +166,37 @@ private def extrasJson (cfg : BenchParams) (snap : ProfileSnapshot) : Lean.Json 
     ("stage_concurrency", stageConcurrencyJson snap.stageConcurrency),
     ("stages", stageArr)
   ]
+
+private def indexSelectJson (cfg : BenchParams) (snap : IndexSelectSnapshot) : Lean.Json :=
+  let configObj := Lean.Json.mkObj [
+    ("data_dir", Lean.Json.str cfg.dataDir),
+    ("max_images", Lean.Json.num cfg.indexSelectMaxImages),
+    ("batch_size", Lean.Json.num cfg.indexSelectBatchSize)
+  ]
+  Lean.Json.mkObj [
+    ("config", configObj),
+    ("batches", Lean.Json.num snap.batches),
+    ("total", jsonNumOfFloat snap.total)
+  ]
+
+private def bytesFromUInt32 (v : UInt32) : Array UInt8 :=
+  let b0 : UInt8 := UInt8.ofNat (UInt32.toNat (v &&& 0xFF))
+  let b1 : UInt8 := UInt8.ofNat (UInt32.toNat ((v >>> 8) &&& 0xFF))
+  let b2 : UInt8 := UInt8.ofNat (UInt32.toNat ((v >>> 16) &&& 0xFF))
+  let b3 : UInt8 := UInt8.ofNat (UInt32.toNat ((v >>> 24) &&& 0xFF))
+  #[b0, b1, b2, b3]
+
+private def pushBytes (out : ByteArray) (bytes : Array UInt8) : ByteArray := Id.run do
+  let mut acc := out
+  for b in bytes do
+    acc := acc.push b
+  return acc
+
+private def packI32 (vals : Array Nat) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity (vals.size * 4)
+  for v in vals do
+    out := pushBytes out (bytesFromUInt32 (UInt32.ofNat v))
+  return out
 
 private def mkShuffled (cfg : BenchParams) (key : RandKey)
     (base : ProfiledDataset MNISTDataset MNISTSample) :
@@ -206,11 +272,43 @@ private def runPrefetchItems (cfg : BenchParams) : IO ProfileSnapshot := do
   let (stages, concurrency, stageConcurrency) ← profiler.snapshotWithConcurrencyByStage
   pure { stages, concurrency, stageConcurrency }
 
+private def runIndexSelectSmall (cfg : BenchParams) : IO IndexSelectSnapshot := do
+  let batchSize := cfg.indexSelectBatchSize
+  let mnist ← getMnistRaw cfg
+  let batches := indexSelectBatchCount cfg
+  if batchSize == 0 || batches == 0 then
+    return { batches := 0, total := 0.0 }
+  let (sumT, imgBuf, idxBuf) := runTensorM do
+    let img ← Tensor.buffer [mnist.images.numImages, 784] .uint8
+    let idx ← Tensor.buffer [batchSize] .int32
+    let gathered ← StaticTensor.indexSelect img 0 idx
+    let gatheredF ← StaticTensor.cast gathered .float32
+    let total ← StaticTensor.sum gatheredF
+    pure (total, img.uop, idx.uop)
+  let imgRaw : RawBuffer := { dtype := .uint8, data := mnist.images.data.toByteArray }
+  let baseEnv := TinyGrad4.Interpreter.setBuffer (∅ : Env) imgBuf imgRaw
+  let key := RandKey.new cfg.seed
+  let (indices, _) := key.shuffleIndices mnist.images.numImages
+  let mut total : Float := 0.0
+  for i in [:batches] do
+    let startIdx := i * batchSize
+    let endIdx := startIdx + batchSize
+    let idxSlice := indices.extract startIdx endIdx
+    let idxBytes := packI32 idxSlice
+    let idxRaw : RawBuffer := { dtype := .int32, data := idxBytes }
+    let env := TinyGrad4.Interpreter.setBuffer baseEnv idxBuf idxRaw
+    let out ← TinyGrad4.Interpreter.evalTensorCached sumT env
+    let vals := RawBuffer.toFloatArray out
+    let v := if vals.size == 0 then 0.0 else vals[0]!
+    total := total + v
+  pure { batches, total }
+
 initialize do
   let cfg ← readParams
   let baselineStats ← IO.mkRef (default : ProfileSnapshot)
   let prefetchStats ← IO.mkRef (default : ProfileSnapshot)
   let prefetchItemStats ← IO.mkRef (default : ProfileSnapshot)
+  let indexSelectStats ← IO.mkRef (default : IndexSelectSnapshot)
   LeanBench.register {
     name := "dataloader/mnist/baseline"
     action := do
@@ -237,6 +335,15 @@ initialize do
     report? := some do
       extrasJson cfg <$> prefetchItemStats.get
     config := baseConfig cfg ["data", "mnist", "prefetch", "items"]
+  }
+  LeanBench.register {
+    name := "dataloader/mnist/indexselect-small"
+    action := do
+      let snap ← runIndexSelectSmall cfg
+      indexSelectStats.set snap
+    report? := some do
+      indexSelectJson cfg <$> indexSelectStats.get
+    config := indexSelectConfig cfg ["data", "mnist", "indexselect", "small"]
   }
 
 end TinyGrad4Bench

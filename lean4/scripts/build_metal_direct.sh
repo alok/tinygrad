@@ -7,9 +7,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LEAN4_DIR="$ROOT_DIR/lean4"
 
-cd "$PROJECT_DIR"
+cd "$ROOT_DIR"
 
 # Get Lean paths
 LEAN_BIN="$(elan which lean)"
@@ -17,7 +18,7 @@ LEAN_HOME="$(dirname "$(dirname "$LEAN_BIN")")"
 LEAN_INCLUDE="$LEAN_HOME/include"
 LEAN_LIB="$LEAN_HOME/lib/lean"
 
-BUILD_DIR="$PROJECT_DIR/.lake/build"
+BUILD_DIR="$ROOT_DIR/.lake/build"
 METAL_DIR="$BUILD_DIR/metal"
 OUTPUT="$METAL_DIR/metal_direct"
 
@@ -43,7 +44,7 @@ echo ""
 
 # Step 4: Compile C driver
 echo "Step 4: Compiling C driver..."
-C_DRIVER="$PROJECT_DIR/c/metal_bench_main.c"
+C_DRIVER="$LEAN4_DIR/c/metal_bench_main.c"
 C_OBJ="$METAL_DIR/metal_bench_main.o"
 
 clang -c \
@@ -71,7 +72,7 @@ METAL_OBJ="$METAL_DIR/tg4_metal.o"
 # Dependency libraries
 DEP_LIBS=""
 for pkg in strata batteries Cli plausible; do
-    PKGLIB="$PROJECT_DIR/.lake/packages/$pkg/.lake/build/lib"
+    PKGLIB="$ROOT_DIR/.lake/packages/$pkg/.lake/build/lib"
     if [ -d "$PKGLIB" ]; then
         DEP_LIBS="$DEP_LIBS -L$PKGLIB"
         # Add the shared library if it exists

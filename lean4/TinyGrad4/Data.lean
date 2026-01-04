@@ -1,7 +1,6 @@
 -- Core types
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.ArrayN
-import TinyGrad4.Data.SciLeanCompat
 
 -- Buffer protocol (device-agnostic, zero-copy exchange)
 import TinyGrad4.Data.Device

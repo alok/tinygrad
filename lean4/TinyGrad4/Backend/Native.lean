@@ -309,6 +309,9 @@ opaque packF32FromF64 (a : @& FloatArray) : ByteArray
 @[extern "tg4_unpack_f64_from_f32"]
 opaque unpackF64FromF32 (a : @& ByteArray) : FloatArray
 
+@[extern "tg4_cast_u8_f32"]
+opaque castU8ToF32 (a : @& ByteArray) : ByteArray
+
 @[extern "tg4_gather_view"]
 opaque gatherView (x idx : @& ByteArray) (outShape : @& Array Nat)
     (xStrides : @& Array Int64) (xOffset : Int64) (xMaskStarts xMaskEnds : @& Array Nat)

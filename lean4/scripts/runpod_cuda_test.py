@@ -56,7 +56,6 @@ else
     git checkout alok-103-conv1d
 fi
 
-cd lean4
 echo ""
 echo "Building with CUDA support..."
 echo ""
@@ -228,7 +227,7 @@ def print_test_commands():
     print("# 2. Clone and build")
     print("git clone https://github.com/alokbeniwal/tinygrad.git")
     print("cd tinygrad && git checkout alok-103-conv1d")
-    print("cd lean4")
+    print("cd tinygrad")
     print("lake update && lake build cuda_smoke")
     print()
     print("# 3. Run CUDA test")

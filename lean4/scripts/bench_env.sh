@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 METRICS_OUT="${TG4_METRICS_OUT:-}"
 if [ -n "$METRICS_OUT" ]; then
@@ -21,7 +21,7 @@ fi
 if [ "${TG4_SHM_LAKE:-0}" = "1" ]; then
   SHM_LAKE="${TG4_SHM_LAKE_DIR:-/dev/shm/tg4_lake}"
   mkdir -p "$SHM_LAKE"
-  LAKE_DIR="$PROJECT_DIR/.lake"
+  LAKE_DIR="$ROOT_DIR/.lake"
   if [ -d "$LAKE_DIR" ] && [ ! -L "$LAKE_DIR" ]; then
     mv "$LAKE_DIR" "$SHM_LAKE"
     ln -s "$SHM_LAKE" "$LAKE_DIR"

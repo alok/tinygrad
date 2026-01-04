@@ -6,9 +6,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-C_DIR="$PROJECT_DIR/c"
-BUILD_DIR="$PROJECT_DIR/.lake/build/metal"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LEAN4_DIR="$ROOT_DIR/lean4"
+C_DIR="$LEAN4_DIR/c"
+BUILD_DIR="$ROOT_DIR/.lake/build/metal"
 
 # Get Lean installation path from elan toolchain
 # The `lean` binary is a shim; get real path via elan

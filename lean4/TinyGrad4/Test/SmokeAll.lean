@@ -39,7 +39,7 @@ import TinyGrad4.Test.Conv2dSmoke
 Single entry point to run the fast Lean TinyGrad4 smoke suite.
 
 Run with:
-`cd lean4 && lake build TinyGrad4.Test.SmokeAll`
+`lake build TinyGrad4.Test.SmokeAll`
 -/
 
 namespace TinyGrad4.Test.SmokeAll

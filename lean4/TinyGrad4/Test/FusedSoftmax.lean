@@ -69,5 +69,4 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.FusedSoftmax
 
-#eval! TinyGrad4.Test.FusedSoftmax.runAll
 

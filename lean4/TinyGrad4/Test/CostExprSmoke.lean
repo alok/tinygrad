@@ -91,5 +91,4 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.CostExprSmoke
 
-#eval! TinyGrad4.Test.CostExprSmoke.runAll
 

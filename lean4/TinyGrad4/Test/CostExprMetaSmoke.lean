@@ -70,5 +70,4 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.CostExprMetaSmoke
 
-#eval! TinyGrad4.Test.CostExprMetaSmoke.runAll
 

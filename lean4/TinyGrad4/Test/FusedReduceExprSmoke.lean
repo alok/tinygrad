@@ -117,4 +117,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.FusedReduceExprSmoke
 
-#eval! TinyGrad4.Test.FusedReduceExprSmoke.runAll

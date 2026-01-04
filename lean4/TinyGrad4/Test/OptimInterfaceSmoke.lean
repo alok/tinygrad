@@ -66,4 +66,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.OptimInterfaceSmoke
 
-#eval! TinyGrad4.Test.OptimInterfaceSmoke.runAll

@@ -45,7 +45,6 @@ def batchedContractForward : IO Unit := do
     throw (IO.userError "Batched CONTRACT Forward Test: FAILED")
   IO.println "=== Batched CONTRACT Forward Test: ok ==="
 
-#eval! TinyGrad4.Test.batchedContractForward
 
 def batchedContractRankMismatch : IO Unit := do
   let (aU, bU, outU) := runTensorM do
@@ -77,6 +76,5 @@ def batchedContractRankMismatch : IO Unit := do
     throw (IO.userError "Batched CONTRACT RankMismatch: FAILED")
   IO.println "=== Batched CONTRACT RankMismatch Test: ok ==="
 
-#eval! TinyGrad4.Test.batchedContractRankMismatch
 
 end TinyGrad4.Test

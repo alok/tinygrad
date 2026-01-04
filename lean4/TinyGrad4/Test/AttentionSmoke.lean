@@ -153,4 +153,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.AttentionSmoke
 
-#eval! TinyGrad4.Test.AttentionSmoke.runAll

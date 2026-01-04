@@ -49,5 +49,4 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.NoopMovementOptSmoke
 
-#eval! TinyGrad4.Test.NoopMovementOptSmoke.runAll
 

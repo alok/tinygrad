@@ -139,4 +139,3 @@ def run (epochs : Nat := 1) (batchSize : Nat := 32) (hidden : Nat := 128) (numBa
 
 end TinyGrad4.Test.MNISTCompiledTrain
 
-#eval! TinyGrad4.Test.MNISTCompiledTrain.run

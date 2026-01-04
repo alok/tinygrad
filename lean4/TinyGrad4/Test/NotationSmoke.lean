@@ -24,5 +24,4 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.NotationSmoke
 
-#eval! TinyGrad4.Test.NotationSmoke.runAll
 

@@ -50,5 +50,4 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.SGDUpdateSmoke
 
-#eval! TinyGrad4.Test.SGDUpdateSmoke.runAll
 

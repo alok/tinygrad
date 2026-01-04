@@ -125,4 +125,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.FusedSoftmaxExprSmoke
 
-#eval! TinyGrad4.Test.FusedSoftmaxExprSmoke.runAll

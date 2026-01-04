@@ -80,5 +80,4 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.FusedEwise
 
-#eval! TinyGrad4.Test.FusedEwise.runAll
 

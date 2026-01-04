@@ -27,4 +27,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.TagSyntaxSmoke
 
-#eval! TinyGrad4.Test.TagSyntaxSmoke.runAll

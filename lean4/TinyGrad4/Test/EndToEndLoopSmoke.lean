@@ -244,4 +244,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.EndToEndLoopSmoke
 
-#eval! TinyGrad4.Test.EndToEndLoopSmoke.runAll

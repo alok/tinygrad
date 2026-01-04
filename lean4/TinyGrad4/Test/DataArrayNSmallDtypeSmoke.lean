@@ -88,4 +88,3 @@ def runAll : IO Unit := do
 
 end TinyGrad4.Test.DataArrayNSmallDtypeSmoke
 
-#eval! TinyGrad4.Test.DataArrayNSmallDtypeSmoke.runAll

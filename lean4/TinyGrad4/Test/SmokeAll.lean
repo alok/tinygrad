@@ -81,5 +81,3 @@ def runAll : IO Unit := do
   IO.println "=== SmokeAll OK ==="
 
 end TinyGrad4.Test.SmokeAll
-
-#eval! TinyGrad4.Test.SmokeAll.runAll

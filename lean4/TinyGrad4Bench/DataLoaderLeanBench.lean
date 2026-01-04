@@ -1,5 +1,6 @@
 import Lean.Data.Json
 import LeanBench
+import Std.Data.HashMap
 import TinyGrad4.Data.MNISTDataset
 import TinyGrad4.Data.MNISTRaw
 import TinyGrad4.Data.Profile
@@ -7,8 +8,10 @@ import TinyGrad4.Data.Prefetch
 import TinyGrad4.Data.Shard
 import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Transform
+import TinyGrad4.Backend.FusedGather
 import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Tensor.Math
+import TinyGrad4.UOp.Graph
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -40,6 +43,12 @@ structure ProfileSnapshot where
 structure IndexSelectSnapshot where
   batches : Nat
   total : Float
+  expectedTotal : Float
+  mismatchCount : Nat
+  maxAbsErr : Float
+  outDType : String
+  fusedGatherCount : Nat
+  fusedGatherMatchCount : Nat
   deriving Inhabited
 
 private def getEnvNat (key : String) (default : Nat) : IO Nat := do
@@ -176,7 +185,13 @@ private def indexSelectJson (cfg : BenchParams) (snap : IndexSelectSnapshot) : L
   Lean.Json.mkObj [
     ("config", configObj),
     ("batches", Lean.Json.num snap.batches),
-    ("total", jsonNumOfFloat snap.total)
+    ("total", jsonNumOfFloat snap.total),
+    ("expected_total", jsonNumOfFloat snap.expectedTotal),
+    ("mismatch_count", Lean.Json.num snap.mismatchCount),
+    ("max_abs_err", jsonNumOfFloat snap.maxAbsErr),
+    ("out_dtype", Lean.Json.str snap.outDType),
+    ("fused_gather_count", Lean.Json.num snap.fusedGatherCount),
+    ("fused_gather_match_count", Lean.Json.num snap.fusedGatherMatchCount)
   ]
 
 private def bytesFromUInt32 (v : UInt32) : Array UInt8 :=
@@ -277,7 +292,10 @@ private def runIndexSelectSmall (cfg : BenchParams) : IO IndexSelectSnapshot := 
   let mnist ← getMnistRaw cfg
   let batches := indexSelectBatchCount cfg
   if batchSize == 0 || batches == 0 then
-    return { batches := 0, total := 0.0 }
+    return {
+      batches := 0, total := 0.0, expectedTotal := 0.0, mismatchCount := 0,
+      maxAbsErr := 0.0, outDType := "none", fusedGatherCount := 0, fusedGatherMatchCount := 0
+    }
   let (sumT, imgBuf, idxBuf) := runTensorM do
     let img ← Tensor.buffer [mnist.images.numImages, 784] .uint8
     let idx ← Tensor.buffer [batchSize] .int32
@@ -285,11 +303,28 @@ private def runIndexSelectSmall (cfg : BenchParams) : IO IndexSelectSnapshot := 
     let gatheredF ← StaticTensor.cast gathered .float32
     let total ← StaticTensor.sum gatheredF
     pure (total, img.uop, idx.uop)
+  let compiled ← TinyGrad4.Interpreter.compileManyCached [sumT.uop]
+  let fusedGatherCount := compiled.implMap.fold (init := 0) fun acc _ impl =>
+    match impl with
+    | TinyGrad4.Backend.Fusion.Impl.fusedGather _ => acc + 1
+    | _ => acc
+  let mut fusedGatherMatchCount := 0
+  let keep : UOpIdSet := UOpIdSet.mkEmpty
+  let refCnt : Std.HashMap UOpId Nat := ∅
+  for u in UOp.toposort sumT.uop do
+    if u.op == .REDUCE_AXIS then
+      match TinyGrad4.Backend.FusedGather.compile u keep refCnt with
+      | some _ => fusedGatherMatchCount := fusedGatherMatchCount + 1
+      | none => pure ()
   let imgRaw : RawBuffer := { dtype := .uint8, data := mnist.images.data.toByteArray }
   let baseEnv := TinyGrad4.Interpreter.setBuffer (∅ : Env) imgBuf imgRaw
   let key := RandKey.new cfg.seed
   let (indices, _) := key.shuffleIndices mnist.images.numImages
   let mut total : Float := 0.0
+  let mut expectedTotal : Float := 0.0
+  let mut mismatchCount : Nat := 0
+  let mut maxAbsErr : Float := 0.0
+  let mut outDType := "unknown"
   for i in [:batches] do
     let startIdx := i * batchSize
     let endIdx := startIdx + batchSize
@@ -298,10 +333,24 @@ private def runIndexSelectSmall (cfg : BenchParams) : IO IndexSelectSnapshot := 
     let idxRaw : RawBuffer := { dtype := .int32, data := idxBytes }
     let env := TinyGrad4.Interpreter.setBuffer baseEnv idxBuf idxRaw
     let out ← TinyGrad4.Interpreter.evalTensorCached sumT env
-    let vals := RawBuffer.toFloatArray out
-    let v := if vals.size == 0 then 0.0 else vals[0]!
+    if i == 0 then
+      outDType := toString (repr out.dtype)
+    let v := RawBuffer.decodeScalarF32 out
     total := total + v
-  pure { batches, total }
+    let mut expectedBatch : Float32 := 0.0
+    for j in [:batchSize] do
+      let idx := idxSlice[j]!
+      for p in [:TinyGrad4.Data.MNISTRaw.ImageBuffer.pixelsPerImage] do
+        let px := mnist.images.getPixel idx p
+        expectedBatch := expectedBatch + (Float32.ofNat px.toNat)
+    let expected := expectedBatch.toFloat
+    expectedTotal := expectedTotal + expected
+    let err := Float.abs (v - expected)
+    if err > maxAbsErr then
+      maxAbsErr := err
+    if err > 1.0 then
+      mismatchCount := mismatchCount + 1
+  pure { batches, total, expectedTotal, mismatchCount, maxAbsErr, outDType, fusedGatherCount, fusedGatherMatchCount }
 
 initialize do
   let cfg ← readParams

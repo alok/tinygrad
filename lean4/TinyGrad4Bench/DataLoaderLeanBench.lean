@@ -27,6 +27,7 @@ structure BenchParams where
   batchSize : Nat := 64
   indexSelectMaxImages : Nat := 256
   indexSelectBatchSize : Nat := 32
+  indexSelectValidate : Bool := true
   prefetchBuffer : Nat := 8
   warmup : Nat := 1
   samples : Nat := 3
@@ -49,6 +50,7 @@ structure IndexSelectSnapshot where
   outDType : String
   fusedGatherCount : Nat
   fusedGatherMatchCount : Nat
+  validated : Bool
   deriving Inhabited
 
 private def getEnvNat (key : String) (default : Nat) : IO Nat := do
@@ -73,18 +75,27 @@ private def getEnvBool (key : String) (default : Bool) : IO Bool := do
 
 private def readParams : IO BenchParams := do
   let dataDir := ← getEnvString "TG4_DATA_DIR" "../data"
-  let maxImages := ← getEnvNat "TG4_MAX_IMAGES" 10000
-  let batchSize := ← getEnvNat "TG4_BATCH" 64
-  let indexSelectMaxImages := ← getEnvNat "TG4_INDEXSELECT_MAX_IMAGES" 256
-  let indexSelectBatchSize := ← getEnvNat "TG4_INDEXSELECT_BATCH" 32
-  let prefetchBuffer := ← getEnvNat "TG4_PREFETCH_BUF" 8
-  let warmup := ← getEnvNat "TG4_BENCH_WARMUP" 1
-  let samples := ← getEnvNat "TG4_BENCH_SAMPLES" 3
+  let maxImages0 := ← getEnvNat "TG4_MAX_IMAGES" 10000
+  let batchSize0 := ← getEnvNat "TG4_BATCH" 64
+  let indexSelectMaxImages0 := ← getEnvNat "TG4_INDEXSELECT_MAX_IMAGES" 256
+  let indexSelectBatchSize0 := ← getEnvNat "TG4_INDEXSELECT_BATCH" 32
+  let indexSelectValidate := ← getEnvBool "TG4_INDEXSELECT_VALIDATE" true
+  let prefetchBuffer0 := ← getEnvNat "TG4_PREFETCH_BUF" 8
+  let warmup0 := ← getEnvNat "TG4_BENCH_WARMUP" 1
+  let samples0 := ← getEnvNat "TG4_BENCH_SAMPLES" 3
   let seed := ← getEnvNat "TG4_BENCH_SEED" 42
   let useCachedShuffle := ← getEnvBool "TG4_BENCH_CACHED_SHUFFLE" true
+  let quick := ← getEnvBool "TINYGRAD4_BENCH_QUICK" false
+  let maxImages := if quick then min maxImages0 1024 else maxImages0
+  let batchSize := if quick then min batchSize0 32 else batchSize0
+  let indexSelectMaxImages := if quick then min indexSelectMaxImages0 64 else indexSelectMaxImages0
+  let indexSelectBatchSize := if quick then min indexSelectBatchSize0 16 else indexSelectBatchSize0
+  let prefetchBuffer := if quick then min prefetchBuffer0 2 else prefetchBuffer0
+  let warmup := if quick then 0 else warmup0
+  let samples := if quick then min samples0 1 else samples0
   pure {
     dataDir, maxImages, batchSize, indexSelectMaxImages, indexSelectBatchSize,
-    prefetchBuffer, warmup, samples, seed, useCachedShuffle
+    indexSelectValidate, prefetchBuffer, warmup, samples, seed, useCachedShuffle
   }
 
 initialize mnistCache : IO.Ref (Option MNISTDataset) <- IO.mkRef none
@@ -180,7 +191,8 @@ private def indexSelectJson (cfg : BenchParams) (snap : IndexSelectSnapshot) : L
   let configObj := Lean.Json.mkObj [
     ("data_dir", Lean.Json.str cfg.dataDir),
     ("max_images", Lean.Json.num cfg.indexSelectMaxImages),
-    ("batch_size", Lean.Json.num cfg.indexSelectBatchSize)
+    ("batch_size", Lean.Json.num cfg.indexSelectBatchSize),
+    ("validate", Lean.Json.bool cfg.indexSelectValidate)
   ]
   Lean.Json.mkObj [
     ("config", configObj),
@@ -191,7 +203,8 @@ private def indexSelectJson (cfg : BenchParams) (snap : IndexSelectSnapshot) : L
     ("max_abs_err", jsonNumOfFloat snap.maxAbsErr),
     ("out_dtype", Lean.Json.str snap.outDType),
     ("fused_gather_count", Lean.Json.num snap.fusedGatherCount),
-    ("fused_gather_match_count", Lean.Json.num snap.fusedGatherMatchCount)
+    ("fused_gather_match_count", Lean.Json.num snap.fusedGatherMatchCount),
+    ("validated", Lean.Json.bool snap.validated)
   ]
 
 private def bytesFromUInt32 (v : UInt32) : Array UInt8 :=
@@ -294,7 +307,8 @@ private def runIndexSelectSmall (cfg : BenchParams) : IO IndexSelectSnapshot := 
   if batchSize == 0 || batches == 0 then
     return {
       batches := 0, total := 0.0, expectedTotal := 0.0, mismatchCount := 0,
-      maxAbsErr := 0.0, outDType := "none", fusedGatherCount := 0, fusedGatherMatchCount := 0
+      maxAbsErr := 0.0, outDType := "none", fusedGatherCount := 0, fusedGatherMatchCount := 0,
+      validated := cfg.indexSelectValidate
     }
   let (sumT, imgBuf, idxBuf) := runTensorM do
     let img ← Tensor.buffer [mnist.images.numImages, 784] .uint8
@@ -337,20 +351,24 @@ private def runIndexSelectSmall (cfg : BenchParams) : IO IndexSelectSnapshot := 
       outDType := toString (repr out.dtype)
     let v := RawBuffer.decodeScalarF32 out
     total := total + v
-    let mut expectedBatch : Float32 := 0.0
-    for j in [:batchSize] do
-      let idx := idxSlice[j]!
-      for p in [:TinyGrad4.Data.MNISTRaw.ImageBuffer.pixelsPerImage] do
-        let px := mnist.images.getPixel idx p
-        expectedBatch := expectedBatch + (Float32.ofNat px.toNat)
-    let expected := expectedBatch.toFloat
-    expectedTotal := expectedTotal + expected
-    let err := Float.abs (v - expected)
-    if err > maxAbsErr then
-      maxAbsErr := err
-    if err > 1.0 then
-      mismatchCount := mismatchCount + 1
-  pure { batches, total, expectedTotal, mismatchCount, maxAbsErr, outDType, fusedGatherCount, fusedGatherMatchCount }
+    if cfg.indexSelectValidate then
+      let mut expectedBatch : Float32 := 0.0
+      for j in [:batchSize] do
+        let idx := idxSlice[j]!
+        for p in [:TinyGrad4.Data.MNISTRaw.ImageBuffer.pixelsPerImage] do
+          let px := mnist.images.getPixel idx p
+          expectedBatch := expectedBatch + (Float32.ofNat px.toNat)
+      let expected := expectedBatch.toFloat
+      expectedTotal := expectedTotal + expected
+      let err := Float.abs (v - expected)
+      if err > maxAbsErr then
+        maxAbsErr := err
+      if err > 1.0 then
+        mismatchCount := mismatchCount + 1
+  pure {
+    batches, total, expectedTotal, mismatchCount, maxAbsErr, outDType,
+    fusedGatherCount, fusedGatherMatchCount, validated := cfg.indexSelectValidate
+  }
 
 initialize do
   let cfg ← readParams

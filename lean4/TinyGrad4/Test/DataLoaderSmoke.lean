@@ -1,4 +1,6 @@
 import TinyGrad4
+import TinyGrad4.Data.ArrayN
+import TinyGrad4.Data.Loader
 
 -- Disable RawBuffer linter for test files that need Array Float literals
 set_option linter.useRawBuffer false
@@ -44,12 +46,11 @@ def runAll : IO Unit := do
   let y1 : DataArrayN [2, 1] .float32 := DataArrayN.ofArrayF32 [2, 1] #[1.0, 0.0]
   let loader : ToyLoader 2 := { xs := #[x0, x1], ys := #[y0, y1] }
   let b0 : Batch 2 [2] [1] .float32 .float32 ← DataLoader.getBatch loader 0
-  assertAllClose b0.x.decodeF32 #[1.0, 2.0, 3.0, 4.0] 0.0001 "loader batch0 x"
-  assertAllClose b0.y.decodeF32 #[0.0, 1.0] 0.0001 "loader batch0 y"
+  assertAllClose (DataArrayN.decodeF32 b0.x) #[1.0, 2.0, 3.0, 4.0] 0.0001 "loader batch0 x"
+  assertAllClose (DataArrayN.decodeF32 b0.y) #[0.0, 1.0] 0.0001 "loader batch0 y"
   let b1 : Batch 2 [2] [1] .float32 .float32 ← DataLoader.getBatch loader 1
-  assertAllClose b1.x.decodeF32 #[5.0, 6.0, 7.0, 8.0] 0.0001 "loader batch1 x"
-  assertAllClose b1.y.decodeF32 #[1.0, 0.0] 0.0001 "loader batch1 y"
+  assertAllClose (DataArrayN.decodeF32 b1.x) #[5.0, 6.0, 7.0, 8.0] 0.0001 "loader batch1 x"
+  assertAllClose (DataArrayN.decodeF32 b1.y) #[1.0, 0.0] 0.0001 "loader batch1 y"
   IO.println "=== DataLoaderSmoke OK ==="
 
 end TinyGrad4.Test.DataLoaderSmoke
-

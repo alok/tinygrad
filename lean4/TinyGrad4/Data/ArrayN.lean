@@ -54,6 +54,21 @@ private def packF32 (vals : Array Float) : ByteArray := Id.run do
     out := pushBytes out (bytesFromUInt32 bits)
   return out
 
+private def packU8 (vals : Array UInt8) : ByteArray :=
+  ByteArray.mk vals
+
+private def int8ToUInt8 (v : Int8) : UInt8 :=
+  UInt8.ofNat v.toBitVec.toNat
+
+private def packI8 (vals : Array Int8) : ByteArray :=
+  ByteArray.mk (vals.map int8ToUInt8)
+
+private def packU16 (vals : Array UInt16) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity (vals.size * 2)
+  for v in vals do
+    out := pushBytes out (bytesFromUInt16 v)
+  return out
+
 private def int16ToUInt16 (v : Int16) : UInt16 :=
   UInt16.ofNat v.toBitVec.toNat
 
@@ -78,6 +93,27 @@ def ofArrayF32 (shape : Shape) (vals : Array Float) : DataArrayN shape .float32 
       ) (Nat.min vals.size expected)
   { data := packF32 vals' }
 
+/-- Construct uint8 data when the length matches the shape. -/
+def ofArrayU8? (shape : Shape) (vals : Array UInt8) : Option (DataArrayN shape .uint8) :=
+  if vals.size != Shape.numel shape then
+    none
+  else
+    some { data := packU8 vals }
+
+/-- Construct int8 data when the length matches the shape. -/
+def ofArrayI8? (shape : Shape) (vals : Array Int8) : Option (DataArrayN shape .int8) :=
+  if vals.size != Shape.numel shape then
+    none
+  else
+    some { data := packI8 vals }
+
+/-- Construct uint16 data when the length matches the shape. -/
+def ofArrayU16? (shape : Shape) (vals : Array UInt16) : Option (DataArrayN shape .uint16) :=
+  if vals.size != Shape.numel shape then
+    none
+  else
+    some { data := packU16 vals }
+
 /-- Construct int16 data when the length matches the shape. -/
 def ofArrayI16? (shape : Shape) (vals : Array Int16) : Option (DataArrayN shape .int16) :=
   if vals.size != Shape.numel shape then
@@ -98,6 +134,38 @@ def ofRawBuffer? (shape : Shape) (dtype : DType) (buf : RawBuffer) : Option (Dat
 def toRawBuffer (arr : DataArrayN shape dtype) : RawBuffer :=
   { dtype := dtype, data := arr.data }
 
+/-- Decode float32 bytes into a FloatArray. -/
+def decodeF32 {shape : Shape} (arr : DataArrayN shape .float32) : FloatArray :=
+  RawBuffer.toFloatArray (toRawBuffer arr)
+
+/-- Decode uint8 bytes into an Array UInt8. -/
+def decodeU8 {shape : Shape} (arr : DataArrayN shape .uint8) : Array UInt8 := Id.run do
+  let n := Shape.numel shape
+  let mut out := Array.emptyWithCapacity n
+  for i in [:n] do
+    out := out.push (arr.data.get! i)
+  return out
+
+private def int8FromUInt8 (v : UInt8) : Int8 :=
+  Int8.ofBitVec (BitVec.ofNat 8 v.toNat)
+
+/-- Decode int8 bytes into an Array Int8. -/
+def decodeI8 {shape : Shape} (arr : DataArrayN shape .int8) : Array Int8 := Id.run do
+  let n := Shape.numel shape
+  let mut out := Array.emptyWithCapacity n
+  for i in [:n] do
+    out := out.push (int8FromUInt8 (arr.data.get! i))
+  return out
+
+/-- Decode uint16 bytes into an Array UInt16. -/
+def decodeU16 {shape : Shape} (arr : DataArrayN shape .uint16) : Array UInt16 := Id.run do
+  let n := Shape.numel shape
+  let mut out := Array.emptyWithCapacity n
+  for i in [:n] do
+    let bits := readU16LE arr.data (i * 2)
+    out := out.push bits
+  return out
+
 /-- Decode int16 bytes into an Array Int16. -/
 def decodeI16 {shape : Shape} (arr : DataArrayN shape .int16) : Array Int16 := Id.run do
   let n := Shape.numel shape
@@ -117,6 +185,14 @@ def decodeI32 {shape : Shape} (arr : DataArrayN shape .int32) : Array Int32 := I
     let v := Int32.ofBitVec (BitVec.ofNat 32 (UInt32.toNat bits))
     out := out.push v
   return out
+
+/-- Reshape when the number of elements matches. -/
+def reshape? {shape : Shape} {dtype : DType} (arr : DataArrayN shape dtype) (newShape : Shape)
+    : Option (DataArrayN newShape dtype) :=
+  if Shape.numel shape == Shape.numel newShape then
+    some { data := arr.data }
+  else
+    none
 
 end DataArrayN
 

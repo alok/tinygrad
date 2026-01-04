@@ -1,4 +1,5 @@
 import TinyGrad4
+import TinyGrad4.Data.ArrayN
 
 /-!
 # DataArrayNSmallDtypeSmoke
@@ -87,4 +88,3 @@ def runAll : IO Unit := do
   IO.println "=== DataArrayNSmallDtypeSmoke OK ==="
 
 end TinyGrad4.Test.DataArrayNSmallDtypeSmoke
-

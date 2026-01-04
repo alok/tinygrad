@@ -7,6 +7,7 @@ import TinyGrad4.Backend.FusedContract
 import TinyGrad4.Backend.FusedSGD
 import TinyGrad4.Backend.FusedMatmul
 import TinyGrad4.Backend.FusedSoftmax
+import TinyGrad4.Backend.FusedGather
 import TinyGrad4.Backend.FusedLayerNorm
 import TinyGrad4.Backend.FusedGELU
 import TinyGrad4.Backend.PassManager
@@ -42,6 +43,7 @@ inductive Impl where
   | fusedSGD (plan : FusedSGD.Plan)
   | fusedMatmul (plan : FusedMatmul.Plan)
   | fusedSoftmax (plan : FusedSoftmax.Plan)
+  | fusedGather (plan : FusedGather.Plan)
   | fusedLayerNorm (plan : FusedLayerNorm.Plan)
   | fusedGELU (plan : FusedGELU.Plan)
   deriving Repr
@@ -56,6 +58,7 @@ def tag : Impl → String
   | .fusedSGD _ => "fused_sgd"
   | .fusedMatmul _ => "fused_matmul"
   | .fusedSoftmax _ => "fused_softmax"
+  | .fusedGather _ => "fused_gather"
   | .fusedLayerNorm _ => "fused_layernorm"
   | .fusedGELU _ => "fused_gelu"
 
@@ -72,6 +75,7 @@ def deps : Impl → List UOpId
       | some b2 => base ++ [b2]
       | none => base
   | .fusedSoftmax plan => [plan.input]
+  | .fusedGather plan => [plan.xBase, plan.idxBase]
   | .fusedLayerNorm plan =>
       let base := [plan.input]
       let withGamma := match plan.gamma with | some g => base ++ [g] | none => base
@@ -92,6 +96,7 @@ def mapIds (impl : Impl) (f : UOpId → UOpId) : Impl :=
   | .fusedSGD plan => .fusedSGD (plan.mapIds f)
   | .fusedMatmul plan => .fusedMatmul (plan.mapIds f)
   | .fusedSoftmax plan => .fusedSoftmax (plan.mapIds f)
+  | .fusedGather plan => .fusedGather (plan.mapIds f)
   | .fusedLayerNorm plan => .fusedLayerNorm (plan.mapIds f)
   | .fusedGELU plan => .fusedGELU (plan.mapIds f)
 
@@ -202,6 +207,11 @@ def implCostFeatures (u : UOp) (impl : Impl) : CostFeatures :=
       memWrite := inNumel * 4
       reduceElems := inNumel  -- max reduction
       elemOps := inNumel * 3 }  -- sub, exp, div
+  | .fusedGather plan =>
+    { launches := 1
+      memRead := numel * (itemsize + plan.idxItemsize)
+      memWrite := numel * itemsize
+      elemOps := numel }
   | .fusedContract plan =>
     let mulAdds := plan.aNumel * plan.bNumel / (max plan.aNumel 1)
     { launches := 1
@@ -402,6 +412,16 @@ def selectPhaseC (nodes : List UOp) (keep : UOpIdSet) (refCnt : HashMap UOpId Na
           continue
       | none => pure ()
     if u.op == .REDUCE_AXIS then
+      match FusedGather.compile u keep refCnt with
+      | some p =>
+        if setIntersects p.cover covered then
+          continue
+        let impl := Impl.fusedGather p
+        -- Always use gather fusion when matched; it replaces a large IR pattern.
+        implMap := implMap.insert p.root impl
+        covered := setUnion covered p.cover
+        continue
+      | none => pure ()
       match FusedReduce.compile u keep refCnt with
       | some p =>
         if setIntersects p.ewise.cover covered then

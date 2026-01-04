@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* View information for strided access with optional masking */
 struct view_info {
@@ -27,6 +30,94 @@ typedef struct view_stack view_stack;
 
 static inline lean_object* mk_byte_array(size_t size) {
   return lean_alloc_sarray(1, size, size);
+}
+
+static lean_object* tg4_mk_io_error(const char* action, const char* path) {
+  const char* err = strerror(errno);
+  char buf[256];
+  if (path && path[0] != '\0') {
+    snprintf(buf, sizeof(buf), "%s failed: %s (%s)", action, path, err);
+  } else {
+    snprintf(buf, sizeof(buf), "%s failed: %s", action, err);
+  }
+  return lean_mk_io_user_error(lean_mk_string(buf));
+}
+
+/* FastFile.openRO : String -> IO USize */
+LEAN_EXPORT lean_obj_res tg4_fast_open(b_lean_obj_arg path) {
+#ifdef _WIN32
+  (void)path;
+  return lean_io_result_mk_error(
+      lean_mk_io_user_error(lean_mk_string("FastFile.open: not supported on Windows")));
+#else
+  const char* cpath = lean_string_cstr(path);
+  int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+  int fd = open(cpath, flags);
+  if (fd < 0) {
+    return lean_io_result_mk_error(tg4_mk_io_error("FastFile.open", cpath));
+  }
+  return lean_io_result_mk_ok(lean_box_usize((size_t)fd));
+#endif
+}
+
+/* FastFile.close : USize -> IO Unit */
+LEAN_EXPORT lean_obj_res tg4_fast_close(size_t fd_val) {
+#ifdef _WIN32
+  (void)fd_obj;
+  return lean_io_result_mk_error(
+      lean_mk_io_user_error(lean_mk_string("FastFile.close: not supported on Windows")));
+#else
+  int fd = (int)fd_val;
+  if (close(fd) != 0) {
+    return lean_io_result_mk_error(tg4_mk_io_error("FastFile.close", ""));
+  }
+  return lean_io_result_mk_ok(lean_box(0));
+#endif
+}
+
+/* FastFile.rewind : USize -> IO Unit */
+LEAN_EXPORT lean_obj_res tg4_fast_rewind(size_t fd_val) {
+#ifdef _WIN32
+  (void)fd_obj;
+  return lean_io_result_mk_error(
+      lean_mk_io_user_error(lean_mk_string("FastFile.rewind: not supported on Windows")));
+#else
+  int fd = (int)fd_val;
+  if (lseek(fd, 0, SEEK_SET) < 0) {
+    return lean_io_result_mk_error(tg4_mk_io_error("FastFile.rewind", ""));
+  }
+  return lean_io_result_mk_ok(lean_box(0));
+#endif
+}
+
+/* FastFile.readInto : USize -> ByteArray -> USize -> IO ByteArray
+   Caller must provide a ByteArray with enough capacity and treat it as unique. */
+LEAN_EXPORT lean_obj_res tg4_fast_read_into(size_t fd_val, b_lean_obj_arg buf_obj, size_t nbytes) {
+#ifdef _WIN32
+  (void)fd_obj;
+  (void)buf_obj;
+  (void)nbytes;
+  return lean_io_result_mk_error(
+      lean_mk_io_user_error(lean_mk_string("FastFile.readInto: not supported on Windows")));
+#else
+  lean_object* buf = (lean_object*)buf_obj;
+  size_t cap = lean_sarray_capacity(buf);
+  if (nbytes > cap) {
+    return lean_io_result_mk_error(
+        lean_mk_io_user_error(lean_mk_string("FastFile.readInto: buffer too small")));
+  }
+  int fd = (int)fd_val;
+  ssize_t n = read(fd, lean_sarray_cptr(buf), nbytes);
+  if (n < 0) {
+    return lean_io_result_mk_error(tg4_mk_io_error("FastFile.readInto", ""));
+  }
+  lean_sarray_set_size(buf, (size_t)n);
+  lean_inc(buf);
+  return lean_io_result_mk_ok(buf);
+#endif
 }
 
 static inline uint8_t* byte_array_cptr(lean_object* a) {

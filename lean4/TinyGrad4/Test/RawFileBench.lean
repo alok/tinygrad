@@ -1,5 +1,6 @@
 import TinyGrad4.Backend.Accelerate
 import TinyGrad4.Data.Prefetch
+import TinyGrad4.Data.FastFile
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -22,6 +23,7 @@ structure BenchConfig where
   iterations : Nat
   mode : String
   usePrefetch : Bool
+  useFast : Bool
   prefetchBuffer : Nat
   deriving Repr
 
@@ -138,6 +140,44 @@ private def benchSync (cfg : BenchConfig) : IO BenchResult := do
     let stopAll ← IO.monoNanosNow
     pure { totalBytes, wallNs := stopAll - startAll, samples, checksum, normTotal }
 
+private def benchSyncFast (cfg : BenchConfig) : IO BenchResult := do
+  FastFile.withFile cfg.path.toString fun fd => do
+    let mut samples : Array Nat := #[]
+    let mut checksum : UInt64 := 0
+    let mut normTotal : Float := 0.0
+    let mut totalBytes : Nat := 0
+    let mut buf := ByteArray.emptyWithCapacity cfg.chunkBytes
+
+    let startAll ← IO.monoNanosNow
+    for _ in [:cfg.iterations] do
+      FastFile.rewind fd
+      let mut remaining := cfg.totalBytes
+      repeat do
+        if remaining == 0 then break
+        let toRead := min cfg.chunkBytes remaining
+        let t0 ← IO.monoNanosNow
+        buf ← FastFile.readIntoNat fd buf toRead
+        if buf.isEmpty then break
+        match cfg.mode with
+        | "normalize" =>
+          normTotal := normTotal + normalizeSumBytes buf
+        | "accel" =>
+          checksum := checksum + sumBytesAccel buf
+        | "noop" =>
+          checksum := checksum + touchBytes buf
+        | _ =>
+          checksum := checksum + sumBytesSlow buf
+        let t1 ← IO.monoNanosNow
+        samples := samples.push (t1 - t0)
+        totalBytes := totalBytes + buf.size
+        if buf.size >= remaining then
+          remaining := 0
+        else
+          remaining := remaining - buf.size
+
+    let stopAll ← IO.monoNanosNow
+    pure { totalBytes, wallNs := stopAll - startAll, samples, checksum, normTotal }
+
 private structure FilePrefetcher where
   queue : IOQueue ByteArray
   worker : Task (Except IO.Error Unit)
@@ -147,22 +187,38 @@ private def FilePrefetcher.create (cfg : BenchConfig) : IO FilePrefetcher := do
   let queue ← IOQueue.new cfg.prefetchBuffer
   let totalBytes := cfg.totalBytes * cfg.iterations
   let worker ← IO.asTask (prio := .dedicated) do
-    IO.FS.withFile cfg.path .read fun h => do
-      for _ in [:cfg.iterations] do
-        h.rewind
-        let mut remaining := cfg.totalBytes
-        repeat do
-          if remaining == 0 then break
-          let toRead := min cfg.chunkBytes remaining
-          let data ← h.read toRead.toUSize
-          if data.isEmpty then break
-          queue.push data
-          if data.size >= remaining then
-            remaining := 0
-          else
-            remaining := remaining - data.size
-      queue.finish
-      return ()
+    if cfg.useFast then
+      FastFile.withFile cfg.path.toString fun fd => do
+        for _ in [:cfg.iterations] do
+          FastFile.rewind fd
+          let mut remaining := cfg.totalBytes
+          repeat do
+            if remaining == 0 then break
+            let toRead := min cfg.chunkBytes remaining
+            let data ← FastFile.readIntoNat fd (ByteArray.emptyWithCapacity toRead) toRead
+            if data.isEmpty then break
+            let _ ← queue.push data
+            if data.size >= remaining then
+              remaining := 0
+            else
+              remaining := remaining - data.size
+    else
+      IO.FS.withFile cfg.path .read fun h => do
+        for _ in [:cfg.iterations] do
+          h.rewind
+          let mut remaining := cfg.totalBytes
+          repeat do
+            if remaining == 0 then break
+            let toRead := min cfg.chunkBytes remaining
+            let data ← h.read toRead.toUSize
+            if data.isEmpty then break
+            let _ ← queue.push data
+            if data.size >= remaining then
+              remaining := 0
+            else
+              remaining := remaining - data.size
+    queue.finish
+    return ()
   pure { queue, worker, totalBytes }
 
 private def benchPrefetch (cfg : BenchConfig) : IO BenchResult := do
@@ -201,6 +257,7 @@ private def readConfig : IO BenchConfig := do
   let iterations ← getEnvNat "TG4_RAW_ITERS" 1
   let mode ← getEnvString "TG4_RAW_MODE" "accel"
   let usePrefetch ← getEnvBool "TG4_RAW_PREFETCH" false
+  let useFast ← getEnvBool "TG4_RAW_FAST" false
   let prefetchBuffer ← getEnvNat "TG4_RAW_PREFETCH_BUF" 8
 
   let metaData ← path.metadata
@@ -215,6 +272,7 @@ private def readConfig : IO BenchConfig := do
     iterations
     mode := modeName mode
     usePrefetch
+    useFast
     prefetchBuffer
   }
 
@@ -225,7 +283,7 @@ private def printResult (cfg : BenchConfig) (res : BenchResult) : IO Unit := do
   let gbps := if wallMs == 0.0 then 0.0 else gb / (wallMs / 1000.0)
   IO.println "RAW_FILE_BENCH"
   IO.println s!"path={cfg.path}"
-  IO.println s!"mode={cfg.mode} prefetch={cfg.usePrefetch} buf={cfg.prefetchBuffer}"
+  IO.println s!"mode={cfg.mode} prefetch={cfg.usePrefetch} fast={cfg.useFast} buf={cfg.prefetchBuffer}"
   IO.println s!"chunk_bytes={cfg.chunkBytes} iterations={cfg.iterations}"
   IO.println s!"bytes_total={res.totalBytes} wall_ms={wallMs} gbps={gbps}"
   IO.println s!"lat_mean_ms={meanMs} p50_ms={p50Ms} p90_ms={p90Ms} p99_ms={p99Ms}"
@@ -236,7 +294,7 @@ private def printResult (cfg : BenchConfig) (res : BenchResult) : IO Unit := do
 
 /-- Entry point. Environment variables:
   TG4_RAW_PATH, TG4_RAW_BYTES, TG4_RAW_CHUNK_MB, TG4_RAW_ITERS,
-  TG4_RAW_MODE=checksum|accel|normalize|noop, TG4_RAW_PREFETCH, TG4_RAW_PREFETCH_BUF
+  TG4_RAW_MODE=checksum|accel|normalize|noop, TG4_RAW_PREFETCH, TG4_RAW_PREFETCH_BUF, TG4_RAW_FAST
 -/
 def main : IO Unit := do
   let cfg ← readConfig
@@ -247,7 +305,13 @@ def main : IO Unit := do
     IO.println "  Linux:   fallocate -l 40G ../data/raw_40gb.bin"
     return
   IO.println s!"Raw file bench config: {repr cfg}"
-  let res ← if cfg.usePrefetch then benchPrefetch cfg else benchSync cfg
+  let res ←
+    if cfg.usePrefetch then
+      benchPrefetch cfg
+    else if cfg.useFast then
+      benchSyncFast cfg
+    else
+      benchSync cfg
   printResult cfg res
 
 end TinyGrad4.Test

@@ -2,87 +2,6 @@ import Lake
 
 open Lake DSL System
 
-package TinyGrad4 where
-  version := v!"0.1.0"
-  srcDir := "lean4"
-  testDriver := "tg4_test"
-  -- Global linter options - these apply to all modules in the project
-  -- Disable Float→Float64 linter warnings globally (intentional use of Float alias)
-  leanOptions := #[
-    ⟨`weak.linter.floatExplicit, false⟩,
-    ⟨`weak.linter.useRawBuffer, true⟩,
-    ⟨`doc.verso, false⟩,
-    ⟨`linter.missingDocs, true⟩,
-  ]
-
-require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
-require strata from git "https://github.com/strata-org/Strata" @ "main"
-require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
-require mathlib from git "https://github.com/leanprover-community/mathlib4" @ "v4.27.0-rc1"
-require LeanBench from git "https://github.com/alok/leanbench" @ "ae0820b"
-require scilean from "../scilean"
-
-def cFlags : Array String :=
-  if System.Platform.isWindows then
-    #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING"]
-  else if System.Platform.isOSX then
-    -- macOS: need SDK paths for system headers (math.h, etc.)
-    #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC",
-      "-isystem", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include"]
-  else
-    -- Linux: need system headers (math.h, etc.)
-    #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC",
-      "-isystem", "/usr/include",
-      "-isystem", "/usr/include/x86_64-linux-gnu"]
-
--- Objective-C flags for Metal FFI (macOS only)
--- Note: Lake's buildLeanO adds --sysroot to Lean toolchain, so we use -iframework for Metal
-
-def objcFlags : Array String :=
-  #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC", "-fobjc-arc",
-    "-isystem", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-    "-iframework", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"]
-
--- Linker args for Metal + Accelerate FFI (macOS only)
--- Required for any executable that links libtg4c.a
--- On non-macOS platforms, these are empty (no Metal/Accelerate support)
-
-def metalLinkArgs : Array String :=
-  if System.Platform.isOSX then
-    #["-Wl,-syslibroot,/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
-      "-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks",
-      "-framework", "Metal",
-      "-framework", "Foundation",
-      "-framework", "Accelerate",
-      "-lobjc"]
-  else
-    -- Linux: CUDA libs - search multiple common installation paths
-    -- libcuda.so is always in /usr/lib, libnvrtc location varies by install
-    #["-L/usr/lib/x86_64-linux-gnu",
-      "-L/usr/local/cuda/lib64",
-      "-L/home/alok/cuda-12.4/lib64",  -- ww (freja.mit.edu) local install
-      "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
-      "-Wl,-rpath,/usr/local/cuda/lib64",
-      "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
-      "-Wl,-rpath,$ORIGIN/../lib",
-      "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++"]
-
--- C files to compile (add new files here)
-
-def cSourceFiles : Array String := #["tg4c_stub.c", "tg4_accel.c"]
-
--- Accelerate framework flags for vDSP/BLAS (macOS only)
--- Needs: system clang headers for arm_neon.h, framework path for Accelerate.h
-
-def accelFlags : Array String :=
-  if System.Platform.isOSX then
-    cFlags ++ #[
-      "-isystem", "/Library/Developer/CommandLineTools/usr/lib/clang/17/include",
-      "-iframework", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
-    ]
-  else
-    cFlags
-
 -- Find CUDA include path (returns none if headers not found)
 
 def findCudaInclude : IO (Option String) := do
@@ -128,6 +47,100 @@ def findNvcc : IO (Option String) := do
           return some path
     | none => pure ()
   return none
+
+-- Compute CUDA link args at Lake config time to avoid hard-failing on non-CUDA Linux.
+unsafe def cudaLinkArgs : Array String :=
+  IO.run do
+    if System.Platform.isOSX || System.Platform.isWindows then
+      return #[]
+    let cudaInclude? ← findCudaInclude
+    let nvcc? ← findNvcc
+    if cudaInclude?.isSome && nvcc?.isSome then
+      return #[
+        "-L/usr/lib/x86_64-linux-gnu",
+        "-L/usr/local/cuda/lib64",
+        "-L/home/alok/cuda-12.4/lib64",  -- ww (freja.mit.edu) local install
+        "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
+        "-Wl,-rpath,/usr/local/cuda/lib64",
+        "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
+        "-Wl,-rpath,$ORIGIN",
+        "-Wl,-rpath,$ORIGIN/../lib",
+        "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++"
+      ]
+    return #[]
+
+package TinyGrad4 where
+  version := v!"0.1.0"
+  srcDir := "lean4"
+  testDriver := "tg4_test"
+  -- Global linter options - these apply to all modules in the project
+  -- Disable Float→Float64 linter warnings globally (intentional use of Float alias)
+  leanOptions := #[
+    ⟨`weak.linter.floatExplicit, false⟩,
+    ⟨`weak.linter.useRawBuffer, true⟩,
+    ⟨`doc.verso, false⟩,
+    ⟨`linter.missingDocs, true⟩,
+  ]
+  moreLinkArgs := cudaLinkArgs
+
+require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
+require strata from git "https://github.com/strata-org/Strata" @ "main"
+require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
+require mathlib from git "https://github.com/leanprover-community/mathlib4" @ "v4.27.0-rc1"
+require LeanBench from git "https://github.com/alok/leanbench" @ "ae0820b"
+require scilean from "../scilean"
+
+def cFlags : Array String :=
+  if System.Platform.isWindows then
+    #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING"]
+  else if System.Platform.isOSX then
+    -- macOS: need SDK paths for system headers (math.h, etc.)
+    #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC",
+      "-isystem", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include"]
+  else
+    -- Linux: need system headers (math.h, etc.)
+    #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC",
+      "-isystem", "/usr/include",
+      "-isystem", "/usr/include/x86_64-linux-gnu"]
+
+-- Objective-C flags for Metal FFI (macOS only)
+-- Note: Lake's buildLeanO adds --sysroot to Lean toolchain, so we use -iframework for Metal
+
+def objcFlags : Array String :=
+  #["-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC", "-fobjc-arc",
+    "-isystem", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+    "-iframework", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"]
+
+-- Linker args for Metal + Accelerate FFI (macOS only)
+-- Required for any executable that links libtg4c.a
+-- On Linux, include CUDA link args only when headers + nvcc are present.
+
+def metalLinkArgs : Array String :=
+  if System.Platform.isOSX then
+    #["-Wl,-syslibroot,/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks",
+      "-framework", "Metal",
+      "-framework", "Foundation",
+      "-framework", "Accelerate",
+      "-lobjc"]
+  else
+    cudaLinkArgs
+
+-- C files to compile (add new files here)
+
+def cSourceFiles : Array String := #["tg4c_stub.c", "tg4_accel.c"]
+
+-- Accelerate framework flags for vDSP/BLAS (macOS only)
+-- Needs: system clang headers for arm_neon.h, framework path for Accelerate.h
+
+def accelFlags : Array String :=
+  if System.Platform.isOSX then
+    cFlags ++ #[
+      "-isystem", "/Library/Developer/CommandLineTools/usr/lib/clang/17/include",
+      "-iframework", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+    ]
+  else
+    cFlags
 
 /-!
 FFI build notes:

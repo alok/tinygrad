@@ -20,7 +20,7 @@ type system for correctness.
 
 ## Example Output
 
-```metal
+```
 kernel void fused_add_mul(
     device const float* a [[buffer(0)]],
     device const float* b [[buffer(1)]],
@@ -448,7 +448,7 @@ def ReduceOp.atomicOp : ReduceOp → String
     - threadgroupSize: threads per threadgroup (typically 256 or 1024)
 
     Generates Metal kernel like:
-    ```metal
+    ```
     kernel void reduce_sum(
         device const float* input [[buffer(0)]],
         device float* output [[buffer(1)]],
@@ -605,9 +605,9 @@ def opsToReduceOp : Ops → Option ReduceOp
 /-! ## Matrix Multiplication Kernels -/
 
 /-- Tile sizes for GEMM kernel. These should be tuned for the target GPU.
-    - TILE_M, TILE_N: Output tile computed by each threadgroup
-    - TILE_K: Reduction dimension chunk size for loading A and B tiles
-    - THREADS_M, THREADS_N: Thread layout within threadgroup -/
+    - {lit}`TILE_M`, {lit}`TILE_N`: Output tile computed by each threadgroup
+    - {lit}`TILE_K`: Reduction dimension chunk size for loading A and B tiles
+    - {lit}`THREADS_M`, {lit}`THREADS_N`: Thread layout within threadgroup -/
 structure GemmConfig where
   tileM : Nat := 32
   tileN : Nat := 32
@@ -620,7 +620,7 @@ structure GemmConfig where
 def defaultGemmConfig : GemmConfig := {}
 
 /-- Generate a tiled GEMM kernel for C = A @ B.
-    A: [M, K], B: [K, N], C: [M, N]
+    A: {lit}`[M, K]`, B: {lit}`[K, N]`, C: {lit}`[M, N]`
 
     Each threadgroup computes a TILE_M × TILE_N block of output.
     Uses threadgroup memory to cache tiles of A and B.
@@ -753,8 +753,8 @@ kernel void {name}(
     C[row * {n} + col] = sum;
 }"
 
-/-- Generate a batched matmul kernel: C[B, M, N] = A[B, M, K] @ B[B, K, N]
-    or with broadcast: A[1, M, K] @ B[B, K, N] -> C[B, M, N]
+/-- Generate a batched matmul kernel: {lit}`C[B, M, N] = A[B, M, K] @ B[B, K, N]`
+    or with broadcast: {lit}`A[1, M, K] @ B[B, K, N] -> C[B, M, N]`
 
     This is what conv2d needs - a batch of independent matrix multiplications.
 -/

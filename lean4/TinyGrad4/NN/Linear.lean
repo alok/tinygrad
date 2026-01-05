@@ -17,15 +17,15 @@ open StaticTensor
 
 /-- Linear layer parameters -/
 structure LinearParams (inFeatures outFeatures : Nat) (dt : DType) where
-  /-- Weight matrix [outFeatures, inFeatures] (stored transposed for efficient matmul) -/
+  /-- Weight matrix {lit}`[outFeatures, inFeatures]` (stored transposed for efficient matmul). -/
   weight : Matrix outFeatures inFeatures dt
-  /-- Optional bias [outFeatures] -/
+  /-- Optional bias {lit}`[outFeatures]`. -/
   bias : Option (Vector outFeatures dt)
 
 namespace LinearParams
 
 /-- Create linear layer with Kaiming uniform initialization.
-    bound = 1 / sqrt(in_features), matching tinygrad's nn.Linear -/
+    bound = 1 / sqrt({lit}`in_features`), matching tinygrad's nn.Linear -/
 def create (inFeatures outFeatures : Nat) (dt : DType := .float32) (useBias : Bool := true)
     (seed : Nat := 42) : TensorM (LinearParams inFeatures outFeatures dt) := do
   -- Kaiming bound = 1 / sqrt(in_features)
@@ -44,8 +44,8 @@ def create (inFeatures outFeatures : Nat) (dt : DType := .float32) (useBias : Bo
   pure { weight, bias }
 
 /-- Forward pass: x @ W^T + b
-    Input:  [batch, inFeatures]
-    Output: [batch, outFeatures] -/
+    Input:  {lit}`[batch, inFeatures]`
+    Output: {lit}`[batch, outFeatures]` -/
 def forward {batch : Nat} (params : LinearParams inFeatures outFeatures dt)
     (x : Matrix batch inFeatures dt) : TensorM (Matrix batch outFeatures dt) := do
   -- x @ W^T: [batch, in] @ [in, out] = [batch, out]

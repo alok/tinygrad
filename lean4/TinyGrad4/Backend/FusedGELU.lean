@@ -64,8 +64,8 @@ end Plan
 def approxEq (x expected : Float) (tol : Float := 0.01) : Bool :=
   (x - expected).abs < tol
 
-/-- Detect GELU sigmoid approximation: x * sigmoid(1.702 * x)
-    Pattern: MUL(x, SIGMOID(MUL(const_1.702, x)))
+/-- Detect GELU sigmoid approximation: {lit}`x * sigmoid(1.702 * x)`
+    Pattern: {lit}`MUL(x, SIGMOID(MUL(const_1.702, x)))`
 -/
 def detectSigmoid? (u : UOp) (keep : UOpIdSet) : Option Plan := do
   guard (u.op == .MUL)

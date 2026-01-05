@@ -17,13 +17,13 @@ open StaticTensor
 
 /-- Embedding layer parameters -/
 structure EmbeddingParams (vocabSize embedSize : Nat) (dt : DType) where
-  /-- Embedding weight matrix [vocabSize, embedSize] -/
+  /-- Embedding weight matrix {lit}`[vocabSize, embedSize]`. -/
   weight : Matrix vocabSize embedSize dt
 
 namespace EmbeddingParams
 
 /-- Create embedding with Glorot uniform initialization.
-    Matches tinygrad's Tensor.glorot_uniform -/
+    Matches tinygrad's Tensor.{lit}`glorot_uniform`. -/
 def create (vocabSize embedSize : Nat) (dt : DType := .float32) (seed : Nat := 42)
     : TensorM (EmbeddingParams vocabSize embedSize dt) := do
   -- Glorot bound = sqrt(6 / (fan_in + fan_out))
@@ -45,8 +45,8 @@ def create (vocabSize embedSize : Nat) (dt : DType := .float32) (seed : Nat := 4
     This is a simplified implementation that creates a one-hot encoding
     and does matmul. For efficiency, a proper gather operation would be better.
 
-    Input: indices [batch] with values in [0, vocabSize)
-    Output: embeddings [batch, embedSize] -/
+    Input: indices {lit}`[batch]` with values in {lit}`[0, vocabSize)`
+    Output: embeddings {lit}`[batch, embedSize]` -/
 def forward {batch : Nat} (params : EmbeddingParams vocabSize embedSize dt)
     (indices : Vector batch .int32)
     : TensorM (Matrix batch embedSize dt) := do

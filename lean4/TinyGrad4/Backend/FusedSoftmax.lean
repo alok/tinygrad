@@ -14,12 +14,12 @@ open TinyGrad4.Backend.Pattern
 # Fused Softmax Pattern Matching
 
 Matches the stable softmax pattern:
-  softmax(x, axis) = exp(x - max(x, axis)) / sum(exp(x - max(x, axis)), axis)
+  {lit}`softmax(x, axis) = exp(x - max(x, axis)) / sum(exp(x - max(x, axis)), axis)`
 
 In UOp terms with tinygrad's base-2 ops:
-  FDIV
-  ├── EXP2(LOG2E * (x - REDUCE_AXIS(MAX, x, axis)))
-  └── REDUCE_AXIS(ADD, EXP2(...), axis)
+  {lit}`FDIV`
+  {lit}`├── EXP2(LOG2E * (x - REDUCE_AXIS(MAX, x, axis)))`
+  {lit}`└── REDUCE_AXIS(ADD, EXP2(...), axis)`
 
 Also matches log-softmax variant.
 
@@ -65,7 +65,7 @@ def mapIds (p : Plan) (f : UOpId → UOpId) : Plan :=
 
 end Plan
 
-/-- Compute outer*inner from shape and axis -/
+/-- Compute {lit}`outer*inner` from shape and axis. -/
 private def computeOuterInner (shape : Array Nat) (axis : Nat) : Nat × Nat :=
   let outer := (shape.toList.take axis).foldl (· * ·) 1
   let inner := shape.getD axis 1

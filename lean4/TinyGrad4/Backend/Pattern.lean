@@ -17,21 +17,9 @@ Patterns are functions `UOp → Option α` that compose via:
 
 ## Example
 
-```lean
-def softmax? (u : UOp) : Option SoftmaxInfo := do
-  let (numer, denom) ← u.asDiv?
-  let exp2Arg ← numer.asExp2?
-  let (sumSrc, axes) ← denom.asReduceAdd?
-  -- ... more matching
-  pure { input, axis }
-```
+`softmax?` matches a stable softmax tree and returns the input + axis. See the definition below for details.
 
-Patterns compose with `<|>`:
-```lean
-def anyPattern? (u : UOp) : Option FusedPlan :=
-  (softmax? u >>= fun x => pure (.softmax x)) <|>
-  (matmulRelu? u >>= fun (a,b) => pure (.matmulRelu a b))
-```
+Patterns compose with `<|>` and `>>=` for sequential matching.
 -/
 
 namespace TinyGrad4.Backend.Pattern
@@ -72,6 +60,7 @@ def UOp.asSub? (u : UOp) : Option (UOp × UOp) := asBinary? u .SUB
 def UOp.asMul? (u : UOp) : Option (UOp × UOp) := asBinary? u .MUL
 def UOp.asDiv? (u : UOp) : Option (UOp × UOp) := asBinary? u .FDIV
 def UOp.asMax? (u : UOp) : Option (UOp × UOp) := asBinary? u .MAX
+def UOp.asCmpeq? (u : UOp) : Option (UOp × UOp) := asBinary? u .CMPEQ
 
 def UOp.asNeg? (u : UOp) : Option UOp := asUnary? u .NEG
 def UOp.asSqrt? (u : UOp) : Option UOp := asUnary? u .SQRT
@@ -93,7 +82,7 @@ def getReduceInfo (arg : UArg) : Option (Ops × List Nat) :=
   | .reduceWithAxes op axes => some (op, axes)
   | _ => none
 
-/-- Match REDUCE_AXIS with specific op, return (source, axes) -/
+/-- Match `REDUCE_AXIS` with specific op, return (source, axes). -/
 def UOp.asReduceWith? (u : UOp) (op : Ops) : Option (UOp × List Nat) :=
   if u.op != .REDUCE_AXIS then none
   else match getReduceInfo u.arg with
@@ -134,6 +123,18 @@ def UOp.asConstF32? (u : UOp) : Option Float :=
     | _ => none
   else none
 
+/-- Check for scalar zero constant (any scalar dtype). -/
+def UOp.isZeroConst (u : UOp) : Bool :=
+  if u.op != .CONST then
+    false
+  else
+    match u.arg with
+    | .constF32Bits bits => bits == (0.0 : Float32).toBits
+    | .constFloat v => v == 0.0
+    | .constInt v => v == 0
+    | .constBool v => v == false
+    | _ => false
+
 /-- Check if constant is approximately a value -/
 def UOp.isConstApprox? (u : UOp) (target : Float) (tol : Float := 0.001) : Bool :=
   match UOp.asConstF32? u with
@@ -167,7 +168,7 @@ structure SoftmaxInfo where
 
 /--
 Match stable softmax pattern:
-  exp2(log2e * (x - max(x, axis))) / sum(exp2(log2e * (x - max(x, axis))), axis)
+  `exp2(log2e * (x - max(x, axis))) / sum(exp2(log2e * (x - max(x, axis))), axis)`
 
 Returns the input and axis if matched.
 -/
@@ -309,9 +310,9 @@ structure GeluInfo where
 
 /--
 Match GELU pattern (exact):
-  x * 0.5 * (1 + erf(x / sqrt(2)))
+  `x * 0.5 * (1 + erf(x / sqrt(2)))`
 Or approximate (tanh):
-  x * 0.5 * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
+  `x * 0.5 * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))`
 
 For now, match simpler patterns we can detect.
 -/
@@ -330,7 +331,7 @@ structure LayerNormInfo where
 
 /--
 Match layer norm pattern:
-  gamma * (x - mean(x)) / sqrt(var(x) + eps) + beta
+  `gamma * (x - mean(x)) / sqrt(var(x) + eps) + beta`
 -/
 def layerNorm? (_u : UOp) : Option LayerNormInfo := do
   -- Complex pattern - defer for now

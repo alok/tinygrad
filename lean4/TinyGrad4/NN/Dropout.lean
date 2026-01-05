@@ -45,8 +45,8 @@ private def coerceShape {s1 s2 : List Nat} {d : DType}
 /-- Forward pass for dropout.
 
     Training mode:
-    - Generate random mask where mask[i] = 1 if rand[i] > p, else 0
-    - Output = input * mask / (1 - p)
+    - Generate random mask where {lit}`mask[i] = 1` if {lit}`rand[i] > p`, else 0
+    - Output = {lit}`input * mask / (1 - p)`
 
     Eval mode:
     - Output = input (identity)

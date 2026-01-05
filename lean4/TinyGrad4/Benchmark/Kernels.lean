@@ -1,4 +1,5 @@
 import TinyGrad4.UOp.UOp
+import TinyGrad4.UOp.Graph
 import TinyGrad4.UOp.Typed
 import TinyGrad4.Backend.MetalRenderer
 
@@ -31,7 +32,7 @@ def mkUnaryEwiseGraph (op : Ops) : List UOp × UOpId := runUOpM do
   let result ← TUOp.unaryOp op bufA
   pure ([bufA.raw, bufOut.raw, result.raw], result.raw.uid)
 
-/-- Build a fused add-mul graph: out = (a + b) * c -/
+/-- Build a fused add-mul graph: {lit}`out = (a + b) * c`. -/
 def mkFusedAddMulGraph : List UOp × UOpId := runUOpM do
   let bufA ← TUOp.buffer .float32 []
   let bufB ← TUOp.buffer .float32 []
@@ -95,6 +96,43 @@ def BenchKernel.flopsPerElement : BenchKernel → Nat
 
 /-! ## Shader Generation -/
 
+def kernelUOpStats (kernel : BenchKernel) : Option _root_.TinyGrad4.UOp.UOpStats :=
+  match kernel with
+  | .add =>
+    let (nodes, _) := mkBinaryEwiseGraph .ADD
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .mul =>
+    let (nodes, _) := mkBinaryEwiseGraph .MUL
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .sub =>
+    let (nodes, _) := mkBinaryEwiseGraph .SUB
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .div =>
+    let (nodes, _) := mkBinaryEwiseGraph .FDIV
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .max =>
+    let (nodes, _) := mkBinaryEwiseGraph .MAX
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .neg =>
+    let (nodes, _) := mkUnaryEwiseGraph .NEG
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .exp2 =>
+    let (nodes, _) := mkUnaryEwiseGraph .EXP2
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .sin =>
+    let (nodes, _) := mkUnaryEwiseGraph .SIN
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .sqrt =>
+    let (nodes, _) := mkUnaryEwiseGraph .SQRT
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .recip =>
+    let (nodes, _) := mkUnaryEwiseGraph .RECIPROCAL
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .addMul =>
+    let (nodes, _) := mkFusedAddMulGraph
+    some (_root_.TinyGrad4.UOp.UOpStats.ofNodes nodes)
+  | .reduceSum | .reduceMax | .matmul => none
+
 /-- Generate Metal shader for a benchmark kernel (elementwise) -/
 def generateEwiseShader (kernel : BenchKernel) (size : Nat) : Option String := do
   match kernel with
@@ -133,6 +171,8 @@ def generateEwiseShader (kernel : BenchKernel) (size : Nat) : Option String := d
     renderKernelAuto "fused_add_mul" nodes outId size
   | .reduceSum | .reduceMax | .matmul => none  -- Use specific generators
 
+/-! ## Reduce Shader Generation -/
+
 /-- Generate Metal shader for a reduce kernel -/
 def generateReduceShader (kernel : BenchKernel) (innerSize outerSize : Nat) : Option String := do
   match kernel with
@@ -140,9 +180,22 @@ def generateReduceShader (kernel : BenchKernel) (innerSize outerSize : Nat) : Op
   | .reduceMax => some (renderReduceKernelAuto "reduce_max" .max innerSize outerSize)
   | _ => none
 
+def generateShaderWithStats (kernel : BenchKernel) (size : Nat) :
+    Option (String × Option _root_.TinyGrad4.UOp.UOpStats) := do
+  match kernel with
+  | .reduceSum | .reduceMax =>
+    let shader ← generateReduceShader kernel size 1
+    some (shader, none)
+  | .matmul =>
+    none
+  | _ =>
+    let shader ← generateEwiseShader kernel size
+    let stats := kernelUOpStats kernel
+    some (shader, stats)
+
 /-- Generate Metal shader for matmul kernel.
-    For benchmarking, we use square matrices: [size x size] @ [size x size]
-    Total FLOPs = 2 * M * N * K = 2 * size^3 -/
+    For benchmarking, we use square matrices: {lit}`[size x size] @ [size x size]`
+    Total FLOPs = {lit}`2 * M * N * K = 2 * size^3` -/
 def generateMatmulShader (size : Nat) : String :=
   renderGemmKernelAuto "matmul" size size size
 

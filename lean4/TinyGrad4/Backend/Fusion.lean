@@ -19,12 +19,12 @@ namespace TinyGrad4.Backend
 open Std
 
 /-!
-## Pattern Registry
+# Pattern Registry
 
 Extensible pattern-based fusion selection. Patterns are registered with priorities
 and tried in priority order (highest first).
 
-### Adding New Patterns
+## Adding New Patterns
 
 1. Add pattern matcher in `Pattern.lean`: `def myPattern? (u : UOp) : Option MyInfo`
 2. Add Impl variant: `| fusedMyPattern (plan : MyPattern.Plan)`

@@ -9,10 +9,10 @@ namespace TinyGrad4
 /-!
 # Basic utilities and axioms for TinyGrad4
 
-## sorry_proof axiom
+## `sorry_proof` axiom
 Following the pattern from Grassmann4 and SciLean, we use `sorry_proof` to defer
 proof obligations for Float operations. This allows:
-- Computation to work via `#eval`
+- Computation to work via {lit}`#eval`
 - Type-checking to pass
 - Proofs to be filled in later (or left as axioms for practical use)
 
@@ -23,7 +23,7 @@ but for practical deep learning this is acceptable.
 /-- Axiom for deferring proof obligations. Use sparingly and document why. -/
 axiom sorryProofAxiom {P : Prop} : P
 
-/-- Macro for convenient sorry_proof usage -/
+/-- Macro for convenient `sorry_proof` usage. -/
 macro "sorry_proof" : term => `(sorryProofAxiom)
 
 /-- Product of a list of natural numbers -/
@@ -100,6 +100,7 @@ def listIndexOf [DecidableEq α] (xs : List α) (a : α) : Nat :=
 
 /-- Unique identifier type -/
 structure Id where
+  /-- Raw numeric identifier. -/
   val : Nat
   deriving DecidableEq, Repr, Hashable, Ord
 

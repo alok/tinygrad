@@ -5,7 +5,7 @@ Provides vectorized operations using vDSP and BLAS.
 These are the same primitives numpy uses on macOS.
 
 ## Usage
-```lean
+```
 let sum ← Accel.sumU8 byteArray 0 byteArray.size
 let normalized ← Accel.normalizeU8ToF32 byteArray 0 byteArray.size
 let result ← Accel.matmulF32 a 0 b 0 M K N
@@ -18,7 +18,7 @@ namespace TinyGrad4.Backend.Accel
 -- FFI declarations
 -- ============================================================================
 
-/-- Sum all bytes in a ByteArray slice. Uses vDSP_sve (vectorized). -/
+/-- Sum all bytes in a ByteArray slice. Uses `vDSP_sve` (vectorized). -/
 @[extern "lean_accel_sum_u8"]
 opaque sumU8Impl (ba : @& ByteArray) (offset len : USize) : UInt64
 
@@ -68,7 +68,7 @@ def sumF32 (ba : ByteArray) (offset : Nat := 0) (numFloats : Nat := ba.size / 4)
 
 /-- Convert uint8 array to normalized float32 array.
     Each byte b becomes (b / 255.0) as float32.
-    Returns ByteArray of len * 4 bytes. -/
+    Returns ByteArray of length {lit}`len * 4` bytes. -/
 def normalizeU8ToF32 (ba : ByteArray) (offset : Nat := 0) (len : Nat := ba.size) : ByteArray :=
   normalizeU8ToF32Impl ba offset.toUSize len.toUSize
 
@@ -77,8 +77,8 @@ def normalizeSumU8 (ba : ByteArray) (offset : Nat := 0) (len : Nat := ba.size) :
   normalizeSumU8Impl ba offset.toUSize len.toUSize
 
 /-- Matrix multiply C = A @ B.
-    A: [M, K] float32, B: [K, N] float32, C: [M, N] float32.
-    All row-major. Returns ByteArray of M * N * 4 bytes. -/
+    A is MxK float32, B is KxN float32, C is MxN float32.
+    All row-major. Returns ByteArray of length {lit}`M * N * 4` bytes. -/
 def matmulF32 (a : ByteArray) (aOffset : Nat)
               (b : ByteArray) (bOffset : Nat)
               (M K N : Nat) : ByteArray :=

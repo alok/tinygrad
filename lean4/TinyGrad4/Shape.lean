@@ -5,7 +5,7 @@ namespace TinyGrad4
 /-!
 # Shape System for TinyGrad4
 
-Static shapes encoded as `List Nat` for compile-time verification.
+Static shapes encoded as {lit}`List Nat` for compile-time verification.
 -/
 
 /-- Shape is a list of dimension sizes (all known at compile time) -/
@@ -41,8 +41,8 @@ def broadcast (s1 s2 : Shape) : Option Shape :=
 
 /-- Broadcast output shape, computed unconditionally.
 
-This is useful for dependent typing: if `broadcast s1 s2 = some out`,
-then `broadcastOut s1 s2` is definitionally the same `out`.
+This is useful for dependent typing: if {lit}`broadcast s1 s2 = some out`,
+then {lit}`broadcastOut s1 s2` is definitionally the same {lit}`out`.
 When shapes are not broadcastable, callers should still check and reject the operation.
 -/
 def broadcastOut (s1 s2 : Shape) : Shape :=
@@ -53,7 +53,9 @@ def broadcastOut (s1 s2 : Shape) : Shape :=
 
 /-- Typeclass witness for valid broadcast shapes. -/
 class BroadcastShape (s1 s2 : Shape) (out : Shape) : Prop where
+  /-- Proof that the output matches `broadcastOut`. -/
   h_out : out = broadcastOut s1 s2
+  /-- Proof that inputs are broadcastable. -/
   h_valid : broadcastable s1 s2 = true
 
 instance broadcastShapeInst (s1 s2 : Shape) :
@@ -97,7 +99,9 @@ def concatOutList (shapes : List Shape) (axis : Nat) : Shape :=
 
 /-- Typeclass witness for valid concat shapes. -/
 class ConcatShape (s1 s2 : Shape) (axis : Nat) (out : Shape) : Prop where
+  /-- Proof that the output matches `concatOut`. -/
   h_out : out = concatOut s1 s2 axis
+  /-- Proof that inputs are concatenation-valid. -/
   h_valid : concatValid s1 s2 axis = true
 
 instance concatShapeInst (s1 s2 : Shape) (axis : Nat) :
@@ -107,7 +111,9 @@ instance concatShapeInst (s1 s2 : Shape) (axis : Nat) :
 
 /-- Typeclass witness for valid concat shapes (list). -/
 class ConcatListShape (shapes : List Shape) (axis : Nat) (out : Shape) : Prop where
+  /-- Proof that the output matches `concatOutList`. -/
   h_out : out = concatOutList shapes axis
+  /-- Proof that inputs are concatenation-valid. -/
   h_valid : concatListValid shapes axis = true
 
 instance concatListShapeInst (shapes : List Shape) (axis : Nat) :
@@ -115,7 +121,7 @@ instance concatListShapeInst (shapes : List Shape) (axis : Nat) :
   h_out := rfl
   h_valid := sorry_proof
 
-/-- Insert a dimension of size `dim` at `axis` (axis clamped to [0, rank]). -/
+/-- Insert a dimension of size {lit}`dim` at {lit}`axis` (axis clamped to {lit}`[0, rank]`). -/
 def insertDim (s : Shape) (axis : Nat) (dim : Nat) : Shape :=
   let pre := s.take axis
   let post := s.drop axis
@@ -134,8 +140,8 @@ def unitStrides (s : Shape) : List Int :=
     (stride :: strides, prod * dim)
   ) ([], 1) |>.1
 
-/-- Compute broadcasted strides from `(fromShape, fromStrides)` to `toShape`.
-Returns `none` when broadcasting is invalid. -/
+/-- Compute broadcasted strides from {lit}`(fromShape, fromStrides)` to {lit}`toShape`.
+Returns {lit}`none` when broadcasting is invalid. -/
 def broadcastStrides (fromShape : Shape) (fromStrides : List Int) (toShape : Shape) : Option (List Int) :=
   if fromShape.length != fromStrides.length then
     none
@@ -208,7 +214,9 @@ def reduceValid (s : Shape) (axes : List Nat) : Bool :=
 
 /-- Typeclass witness for valid reduce shapes. -/
 class ReduceShape (s : Shape) (axes : List Nat) (keepdim : Bool) (out : Shape) : Prop where
+  /-- Proof that the output matches `reduce`. -/
   h_out : out = reduce s axes keepdim
+  /-- Proof that axes are valid. -/
   h_valid : reduceValid s axes = true
 
 instance reduceShapeInst (s : Shape) (axes : List Nat) (keepdim : Bool) :
@@ -218,7 +226,7 @@ instance reduceShapeInst (s : Shape) (axes : List Nat) (keepdim : Bool) :
 
 /-- Matmul output shape for tensors with rank ≥ 2.
     Semantics follow tinygrad/PyTorch:
-    (..., m, k) @ (..., k, n) -> (..., m, n) with broadcast on leading dims. -/
+    {lit}`(..., m, k) @ (..., k, n) -> (..., m, n)` with broadcast on leading dims. -/
 def matmulShape (s1 s2 : Shape) : Option Shape :=
   let r1 := s1.length
   let r2 := s2.length
@@ -238,7 +246,7 @@ def matmulShape (s1 s2 : Shape) : Option Shape :=
       | some batchOut => some (batchOut ++ [m, n])
       | none => none
 
-/-- Matmul output shape computed unconditionally (use with `MatmulShape`). -/
+/-- Matmul output shape computed unconditionally (use with {lit}`MatmulShape`). -/
 def matmulOut (s1 s2 : Shape) : Shape :=
   let r1 := s1.length
   let r2 := s2.length
@@ -254,7 +262,9 @@ def matmulValid (s1 s2 : Shape) : Bool :=
 
 /-- Typeclass witness for valid matmul shapes. -/
 class MatmulShape (s1 s2 : Shape) (out : Shape) : Prop where
+  /-- Proof that the output matches `matmulOut`. -/
   h_out : out = matmulOut s1 s2
+  /-- Proof that inputs are matmul-valid. -/
   h_valid : matmulValid s1 s2 = true
 
 instance matmulShapeInst (s1 s2 : Shape) :
@@ -267,7 +277,7 @@ instance matmulShapeInst (s1 s2 : Shape) :
 -- ============================================================================
 
 /-- Compute output shape after repeat along each dimension.
-    repeats[i] specifies how many times to repeat dimension i.
+    {lit}`repeats[i]` specifies how many times to repeat dimension i.
     Pads repeats with 1s on the left if shorter than shape. -/
 def repeatOut (s : Shape) (repeats : List Nat) : Shape :=
   let len := max s.length repeats.length
@@ -280,7 +290,7 @@ def repeatOut (s : Shape) (repeats : List Nat) : Shape :=
 -- ============================================================================
 
 /-- Compute output spatial dimension for convolution.
-    outputDim = (inputDim + 2*padding - dilation*(kernelSize-1) - 1) / stride + 1 -/
+    {lit}`outputDim = (inputDim + 2*padding - dilation*(kernelSize-1) - 1) / stride + 1` -/
 def convOutDim (inputDim padding dilation kernelSize stride : Nat) : Nat :=
   let dilatedKernel := dilation * (kernelSize - 1) + 1
   let paddedInput := inputDim + 2 * padding
@@ -288,9 +298,9 @@ def convOutDim (inputDim padding dilation kernelSize stride : Nat) : Nat :=
   else (paddedInput - dilatedKernel) / stride + 1
 
 /-- Compute conv1d output shape.
-    Input: [batch, cin, w]
-    Weight: [cout, cin, kW]
-    Output: [batch, cout, wOut] -/
+    Input: {lit}`[batch, cin, w]`
+    Weight: {lit}`[cout, cin, kW]`
+    Output: {lit}`[batch, cout, wOut]` -/
 def conv1dShape (inputShape weightShape : Shape) (padding stride dilation : Nat) : Option Shape :=
   match inputShape, weightShape with
   | [batch, cin, w], [cout, cin', kW] =>
@@ -312,9 +322,9 @@ def conv1dValid (inputShape weightShape : Shape) (padding stride dilation : Nat)
   (conv1dShape inputShape weightShape padding stride dilation).isSome
 
 /-- Compute conv2d output shape.
-    Input: [batch, cin, h, w]
-    Weight: [cout, cin, kH, kW]
-    Output: [batch, cout, hOut, wOut] -/
+    Input: {lit}`[batch, cin, h, w]`
+    Weight: {lit}`[cout, cin, kH, kW]`
+    Output: {lit}`[batch, cout, hOut, wOut]` -/
 def conv2dShape (inputShape weightShape : Shape) (padding stride dilation : Nat) : Option Shape :=
   match inputShape, weightShape with
   | [batch, cin, h, w], [cout, cin', kH, kW] =>
@@ -337,8 +347,8 @@ def conv2dValid (inputShape weightShape : Shape) (padding stride dilation : Nat)
   (conv2dShape inputShape weightShape padding stride dilation).isSome
 
 /-- Compute pool2d output shape (for maxPool2d/avgPool2d).
-    Input: [batch, channels, h, w]
-    Output: [batch, channels, hOut, wOut]
+    Input: {lit}`[batch, channels, h, w]`
+    Output: {lit}`[batch, channels, hOut, wOut]`
     Channel dimension is preserved. -/
 def pool2dShape (inputShape : Shape) (kernelSize padding stride : Nat) : Shape :=
   match inputShape with
@@ -353,12 +363,12 @@ def pool2dShape (inputShape : Shape) (kernelSize padding stride : Nat) : Shape :
 -- ============================================================================
 
 /-- Compute output shape after pool/im2col operation.
-    Input spatial dims are last `kernelSize.length` dimensions.
+    Input spatial dims are last {lit}`kernelSize.length` dimensions.
     Output adds kernel dimensions at the end.
 
-    Input:  [..., h, w]
-    Kernel: [kH, kW]
-    Output: [..., hOut, wOut, kH, kW] -/
+    Input:  {lit}`[..., h, w]`
+    Kernel: {lit}`[kH, kW]`
+    Output: {lit}`[..., hOut, wOut, kH, kW]` -/
 def poolOut (s : Shape) (kernelSize stride dilation : List Nat) : Shape :=
   let k := kernelSize.length
   let pre := s.take (s.length - k)
@@ -373,6 +383,7 @@ end Shape
 
 /-- Proof that reshape preserves element count -/
 structure ReshapeProof (from_ to : Shape) : Prop where
+  /-- Proof that element counts match. -/
   numel_eq : from_.numel = to.numel
 
 /-- Decidable instance for ReshapeProof -/

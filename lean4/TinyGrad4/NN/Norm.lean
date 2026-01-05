@@ -21,7 +21,7 @@ open StaticTensor
 
 /-- RMSNorm parameters -/
 structure RMSNormParams (dim : Nat) (dt : DType) where
-  /-- Learnable scale parameter [dim] -/
+  /-- Learnable scale parameter {lit}`[dim]`. -/
   weight : Option (Vector dim dt)
   /-- Epsilon for numerical stability -/
   eps : Float32
@@ -38,7 +38,7 @@ def create (dim : Nat) (dt : DType := .float32) (eps : Float32 := 1e-6)
     pure none
   pure { weight, eps }
 
-/-- Coerce tensor to target shape (uses sorry_proof for shape equality) -/
+/-- Coerce tensor to target shape (uses {lit}`sorry_proof` for shape equality). -/
 private def coerceShape {s1 s2 : List Nat} {d : DType}
     (t : StaticTensor s1 d) : StaticTensor s2 d :=
   { uop := t.uop, h_shape := sorry_proof, requiresGrad := t.requiresGrad }
@@ -87,9 +87,9 @@ end RMSNormParams
 
 /-- LayerNorm parameters -/
 structure LayerNormParams (normalizedShape : List Nat) (dt : DType) where
-  /-- Learnable scale [normalizedShape] -/
+  /-- Learnable scale {lit}`[normalizedShape]`. -/
   weight : Option (StaticTensor normalizedShape dt)
-  /-- Learnable bias [normalizedShape] -/
+  /-- Learnable bias {lit}`[normalizedShape]`. -/
   bias : Option (StaticTensor normalizedShape dt)
   /-- Epsilon for numerical stability -/
   eps : Float32
@@ -107,7 +107,7 @@ def create (normalizedShape : List Nat) (dt : DType := .float32) (eps : Float32 
     pure (none, none)
   pure { weight, bias, eps }
 
-/-- Coerce tensor to target shape (uses sorry_proof for shape equality) -/
+/-- Coerce tensor to target shape (uses {lit}`sorry_proof` for shape equality). -/
 private def coerceShape {s1 s2 : List Nat} {d : DType}
     (t : StaticTensor s1 d) : StaticTensor s2 d :=
   { uop := t.uop, h_shape := sorry_proof, requiresGrad := t.requiresGrad }
@@ -168,21 +168,21 @@ end LayerNormParams
 /-! ## BatchNorm -/
 
 /-- BatchNorm parameters for normalizing over batch dimension.
-    BatchNorm1d: Input [N, C] or [N, C, L]
-    BatchNorm2d: Input [N, C, H, W]
+    BatchNorm1d: Input {lit}`[N, C]` or {lit}`[N, C, L]`
+    BatchNorm2d: Input {lit}`[N, C, H, W]`
 
     Unlike LayerNorm, BatchNorm:
     - Normalizes over batch (and spatial) dimensions, keeping channels separate
     - Tracks running mean/variance for inference
     - Has train vs eval mode -/
 structure BatchNormParams (numFeatures : Nat) (dt : DType) where
-  /-- Learnable scale (gamma) [numFeatures] -/
+  /-- Learnable scale (gamma) {lit}`[numFeatures]`. -/
   weight : StaticTensor [numFeatures] dt
-  /-- Learnable bias (beta) [numFeatures] -/
+  /-- Learnable bias (beta) {lit}`[numFeatures]`. -/
   bias : StaticTensor [numFeatures] dt
-  /-- Running mean for inference [numFeatures] -/
+  /-- Running mean for inference {lit}`[numFeatures]`. -/
   runningMean : StaticTensor [numFeatures] dt
-  /-- Running variance for inference [numFeatures] -/
+  /-- Running variance for inference {lit}`[numFeatures]`. -/
   runningVar : StaticTensor [numFeatures] dt
   /-- Epsilon for numerical stability -/
   eps : Float32
@@ -196,8 +196,8 @@ namespace BatchNormParams
 /-- Create BatchNorm layer with default initialization:
     - weight (gamma) = 1
     - bias (beta) = 0
-    - running_mean = 0
-    - running_var = 1 -/
+    - {lit}`running_mean = 0`
+    - {lit}`running_var = 1` -/
 def create (numFeatures : Nat) (dt : DType := .float32)
     (eps : Float32 := 1e-5) (momentum : Float32 := 0.1)
     (affine : Bool := true) (trackRunningStats : Bool := true)
@@ -217,7 +217,7 @@ private def coerceShape {s1 s2 : List Nat} {d : DType}
     (t : StaticTensor s1 d) : StaticTensor s2 d :=
   { uop := t.uop, h_shape := sorry_proof, requiresGrad := t.requiresGrad }
 
-/-- Forward pass for BatchNorm2d: Input [N, C, H, W]
+/-- Forward pass for BatchNorm2d: Input {lit}`[N, C, H, W]`
     Normalizes over N, H, W dimensions, separately for each channel C.
 
     For simplicity, uses sequential reductions: first over spatial dims (H, W),
@@ -277,8 +277,8 @@ def forward2d {batch channels height width : Nat}
     let result ← addB scaled biasB
     pure (coerceShape result)
 
-/-- Forward pass for BatchNorm1d: Input [N, C] or [N, C, L]
-    Normalizes over N (and L if present), separately for each channel C -/
+/-- Forward pass for BatchNorm1d: Input {lit}`[N, C]` or {lit}`[N, C, L]`.
+    Normalizes over N (and L if present), separately for each channel C. -/
 def forward1d {batch channels : Nat}
     (params : BatchNormParams channels dt)
     (x : StaticTensor [batch, channels] dt)

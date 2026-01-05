@@ -12,7 +12,7 @@ Reusable infrastructure for GPU backend benchmarking.
 4. **CI-friendly**: JSON output, exit codes, regression detection
 
 ## Usage
-```lean
+```
 def myBench : BenchmarkSpec := {
   name := "vector_add"
   size := 1_000_000
@@ -20,7 +20,7 @@ def myBench : BenchmarkSpec := {
   warmupRuns := 3
 }
 
-#eval runBenchmark myBench metalBackend
+runBenchmark myBench metalBackend
 ```
 -/
 
@@ -36,24 +36,34 @@ structure Timing where
 
 namespace Timing
 
+/-- Convert nanoseconds to microseconds. -/
 def toMicros (t : Timing) : Float := t.nanos.toFloat / 1000.0
+/-- Convert nanoseconds to milliseconds. -/
 def toMillis (t : Timing) : Float := t.nanos.toFloat / 1_000_000.0
+/-- Convert nanoseconds to seconds. -/
 def toSeconds (t : Timing) : Float := t.nanos.toFloat / 1_000_000_000.0
 
 end Timing
 
 /-- Statistical summary of multiple runs -/
 structure TimingStats where
+  /-- Minimum timing. -/
   min : Timing
+  /-- Maximum timing. -/
   max : Timing
+  /-- Mean timing. -/
   mean : Timing
+  /-- Median timing. -/
   median : Timing
+  /-- Standard deviation (nanoseconds). -/
   stddev : Float
+  /-- Number of samples. -/
   samples : Nat
   deriving Repr, Inhabited
 
 namespace TimingStats
 
+/-- Compute summary statistics for a set of timings. -/
 def compute (timings : Array Timing) : TimingStats :=
   if timings.isEmpty then
     { min := ⟨0⟩, max := ⟨0⟩, mean := ⟨0⟩, median := ⟨0⟩, stddev := 0.0, samples := 0 }
@@ -101,8 +111,9 @@ structure BenchmarkResult where
   device : String
   /-- Timing statistics -/
   stats : TimingStats
-  /-- Computed metrics -/
+  /-- Bandwidth in GB/s. -/
   bandwidth_gb_s : Float
+  /-- Throughput in GFLOP/s. -/
   throughput_gflops : Float
   /-- Whether results were verified correct -/
   verified : Bool
@@ -265,14 +276,17 @@ def vectorAddSmall : BenchmarkSpec := {
 
 /-- Matmul benchmark spec with M, N, K dimensions -/
 structure MatmulSpec extends BenchmarkSpec where
+  /-- Left-hand matrix rows (M dimension). -/
   m : Nat
+  /-- Inner dimension (K). -/
   k : Nat
+  /-- Right-hand matrix columns (N dimension). -/
   n : Nat
   deriving Repr, Inhabited
 
 namespace MatmulSpec
 
-/-- Compute memory bandwidth for matmul (read A[M,K] + B[K,N], write C[M,N]) -/
+/-- Compute memory bandwidth for matmul (read `A[M,K]` + `B[K,N]`, write `C[M,N]`). -/
 def computeBandwidth (spec : MatmulSpec) (timeUs : Float) : Float :=
   let bytesA := spec.m * spec.k * 4  -- float32
   let bytesB := spec.k * spec.n * 4
@@ -280,7 +294,7 @@ def computeBandwidth (spec : MatmulSpec) (timeUs : Float) : Float :=
   let totalBytes := (bytesA + bytesB + bytesC).toFloat
   (totalBytes / timeUs) * 1e6 / 1e9  -- GB/s
 
-/-- Compute GFLOP/s for matmul (2*M*N*K FLOPs) -/
+/-- Compute GFLOP/s for matmul (`2*M*N*K` FLOPs). -/
 def computeThroughput (spec : MatmulSpec) (timeUs : Float) : Float :=
   let flops := 2 * spec.m * spec.n * spec.k  -- multiply-add
   (flops.toFloat / timeUs) * 1e6 / 1e9  -- GFLOP/s

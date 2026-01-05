@@ -214,7 +214,7 @@ extern_lib tg4c pkg := do
       let buildLib := pkg.buildDir / "lib"
       IO.FS.createDirAll buildLib
       let leanLib := (← getLeanSysroot) / "lib"
-      let candidates := #["libc++.so.1", "libc++abi.so.1"]
+      let candidates := #["libc++.so.1", "libc++abi.so.1", "libunwind.so.1"]
       for name in candidates do
         let src := leanLib / name
         if ← src.pathExists then

@@ -113,9 +113,9 @@ private def renderGatherKernelFromPlan (name : String) (plan : FusedGather.Plan)
     lines := lines ++ s!"  idx_off += {renderInt64 stride} * (long)idx{j};\n"
 
   let zeroBlock := renderZeroStore elemSize "    "
-  lines := lines ++ s!"  if (!valid || idx_off < 0 || idx_off >= {renderInt64 idxNumel64}) {{\n{zeroBlock}    return;\n  }}\n"
+  lines := lines ++ s!"  if (!valid || idx_off < 0 || idx_off >= {renderInt64 idxNumel64}) " ++ "{\n" ++ zeroBlock ++ "    return;\n  }\n"
   lines := lines ++ s!"  long idx_val = (long)idx[(uint)idx_off];\n"
-  lines := lines ++ s!"  if (idx_val < 0 || idx_val >= (long){renderNat classDim}) {{\n{zeroBlock}    return;\n  }}\n"
+  lines := lines ++ s!"  if (idx_val < 0 || idx_val >= (long){renderNat classDim}) " ++ "{\n" ++ zeroBlock ++ "    return;\n  }\n"
 
   lines := lines ++ s!"  long x_off = {renderInt64 plan.xView.offset};\n"
   for j in [:maskRank] do
@@ -133,19 +133,15 @@ private def renderGatherKernelFromPlan (name : String) (plan : FusedGather.Plan)
     lines := lines ++ s!"  if (x{j} < {renderNat start} || x{j} >= {renderNat stop}) valid = false;\n"
     lines := lines ++ s!"  x_off += {renderInt64 stride} * (long)x{j};\n"
 
-  lines := lines ++ s!"  if (!valid || x_off < 0 || x_off >= {renderInt64 xNumel64}) {{\n{zeroBlock}    return;\n  }}\n"
+  lines := lines ++ s!"  if (!valid || x_off < 0 || x_off >= {renderInt64 xNumel64}) " ++ "{\n" ++ zeroBlock ++ "    return;\n  }\n"
   lines := lines ++ renderCopyStore elemSize "  "
 
-  s!"#include <metal_stdlib>
-using namespace metal;
-
-kernel void {name}(
-  device const uchar* x [[buffer(0)]],
-  device const {idxType}* idx [[buffer(1)]],
-  device uchar* out [[buffer(2)]],
-  uint gid [[thread_position_in_grid]]
-) {{
-{lines}}}"
+  s!"#include <metal_stdlib>\nusing namespace metal;\n\nkernel void {name}(\n" ++
+    s!"  device const uchar* x [[buffer(0)]],\n" ++
+    s!"  device const {idxType}* idx [[buffer(1)]],\n" ++
+    "  device uchar* out [[buffer(2)]],\n" ++
+    "  uint gid [[thread_position_in_grid]]\n" ++
+    ") " ++ "{\n" ++ lines ++ "}"
 
 /-! ## Kernel Dispatch -/
 

@@ -64,6 +64,7 @@ def metalLinkArgs : Array String :=
       "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
       "-Wl,-rpath,/usr/local/cuda/lib64",
       "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
+      "-Wl,-rpath,$ORIGIN/../lib",
       "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++"]
 
 -- C files to compile (add new files here)
@@ -200,6 +201,18 @@ extern_lib tg4c pkg := do
             IO.eprintln s!"Failed to compile tg4_accel.c: {out.stderr}"
           else
             oFiles := oFiles.push (← inputBinFile oFile)
+    if !System.Platform.isOSX && !System.Platform.isWindows then
+      let buildLib := pkg.buildDir / "lib"
+      IO.FS.createDirAll buildLib
+      let leanLib := (← getLeanSysroot) / "lib"
+      let candidates := #["libc++.so.1", "libc++abi.so.1"]
+      for name in candidates do
+        let src := leanLib / name
+        if ← src.pathExists then
+          let dst := buildLib / name
+          let out ← IO.Process.output { cmd := "ln", args := #["-sf", src.toString, dst.toString] }
+          if out.exitCode != 0 then
+            IO.eprintln s!"Failed to link {name} into {buildLib}: {out.stderr}"
     let name := nameToStaticLib "tg4c"
     buildStaticLib (pkg.staticLibDir / name) oFiles
 

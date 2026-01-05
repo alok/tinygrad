@@ -62,6 +62,10 @@ def tryPop (q : IOQueue T) : IO (Option T) := do
 def pop (q : IOQueue T) : IO (Option T) := do
   Std.CloseableChannel.Sync.recv q.chan
 
+/-- Check whether the queue has been closed. -/
+def isClosed (q : IOQueue T) : IO Bool := do
+  Std.CloseableChannel.Sync.isClosed q.chan
+
 /-- Pop an item and report time spent waiting (sleeping) in nanoseconds. -/
 def popWithWait (q : IOQueue T) : IO (Option T × Nat) := do
   match ← q.tryPop with

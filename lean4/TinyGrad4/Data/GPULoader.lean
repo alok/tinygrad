@@ -930,7 +930,7 @@ partial def nextAny (pool : MultiGPULoader batch itemShape dtype) :
     | none => pure ()
 
   -- All empty - check if any still producing
-  let allDone ← pool.workers.allM fun w => w.queue.isClosed
+  let allDone ← pool.workers.allM fun w => IOQueue.isClosed w.queue
   if allDone then return none
 
   -- Wait and retry (could be smarter with condition variables)

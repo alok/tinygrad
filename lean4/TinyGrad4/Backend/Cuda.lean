@@ -20,6 +20,9 @@ NVIDIA GPU
 
 All buffer and program handles are opaque to Lean,
 ensuring type safety and preventing misuse.
+
+FFI glue is provided by `lean4/c/tg4_cuda.cu` and linked via Lake `extern_lib`
+in `lakefile.lean`. The `@[extern]` names here must match the C symbols.
 -/
 
 namespace TinyGrad4.Backend.Cuda

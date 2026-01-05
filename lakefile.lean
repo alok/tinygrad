@@ -64,7 +64,7 @@ def metalLinkArgs : Array String :=
       "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
       "-Wl,-rpath,/usr/local/cuda/lib64",
       "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
-      "-lcuda", "-lnvrtc", "-lstdc++"]
+      "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++"]
 
 -- C files to compile (add new files here)
 
@@ -106,14 +106,69 @@ def findCudaInclude : IO (Option String) := do
     return some "/usr/include"
   return none
 
+-- Find nvcc (returns none if not found)
+
+def findNvcc : IO (Option String) := do
+  -- Respect CUDA_HOME/CUDA_PATH when set
+  let envHome ← IO.getEnv "CUDA_HOME"
+  let envPath ← IO.getEnv "CUDA_PATH"
+  let home := (← IO.getEnv "HOME").getD ""
+  let candidates : Array (Option String) := #[
+    envHome.map (· ++ "/bin/nvcc"),
+    envPath.map (· ++ "/bin/nvcc"),
+    some "/usr/local/cuda/bin/nvcc",
+    some "/opt/cuda/bin/nvcc",
+    if !home.isEmpty then some (home ++ "/cuda-12.4/bin/nvcc") else none
+  ]
+  for path? in candidates do
+    match path? with
+    | some path =>
+        if ← FilePath.pathExists path then
+          return some path
+    | none => pure ()
+  return none
+
+/-!
+FFI build notes:
+- `extern_lib` builds a static library that satisfies `@[extern]` declarations.
+- CUDA support is enabled only when headers + nvcc are found; then we compile `tg4_cuda.cu`
+  and define `TG4_HAS_CUDA` to disable the stub symbols in `tg4c_stub.c`.
+- When CUDA is enabled, link `-lcudart` (see `metalLinkArgs`) to resolve nvcc fatbin registration.
+See the Lake build tool docs and the Lean FFI reference for details.
+-/
+
 extern_lib tg4c pkg := do
   pkg.afterBuildCacheAsync do
     let cDir := pkg.dir / "lean4" / "c"
     let mut oFiles : Array (Job FilePath) := #[]
     -- Check for CUDA availability first (affects stub compilation)
     let cudaInclude? ← if System.Platform.isOSX then pure none else findCudaInclude
-    let hasCuda := cudaInclude?.isSome
-    let cFlagsWithCuda := if hasCuda then cFlags ++ #["-DTG4_HAS_CUDA"] else cFlags
+    let nvcc? ← if System.Platform.isOSX then pure none else findNvcc
+    let mut enableCuda := cudaInclude?.isSome && nvcc?.isSome
+    if enableCuda then
+      let cudaSrc := cDir / "tg4_cuda.cu"
+      if ← cudaSrc.pathExists then
+        let oFile := pkg.buildDir / "c" / "tg4_cuda.o"
+        IO.FS.createDirAll (pkg.buildDir / "c")
+        let leanInclude := (← getLeanSysroot) / "include"
+        let cudaInclude := cudaInclude?.getD "/usr/include"
+        let nvcc := nvcc?.getD "nvcc"
+        let args := #[
+          "-c", "-O3", "-std=c++17", "-lineinfo",
+          "-Xcompiler", "-fPIC",
+          "-I", leanInclude.toString,
+          "-I", cudaInclude,
+          "-o", oFile.toString,
+          cudaSrc.toString
+        ]
+        let out ← IO.Process.output { cmd := nvcc, args := args }
+        if out.exitCode != 0 then
+          enableCuda := false
+          IO.eprintln s!"Failed to compile tg4_cuda.cu with nvcc ({nvcc}): {out.stderr}"
+        else
+          IO.println s!"Compiled CUDA support: {oFile}"
+          oFiles := oFiles.push (← inputBinFile oFile)
+    let cFlagsWithCuda := if enableCuda then cFlags ++ #["-DTG4_HAS_CUDA"] else cFlags
     -- Build C files with Lake's clang
     for file in (← cDir.readDir) do
       if file.path.extension == some "c" && cSourceFiles.contains file.fileName then
@@ -141,34 +196,9 @@ extern_lib tg4c pkg := do
           "-O3", "-DNDEBUG", "-DLEAN_EXPORTING", "-fPIC",
           "-DACCELERATE_NEW_LAPACK"]
         let out ← IO.Process.output { cmd := "xcrun", args := args }
-        if out.exitCode != 0 then
-          IO.eprintln s!"Failed to compile tg4_accel.c: {out.stderr}"
-        else
-          oFiles := oFiles.push (← inputBinFile oFile)
-    -- Build tg4_cuda.cu with nvcc (Linux with CUDA only)
-    -- On macOS/non-CUDA systems, stubs in tg4c_stub.c provide dummy implementations
-    if hasCuda then
-        let cudaSrc := cDir / "tg4_cuda.cu"
-        if ← cudaSrc.pathExists then
-          let oFile := pkg.buildDir / "c" / "tg4_cuda.o"
-          IO.FS.createDirAll (pkg.buildDir / "c")
-          let leanInclude := (← getLeanSysroot) / "include"
-          -- Find CUDA include path (check common locations)
-          let cudaInclude := (cudaInclude?.getD "/usr/include")
-          -- Compile with g++ as C++ (Driver API only, no nvcc needed)
-          let args := #[
-            "-c", "-x", "c++", "-O3", "-fPIC",
-            "-DTG4_HAS_CUDA",
-            "-I", leanInclude.toString,
-            "-I", cudaInclude,
-            "-o", oFile.toString,
-            cudaSrc.toString
-          ]
-          let out ← IO.Process.output { cmd := "g++", args := args }
           if out.exitCode != 0 then
-            IO.eprintln s!"Failed to compile tg4_cuda.cu: {out.stderr}"
+            IO.eprintln s!"Failed to compile tg4_accel.c: {out.stderr}"
           else
-            IO.println s!"Compiled CUDA support: {oFile}"
             oFiles := oFiles.push (← inputBinFile oFile)
     let name := nameToStaticLib "tg4c"
     buildStaticLib (pkg.staticLibDir / name) oFiles

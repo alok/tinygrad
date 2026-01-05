@@ -1,4 +1,5 @@
 import TinyGrad4.UOp.UOp
+import Lean.Data.Json
 import Std.Data.HashMap
 import Std.Data.HashSet
 
@@ -70,6 +71,35 @@ def toposortMany (roots : List UOp) (_fuel : Nat := 100000) : List UOp :=
 
 def allNodes (root : UOp) : List UOp := toposort root
 def nodeCount (root : UOp) : Nat := (allNodes root).length
+
+structure UOpStats where
+  total : Nat
+  byOp : HashMap Ops Nat
+  deriving Repr
+
+namespace UOpStats
+
+def ofNodes (nodes : List UOp) : UOpStats := Id.run do
+  let mut counts : HashMap Ops Nat := ∅
+  for u in nodes do
+    let prev := counts.getD u.op 0
+    counts := counts.insert u.op (prev + 1)
+  return { total := nodes.length, byOp := counts }
+
+end UOpStats
+
+def stats (root : UOp) : UOpStats :=
+  UOpStats.ofNodes (toposort root)
+
+open Lean Json in
+instance : ToJson UOpStats where
+  toJson s :=
+    let opPairs :=
+      s.byOp.toList.map (fun (op, cnt) => (toString (repr op), toJson cnt))
+    Json.mkObj [
+      ("total", toJson s.total),
+      ("by_op", Json.mkObj opPairs)
+    ]
 
 def buildConsumerMap (root : UOp) : ConsumerMap :=
   let nodes := toposort root

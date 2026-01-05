@@ -2613,13 +2613,20 @@ private def evalFusedEwiseGPU (u : UOp) (plan : FusedEwise.Plan)
     return (fromCPU (RawBuffer.zeros u.dtype (listProd u.shape)), gpuCache)
 
   let numel := listProd u.shape
-  if numel < gpuEwiseMinElements || !isGpuDispatchableKernel plan.kernel then
-    -- Fall back to CPU, then wrap result
-    let cpuResult := evalFusedEwise u plan env cache
+  let n := plan.leafBases.size
+  if !plan.fast || numel < gpuEwiseMinElements || !isGpuDispatchableKernel plan.kernel then
+    -- Fall back to CPU, materializing any GPU inputs needed.
+    let mut cacheLocal := cache
+    for i in [:n] do
+      let uid := plan.leafBases[i]!
+      if !cacheLocal.contains uid then
+        if let some db := gpuCache[uid]? then
+          let raw ← toCPU db
+          cacheLocal := cacheLocal.insert uid raw
+    let cpuResult := evalFusedEwise u plan env cacheLocal
     return (fromCPU cpuResult, gpuCache)
 
   -- Get inputs on GPU
-  let n := plan.leafBases.size
   let mut inputs : Array DeviceBuffer.DeviceBuffer := #[]
   let mut gpuCache' := gpuCache
   for i in [:n] do
@@ -2666,8 +2673,16 @@ private def evalFusedReduceGPU (u : UOp) (plan : FusedReduce.Plan)
   let useGPU := reduceOp.isSome && plan.ewise.fast && isLastAxes && inner >= 128 && totalElements >= 1000000
 
   if !useGPU then
-    -- Fall back to CPU
-    let cpuResult := evalFusedReduce u plan env cache
+    -- Fall back to CPU, materializing any GPU inputs needed.
+    let mut cacheLocal := cache
+    let n := plan.ewise.leafBases.size
+    for i in [:n] do
+      let uid := plan.ewise.leafBases[i]!
+      if !cacheLocal.contains uid then
+        if let some db := gpuCache[uid]? then
+          let raw ← toCPU db
+          cacheLocal := cacheLocal.insert uid raw
+    let cpuResult := evalFusedReduce u plan env cacheLocal
     return (fromCPU cpuResult, gpuCache)
 
   let some reduceOp := reduceOp | do
@@ -2752,10 +2767,13 @@ private def evalFusedMatmulGPU (u : UOp) (plan : FusedMatmul.Plan)
   return (resultDb, gpuCache')
 
 open DeviceBuffer.DeviceBuffer in
-/-- IO-based schedule evaluation with GPU residency.
-    Keeps intermediate results on GPU, only materializes to CPU for final outputs. -/
-def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) := do
-  let deps (u : UOp) : List UOpId := u.src.map (fun s => s.uid)
+/-- Internal helper for IO-based schedule evaluation with GPU residency. -/
+private def evalCompiledRawIOGPUWithCache (c : Compiled) (env : Env)
+    (gpuCacheInit : HashMap UOpId DeviceBuffer.DeviceBuffer) : IO (HashMap UOpId RawBuffer) := do
+  let deps (u : UOp) : List UOpId :=
+    match c.implMap[u.uid]? with
+    | some impl => impl.deps
+    | none => u.src.map (fun s => s.uid)
 
   let mut refCnt : HashMap UOpId Nat := ∅
   for u in c.nodes do
@@ -2763,7 +2781,7 @@ def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffe
       refCnt := refCnt.insert sid (refCnt.getD sid 0 + 1)
 
   let mut cache : HashMap UOpId RawBuffer := ∅
-  let mut gpuCache : HashMap UOpId DeviceBuffer.DeviceBuffer := ∅
+  let mut gpuCache : HashMap UOpId DeviceBuffer.DeviceBuffer := gpuCacheInit
 
   for item in c.schedule do
     let u := item.ast
@@ -2774,7 +2792,7 @@ def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffe
       | .KERNEL =>
         match item.impl with
         | some (.fusedEwise plan) =>
-          if u.dtype == .float32 && listProd u.shape >= gpuEwiseMinElements then
+          if u.dtype == .float32 && plan.fast && listProd u.shape >= gpuEwiseMinElements then
             let (db, gc) ← evalFusedEwiseGPU u plan cache gpuCache env
             gpuCache := gc
             pure (true, some db)
@@ -2811,6 +2829,16 @@ def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffe
         gpuCache := gpuCache.insert u.uid db
         -- Don't materialize to CPU cache yet - lazy evaluation
     else
+      -- Materialize any GPU-resident inputs needed by CPU ops.
+      let cpuDeps :=
+        match item.impl with
+        | some impl => impl.deps
+        | none => deps u
+      for sid in cpuDeps do
+        if !cache.contains sid then
+          if let some db := gpuCache[sid]? then
+            let raw ← toCPU db
+            cache := cache.insert sid raw
       -- Fall back to regular CPU path
       let v ←
         match u.op with
@@ -2846,14 +2874,30 @@ def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffe
             release db
             gpuCache := gpuCache.erase sid
 
-  -- Materialize any remaining GPU buffers to CPU for final output
-  for (uid, db) in gpuCache.toList do
-    if !cache.contains uid then
-      let raw ← toCPU db
-      cache := cache.insert uid raw
+  -- Materialize requested outputs (roots) to CPU if they were kept on GPU.
+  for r in c.roots do
+    if !cache.contains r.uid then
+      if let some db := gpuCache[r.uid]? then
+        let raw ← toCPU db
+        cache := cache.insert r.uid raw
+
+  -- Release GPU buffers now that results are materialized.
+  for (_, db) in gpuCache.toList do
     release db
 
   return cache
+
+open DeviceBuffer.DeviceBuffer in
+/-- IO-based schedule evaluation with GPU residency.
+    Keeps intermediate results on GPU, only materializes to CPU for final outputs. -/
+def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) :=
+  evalCompiledRawIOGPUWithCache c env ∅
+
+open DeviceBuffer.DeviceBuffer in
+/-- IO-based schedule evaluation with GPU residency and preloaded GPU inputs. -/
+def evalCompiledRawIOGPUWithInputs (c : Compiled) (env : Env)
+    (gpuInputs : HashMap UOpId DeviceBuffer.DeviceBuffer) : IO (HashMap UOpId RawBuffer) :=
+  evalCompiledRawIOGPUWithCache c env gpuInputs
 
 /-- IO-based evaluation with GPU residency -/
 def evalIOGPU (u : UOp) (env : Env) : IO RawBuffer := do

@@ -24,7 +24,7 @@ Provides neural network building blocks mirroring tinygrad's `nn` module.
 
 ## Usage
 
-```lean
+```
 import TinyGrad4.NN
 
 open TinyGrad4.NN

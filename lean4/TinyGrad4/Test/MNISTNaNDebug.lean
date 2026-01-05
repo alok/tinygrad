@@ -40,6 +40,9 @@ private def fileExists (path : String) : IO Bool := do
 
 def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
   IO.println s!"=== MNIST NaN Debug: batch={batchSize} hidden={hidden} ==="
+  let useResident := (← IO.getEnv "TG4_MNIST_NAN_RESIDENT") == some "1"
+  if useResident then
+    IO.println "  (using evalCompiledRawIOGPU for GPU path)"
 
   let trainImagesPath := "data/train-images-idx3-ubyte"
   let trainLabelsPath := "data/train-labels-idx1-ubyte"
@@ -60,7 +63,9 @@ def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
 
   -- Build forward pass only (no backward)
   IO.println s!"\n--- Building Forward Pass ---"
-  let (w1Id, w2Id, xId, yId, hUop, hReluUop, logitsUop, lossUop) := runTensorM do
+  let (w1Id, w2Id, xId, yId,
+      hUop, hReluUop, logitsUop,
+      logProbsUop, prodUop, sumCUop, negSumUop, lossUop) := runTensorM do
     let xBuf ← Tensor.buffer [batchSize, 784] .float32
     let yBuf ← Tensor.buffer [batchSize, 10] .float32
     let w1Buf ← Tensor.buffer [784, hidden] .float32
@@ -69,9 +74,16 @@ def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
     let h ← matmul xBuf w1Buf
     let hRelu ← relu h
     let logits ← matmul hRelu w2Buf
-    let loss ← crossEntropyOneHot logits yBuf
+    let logProbs ← logSoftmax logits
+    let prod ← mul logProbs yBuf
+    let axis := ([batchSize, 10] : List Nat).length - 1
+    let sumC ← sumAxis prod axis true
+    let negSum ← neg sumC
+    let loss ← mean negSum
 
-    pure (w1Buf.uop.uid, w2Buf.uop.uid, xBuf.uop.uid, yBuf.uop.uid, h.uop, hRelu.uop, logits.uop, loss.uop)
+    pure (w1Buf.uop.uid, w2Buf.uop.uid, xBuf.uop.uid, yBuf.uop.uid,
+      h.uop, hRelu.uop, logits.uop,
+      logProbs.uop, prod.uop, sumC.uop, negSum.uop, loss.uop)
 
   -- Initialize weights
   let w1Init : RawBuffer := { dtype := .float32, data := Native.fullF32Bits (784 * hidden) ((0.01 : Float32).toBits) }
@@ -89,7 +101,10 @@ def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
   let hBufCPU := hCacheCPU.getD hUop.uid (RawBuffer.zeros .float32 0)
   let _ ← checkNaN "h (CPU)" hBufCPU
 
-  let hCacheGPU ← Interpreter.evalCompiledRawIO hCompiled hEnv
+  let hCacheGPU ← if useResident then
+    Interpreter.evalCompiledRawIOGPU hCompiled hEnv
+  else
+    Interpreter.evalCompiledRawIO hCompiled hEnv
   let hBufGPU := hCacheGPU.getD hUop.uid (RawBuffer.zeros .float32 0)
   let hadNaN ← checkNaN "h (GPU)" hBufGPU
 
@@ -104,7 +119,10 @@ def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
   let hReluBufCPU := hReluCacheCPU.getD hReluUop.uid (RawBuffer.zeros .float32 0)
   let _ ← checkNaN "hRelu (CPU)" hReluBufCPU
 
-  let hReluCacheGPU ← Interpreter.evalCompiledRawIO hReluCompiled hReluEnv
+  let hReluCacheGPU ← if useResident then
+    Interpreter.evalCompiledRawIOGPU hReluCompiled hReluEnv
+  else
+    Interpreter.evalCompiledRawIO hReluCompiled hReluEnv
   let hReluBufGPU := hReluCacheGPU.getD hReluUop.uid (RawBuffer.zeros .float32 0)
   let hadNaN ← checkNaN "hRelu (GPU)" hReluBufGPU
 
@@ -119,7 +137,10 @@ def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
   let logitsBufCPU := logitsCacheCPU.getD logitsUop.uid (RawBuffer.zeros .float32 0)
   let _ ← checkNaN "logits (CPU)" logitsBufCPU
 
-  let logitsCacheGPU ← Interpreter.evalCompiledRawIO logitsCompiled logitsEnv
+  let logitsCacheGPU ← if useResident then
+    Interpreter.evalCompiledRawIOGPU logitsCompiled logitsEnv
+  else
+    Interpreter.evalCompiledRawIO logitsCompiled logitsEnv
   let logitsBufGPU := logitsCacheGPU.getD logitsUop.uid (RawBuffer.zeros .float32 0)
   let hadNaN ← checkNaN "logits (GPU)" logitsBufGPU
 
@@ -127,20 +148,81 @@ def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
     IO.println "  Stopping at first NaN"
     return
 
+  if useResident then
+    IO.println s!"\n--- Step 3b: resident single-op checks ---"
+    let logCompiled ← Interpreter.compileManyCached [logitsUop, logProbsUop]
+    let logCache ← Interpreter.evalCompiledRawIOGPU logCompiled logitsEnv
+    let logitsBuf2 := logCache.getD logitsUop.uid (RawBuffer.zeros .float32 0)
+    let logBuf := logCache.getD logProbsUop.uid (RawBuffer.zeros .float32 0)
+    let _ ← checkNaN "logits (GPU single)" logitsBuf2
+    let _ ← checkNaN "logProbs (GPU single)" logBuf
+    let scaleBits := (1.0 : Float).toFloat32.toBits
+    let ln2Bits := (Float.log 2.0).toFloat32.toBits
+    let refBytes := Native.logSoftmaxLastF32 logitsBuf2.data batchSize 10 scaleBits ln2Bits
+    let refBuf : RawBuffer := { dtype := .float32, data := refBytes }
+    let _ ← checkNaN "logProbs (CPU ref)" refBuf
+    match logCompiled.implMap[logProbsUop.uid]? with
+    | some (.fusedSoftmax plan) =>
+      IO.println s!"  logSoftmax input uid: {plan.input}, logits uid: {logitsUop.uid}"
+      let refBytes := Native.logSoftmaxLastF32 logitsBuf2.data plan.outer plan.inner plan.scaleBits plan.ln2Bits
+      let refBuf : RawBuffer := { dtype := .float32, data := refBytes }
+      let _ ← checkNaN "logProbs (CPU from logits)" refBuf
+    | some impl =>
+      IO.println s!"  logProbs impl tag: {impl.tag}"
+    | none =>
+      IO.println "  logProbs impl missing"
+
+    let prodCompiled ← Interpreter.compileManyCached [prodUop]
+    let prodCache ← Interpreter.evalCompiledRawIOGPU prodCompiled logitsEnv
+    let prodBuf := prodCache.getD prodUop.uid (RawBuffer.zeros .float32 0)
+    let _ ← checkNaN "prod (GPU single)" prodBuf
+
+    let sumCompiled ← Interpreter.compileManyCached [sumCUop]
+    let sumCache ← Interpreter.evalCompiledRawIOGPU sumCompiled logitsEnv
+    let sumBuf := sumCache.getD sumCUop.uid (RawBuffer.zeros .float32 0)
+    let _ ← checkNaN "sumC (GPU single)" sumBuf
+
   IO.println s!"\n--- Step 4: loss = crossEntropy(logits, y) ---"
-  let lossCompiled ← Interpreter.compileManyCached [lossUop]
+  let lossCompiledBase ← Interpreter.compileManyCached [lossUop]
   let lossEnv : Env := (∅ : Env) |>.insert xId xBuf |>.insert yId yBuf |>.insert w1Id w1Init |>.insert w2Id w2Init
-  let lossCacheCPU := Interpreter.evalCompiledRaw lossCompiled lossEnv
+  if useResident then
+    let tagOf (u : UOp) :=
+      match lossCompiledBase.implMap[u.uid]? with
+      | some impl => impl.tag
+      | none => "none"
+    IO.println s!"  impl tags: logProbs={tagOf logProbsUop}, prod={tagOf prodUop}, sumC={tagOf sumCUop}, negSum={tagOf negSumUop}, loss={tagOf lossUop}"
+  let lossCacheCPU := Interpreter.evalCompiledRaw lossCompiledBase lossEnv
   let lossBufCPU := lossCacheCPU.getD lossUop.uid (RawBuffer.zeros .float32 0)
   let cpuNaN ← checkNaN "loss (CPU)" lossBufCPU
   if !cpuNaN then
     IO.println s!"  CPU loss value: {RawBuffer.decodeScalarF32 lossBufCPU}"
 
-  let lossCacheGPU ← Interpreter.evalCompiledRawIO lossCompiled lossEnv
+  let lossCacheGPU ←
+    if useResident then
+      let watch := [logProbsUop, prodUop, sumCUop, negSumUop]
+      let mut keepIds := lossCompiledBase.keepIds
+      for u in watch do
+        keepIds := UOpIdSet.add keepIds u.uid
+      let roots := lossCompiledBase.roots ++ watch
+      let lossCompiled := { lossCompiledBase with roots := roots, keepIds := keepIds }
+      Interpreter.evalCompiledRawIOGPU lossCompiled lossEnv
+    else
+      Interpreter.evalCompiledRawIO lossCompiledBase lossEnv
   let lossBufGPU := lossCacheGPU.getD lossUop.uid (RawBuffer.zeros .float32 0)
   let gpuNaN ← checkNaN "loss (GPU)" lossBufGPU
   if !gpuNaN then
     IO.println s!"  GPU loss value: {RawBuffer.decodeScalarF32 lossBufGPU}"
+
+  if useResident then
+    IO.println s!"\n--- Step 4b: logits + loss (combined, GPU resident) ---"
+    let logProbsBuf := lossCacheGPU.getD logProbsUop.uid (RawBuffer.zeros .float32 0)
+    let prodBuf := lossCacheGPU.getD prodUop.uid (RawBuffer.zeros .float32 0)
+    let sumCBuf := lossCacheGPU.getD sumCUop.uid (RawBuffer.zeros .float32 0)
+    let negSumBuf := lossCacheGPU.getD negSumUop.uid (RawBuffer.zeros .float32 0)
+    let _ ← checkNaN "logProbs (GPU resident)" logProbsBuf
+    let _ ← checkNaN "prod (GPU resident)" prodBuf
+    let _ ← checkNaN "sumC (GPU resident)" sumCBuf
+    let _ ← checkNaN "negSum (GPU resident)" negSumBuf
 
   -- Now test with backward pass
   IO.println s!"\n--- Step 5: Backward Pass (gradW1, gradW2) ---"
@@ -180,7 +262,10 @@ def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
 
   -- GPU path
   IO.println "  Running GPU path..."
-  let fullCacheGPU ← Interpreter.evalCompiledRawIO fullCompiled fullEnv
+  let fullCacheGPU ← if useResident then
+    Interpreter.evalCompiledRawIOGPU fullCompiled fullEnv
+  else
+    Interpreter.evalCompiledRawIO fullCompiled fullEnv
   let newW1GPU := fullCacheGPU.getD newW1Uop.uid (RawBuffer.zeros .float32 0)
   let newW2GPU := fullCacheGPU.getD newW2Uop.uid (RawBuffer.zeros .float32 0)
   let hadNaN1 ← checkNaN "newW1 (GPU)" newW1GPU
@@ -199,4 +284,12 @@ def run (batchSize : Nat := 256) (hidden : Nat := 256) : IO Unit := do
 
 end TinyGrad4.Test.MNISTNaNDebug
 
-def main : IO Unit := TinyGrad4.Test.MNISTNaNDebug.run
+private def getEnvNat (key : String) (default : Nat) : IO Nat := do
+  match (← IO.getEnv key) with
+  | some v => pure (v.toNat?.getD default)
+  | none => pure default
+
+def main : IO Unit := do
+  let batch ← getEnvNat "TG4_MNIST_NAN_BATCH" 256
+  let hidden ← getEnvNat "TG4_MNIST_NAN_HIDDEN" 256
+  TinyGrad4.Test.MNISTNaNDebug.run batch hidden

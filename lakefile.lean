@@ -48,26 +48,22 @@ def findNvcc : IO (Option String) := do
     | none => pure ()
   return none
 
--- Compute CUDA link args at Lake config time to avoid hard-failing on non-CUDA Linux.
-unsafe def cudaLinkArgs : Array String :=
-  IO.run do
-    if System.Platform.isOSX || System.Platform.isWindows then
-      return #[]
-    let cudaInclude? ← findCudaInclude
-    let nvcc? ← findNvcc
-    if cudaInclude?.isSome && nvcc?.isSome then
-      return #[
-        "-L/usr/lib/x86_64-linux-gnu",
-        "-L/usr/local/cuda/lib64",
-        "-L/home/alok/cuda-12.4/lib64",  -- ww (freja.mit.edu) local install
-        "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
-        "-Wl,-rpath,/usr/local/cuda/lib64",
-        "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
-        "-Wl,-rpath,$ORIGIN",
-        "-Wl,-rpath,$ORIGIN/../lib",
-        "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++"
-      ]
-    return #[]
+-- CUDA link args for Linux; requires CUDA libs to be installed when building.
+def cudaLinkArgs : Array String :=
+  if System.Platform.isOSX || System.Platform.isWindows then
+    #[]
+  else
+    #[
+      "-L/usr/lib/x86_64-linux-gnu",
+      "-L/usr/local/cuda/lib64",
+      "-L/home/alok/cuda-12.4/lib64",  -- ww (freja.mit.edu) local install
+      "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
+      "-Wl,-rpath,/usr/local/cuda/lib64",
+      "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
+      "-Wl,-rpath,$ORIGIN",
+      "-Wl,-rpath,$ORIGIN/../lib",
+      "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++"
+    ]
 
 package TinyGrad4 where
   version := v!"0.1.0"

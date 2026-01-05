@@ -89,11 +89,11 @@ def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : N
     pure (StaticTensor.ofTUOp out reqGrad)
 
 /-- Repeat tensor along each dimension.
-    repeats[i] specifies how many times to repeat dimension i.
+    {lit}`repeats[i]` specifies how many times to repeat dimension i.
 
     Implementation: reshape to interleave 1s, expand, reshape to merge.
-    For example, shape [2, 3] with repeats [4, 5]:
-      [2, 3] → [1, 2, 1, 3] → [4, 2, 5, 3] → [8, 15]
+    For example, shape {lit}`[2, 3]` with repeats {lit}`[4, 5]`:
+      {lit}`[2, 3] → [1, 2, 1, 3] → [4, 2, 5, 3] → [8, 15]`
 -/
 def tile {s : List Nat} {d : DType} (t : StaticTensor s d)
     (repeats : List Nat)
@@ -146,14 +146,14 @@ private def smax (a b : Nat) : Nat := max a b
 
 /-- Pool/im2col operation: unfolds patches from spatial dimensions.
 
-    Input:  [..., h, w]
-    Kernel: [kH, kW]
-    Output: [..., hOut, wOut, kH, kW]
+    Input:  {lit}`[..., h, w]`
+    Kernel: {lit}`[kH, kW]`
+    Output: {lit}`[..., hOut, wOut, kH, kW]`
 
     This extracts all (kH × kW) patches from the spatial dimensions,
     with the given stride and dilation.
 
-    Implementation follows Python tinygrad's _pool:
+    Implementation follows Python tinygrad's {lit}`_pool`:
     1. Repeat to ensure we have enough elements
     2. Shrink and reshape to create patch dimension
     3. Permute to move kernel dims to the end

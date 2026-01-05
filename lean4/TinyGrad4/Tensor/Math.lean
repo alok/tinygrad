@@ -271,14 +271,14 @@ def log2e : Float := 1.4426950408889634
 def ln2f32 : Float32 := 0.6931471805599453
 def log2ef32 : Float32 := 1.4426950408889634
 
-/-- Natural exponential: e^x = 2^(x * log2(e)) -/
+/-- Natural exponential: {lit}`e^x = 2^(x * log2(e))`. -/
 def exp {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let log2eConst ← TUOp.const d log2ef32
   let scaled ← TUOp.mul t.tuop log2eConst
   let result ← TUOp.unaryOp .EXP2 scaled
   pure (ofTUCastShapeDType result s d t.requiresGrad)
 
-/-- Natural logarithm: ln(x) = log2(x) * ln(2) -/
+/-- Natural logarithm: {lit}`ln(x) = log2(x) * ln(2)`. -/
 def log {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let log2Result ← TUOp.unaryOp .LOG2 t.tuop
   let ln2Const ← TUOp.const d ln2f32
@@ -370,11 +370,11 @@ def abs {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTenso
   let out ← TUOp.where_ isNeg negT t.tuop
   pure (ofTUCastShapeDType out s d t.requiresGrad)
 
-/-- Square: x * x. -/
+/-- Square: {lit}`x * x`. -/
 def square {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   mul t t
 
-/-- SiLU / Swish: x * sigmoid(x) -/
+/-- SiLU / Swish: {lit}`x * sigmoid(x)`. -/
 def silu {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let sig ← sigmoid t
   mul t sig
@@ -383,7 +383,7 @@ def silu {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTens
 def swish {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) :=
   silu t
 
-/-- Hardswish: x * relu6(x+3) / 6. -/
+/-- Hardswish: {lit}`x * relu6(x+3) / 6`. -/
 def hardswish {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let three ← TUOp.const d 3.0
   let tPlusThree ← TUOp.add t.tuop three
@@ -394,7 +394,7 @@ def hardswish {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (Stati
   let out ← TUOp.mul mul1 oneSixth
   pure (ofTUCastShapeDType out s d t.requiresGrad)
 
-/-- Leaky ReLU: x if x >= 0, alpha * x otherwise. -/
+/-- Leaky ReLU: {lit}`x` if {lit}`x >= 0`, {lit}`alpha * x` otherwise. -/
 def leakyRelu {s : List Nat} {d : DType} (t : StaticTensor s d) (alpha : Float32 := 0.01)
     : TensorM (StaticTensor s d) := do
   let zero ← TUOp.const d 0.0
@@ -405,7 +405,7 @@ def leakyRelu {s : List Nat} {d : DType} (t : StaticTensor s d) (alpha : Float32
   let out ← TUOp.where_ isNeg negOut t.tuop
   pure (ofTUCastShapeDType out s d t.requiresGrad)
 
-/-- ELU: x if x >= 0, alpha * (exp(x) - 1) otherwise. -/
+/-- ELU: {lit}`x` if {lit}`x >= 0`, {lit}`alpha * (exp(x) - 1)` otherwise. -/
 def elu {s : List Nat} {d : DType} (t : StaticTensor s d) (alpha : Float32 := 1.0)
     : TensorM (StaticTensor s d) := do
   let zero ← TUOp.const d 0.0
@@ -424,7 +424,7 @@ def logSigmoid {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (Stat
   let sig ← sigmoid t
   log sig
 
-/-- Clamp values to [lo, hi]. -/
+/-- Clamp values to {lit}`[lo, hi]`. -/
 def clamp {s : List Nat} {d : DType} (t : StaticTensor s d) (lo hi : Float32) : TensorM (StaticTensor s d) := do
   let loConst ← TUOp.const d lo
   let hiConst ← TUOp.const d hi
@@ -434,11 +434,11 @@ def clamp {s : List Nat} {d : DType} (t : StaticTensor s d) (lo hi : Float32) : 
   let clipped ← TUOp.where_ above hiConst clippedLo
   pure (ofTUCastShapeDType clipped s d t.requiresGrad)
 
-/-- Clip values to [lo, hi]. Alias for clamp. -/
+/-- Clip values to {lit}`[lo, hi]`. Alias for clamp. -/
 def clip {s : List Nat} {d : DType} (t : StaticTensor s d) (lo hi : Float32) : TensorM (StaticTensor s d) :=
   clamp t lo hi
 
-/-- Hardtanh clamps values to [minVal, maxVal]. -/
+/-- Hardtanh clamps values to {lit}`[minVal, maxVal]`. -/
 def hardtanh {s : List Nat} {d : DType} (t : StaticTensor s d) (minVal : Float32 := -1.0) (maxVal : Float32 := 1.0)
     : TensorM (StaticTensor s d) := do
   clamp t minVal maxVal
@@ -545,6 +545,35 @@ def oneHotF32 {batch numClasses : Nat}
   let out ← TUOp.where_ cmp one zero
   pure (ofTUCast out [batch, numClasses] false)
 
+private def classShape (numClasses offset : Nat) : Shape :=
+  [numClasses] ++ List.replicate offset 1
+
+private def indexSelectOut (s idx : Shape) (dim : Nat) : Shape :=
+  s.take dim ++ idx ++ s.drop (dim + 1)
+
+private def zeroScalar (d : DType) : TensorM (StaticTensor [] d) := do
+  let v ← TUOp.const d 0.0
+  pure (ofTU v false)
+
+/-- One-hot encoding along a dimension for int32 indices (boolean mask). -/
+def oneHotAlongDim {s : Shape}
+    (indices : StaticTensor s .int32)
+    (numClasses : Nat)
+    (dim : Nat := s.length - 1)
+    : TensorM (StaticTensor (Shape.broadcastOut s (classShape numClasses (s.length - dim - 1))) .bool) := do
+  let actualShape := indices.uop.shape
+  let rank := actualShape.length
+  if dim >= rank then
+    panic! s!"oneHotAlongDim: dim {dim} out of bounds for rank {rank}"
+  else
+    pure ()
+  let offset := rank - dim - 1
+  let classes ← Tensor.arange numClasses (dtype := .int32)
+  let classesR ← reshape classes (classShape numClasses offset)
+  let cmp ← TUOp.cmpeq indices.tuop classesR.tuop
+  let outShape := Shape.broadcastOut s (classShape numClasses (s.length - dim - 1))
+  pure (ofTUCast cmp outShape false)
+
 /-- Gather along the last axis using class indices (float32). -/
 def gatherLastF32 {batch numClasses : Nat}
     (x : StaticTensor [batch, numClasses] .float32)
@@ -561,6 +590,39 @@ def gatherLast {batch numClasses : Nat}
     : TensorM (StaticTensor [batch] .float32) := do
   let targetsF ← cast targets .float32
   gatherLastF32 x targetsF
+
+/-- Index select along an axis using one-hot + where + sum (tinygrad-style). -/
+def indexSelect {s idxShape : Shape} {d : DType}
+    (x : StaticTensor s d)
+    (dim : Nat)
+    (indices : StaticTensor idxShape .int32)
+    : TensorM (StaticTensor (indexSelectOut s idxShape dim) d) := do
+  let xShape := x.uop.shape
+  let idxShape0 := indices.uop.shape
+  let rank := xShape.length
+  if dim >= rank then
+    panic! s!"indexSelect: dim {dim} out of bounds for rank {rank}"
+  else
+    pure ()
+  let preShape := xShape.take dim
+  let suffix := xShape.drop dim
+  match suffix with
+  | [] => panic! "indexSelect: empty suffix"
+  | classDim :: suffixTail => do
+    let idxRank := idxShape0.length
+    let preReduceShape := preShape ++ idxShape0 ++ (classDim :: suffixTail)
+    let iReshapeShape := idxShape0 ++ List.replicate (rank - dim) 1
+    let indicesR ← reshape indices iReshapeShape
+    let indicesE ← expand indicesR preReduceShape
+    let axis := dim + idxRank
+    let mask ← oneHotAlongDim indicesE classDim axis
+    let xReshapeShape := preShape ++ List.replicate idxRank 1 ++ (classDim :: suffixTail)
+    let xReshaped ← reshape x xReshapeShape
+    let zero ← zeroScalar d
+    let masked ← where_ mask xReshaped zero
+    let out ← sumAxis masked axis false
+    let outShape := indexSelectOut s idxShape dim
+    pure (ofTUCast out.tuop outShape x.requiresGrad)
 
 def scatterLastF32 {batch numClasses : Nat}
     (values : StaticTensor [batch] .float32)
@@ -651,7 +713,7 @@ def argmin {batch n : Nat} {d : DType} (t : StaticTensor [batch, n] d)
   let negT ← neg tF
   argmaxF32 negT
 
-/-- Scalar multiplication: t * scalar -/
+/-- Scalar multiplication: {lit}`t * scalar`. -/
 def scale {s : List Nat} {d : DType} (t : StaticTensor s d) (scalar : Float32)
     : TensorM (StaticTensor s d) := do
   let scalarUop ← TUOp.const d scalar
@@ -666,7 +728,7 @@ def addScalar {s : List Nat} {d : DType} (t : StaticTensor s d) (scalar : Float3
   pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- Cross-entropy loss with log-softmax
-    logits: [batch, numClasses], targets: [batch] (class indices as floats)
+    logits: {lit}`[batch, numClasses]`, targets: {lit}`[batch]` (class indices as floats)
     Returns scalar loss -/
 def crossEntropyLoss {batch numClasses : Nat}
     (logits : StaticTensor [batch, numClasses] .float32)
@@ -678,8 +740,8 @@ def crossEntropyLoss {batch numClasses : Nat}
   mean negPicked
 
 /-- Cross-entropy loss with one-hot targets.
-    logits: [batch, numClasses], targets: [batch, numClasses] (one-hot)
-    Returns scalar loss: mean over batch of -sum(target * log_softmax(logits)) -/
+    logits: {lit}`[batch, numClasses]`, targets: {lit}`[batch, numClasses]` (one-hot)
+    Returns scalar loss: mean over batch of {lit}`-sum(target * log_softmax(logits))` -/
 def crossEntropyOneHot {batch numClasses : Nat} {d : DType}
     (logits : StaticTensor [batch, numClasses] d)
     (targets : StaticTensor [batch, numClasses] d)
@@ -691,9 +753,9 @@ def crossEntropyOneHot {batch numClasses : Nat} {d : DType}
   let negSum ← neg sumC
   mean negSum
 
-/-- Negative log likelihood loss (assumes log_softmax input)
-    log_probs: [batch, numClasses], already log-softmax'd
-    target_indices: [batch] containing class indices
+/-- Negative log likelihood loss (assumes {lit}`log_softmax` input)
+    {lit}`log_probs`: {lit}`[batch, numClasses]`, already log-softmax'd
+    {lit}`target_indices`: {lit}`[batch]` containing class indices
     For MVP: averages all log probs (placeholder until gather/index support) -/
 def nllLoss {batch numClasses : Nat}
     (logProbs : StaticTensor [batch, numClasses] .float32)
@@ -720,7 +782,7 @@ def smoothL1Loss {s : List Nat} (pred target : StaticTensor s .float32) (beta : 
   let outT : StaticTensor s .float32 := ofTUCastShapeDType out s .float32 (pred.requiresGrad || target.requiresGrad)
   mean outT
 
-/-- Binary cross-entropy loss (expects probabilities in [0, 1]). -/
+/-- Binary cross-entropy loss (expects probabilities in {lit}`[0, 1]`). -/
 def binaryCrossEntropy {s : List Nat}
     (pred target : StaticTensor s .float32) (eps : Float32 := 1.0e-7)
     : TensorM (Scalar .float32) := do
@@ -763,7 +825,7 @@ def mseLoss {s : List Nat} {d : DType}
   let sq ← mul diff diff
   mean sq
 
-/-- Matrix multiplication: [m, k] @ [k, n] -> [m, n] -/
+/-- Matrix multiplication: {lit}`[m, k] @ [k, n] -> [m, n]`. -/
 def matmul {m k n : Nat} {d : DType}
     (a : Matrix m k d) (b : Matrix k n d)
     : TensorM (Matrix m n d) := do
@@ -771,13 +833,13 @@ def matmul {m k n : Nat} {d : DType}
   let outUop := TUOp.castDType outUop d
   pure (ofTUCast outUop [m, n] (a.requiresGrad || b.requiresGrad))
 
-/-- Fully-connected (linear) layer: X @ W -> [batch, out]. -/
+/-- Fully-connected (linear) layer: {lit}`X @ W -> [batch, out]`. -/
 def linear {batch inDim outDim : Nat} {d : DType}
     (x : Matrix batch inDim d) (w : Matrix inDim outDim d)
     : TensorM (Matrix batch outDim d) := do
   matmul x w
 
-/-- Fully-connected layer with bias: X @ W + b (broadcasted over batch). -/
+/-- Fully-connected layer with bias: {lit}`X @ W + b` (broadcasted over batch). -/
 def linearBias {batch inDim outDim : Nat} {d : DType}
     (x : Matrix batch inDim d) (w : Matrix inDim outDim d) (b : Vector outDim d)
     : TensorM (Matrix batch outDim d) := do
@@ -786,7 +848,7 @@ def linearBias {batch inDim outDim : Nat} {d : DType}
   pure { uop := yb.uop, h_shape := sorry_proof, requiresGrad := yb.requiresGrad }
 
 /-- Batched matrix multiplication with broadcast on the batch dim:
-    [b1, m, k] @ [b2, k, n] -> [max b1 b2, m, n]. -/
+    {lit}`[b1, m, k] @ [b2, k, n] -> [max b1 b2, m, n]`. -/
 def bmatmul {b1 b2 m k n : Nat} {d : DType}
     (a : BMatrix b1 m k d) (b : BMatrix b2 k n d)
     : TensorM (BMatrix (Nat.max b1 b2) m n d) := do
@@ -798,8 +860,8 @@ def bmatmul {b1 b2 m k n : Nat} {d : DType}
 -- Initialization
 -- ============================================================================
 
-/-- Generate uniform random tensor in [low, high) range.
-    Uses: rand * (high - low) + low -/
+/-- Generate uniform random tensor in {lit}`[low, high)` range.
+    Uses: {lit}`rand * (high - low) + low` -/
 def uniformInit (shape : Shape) (dt : DType) (low high : Float32) (seed : Nat)
     : TensorM (StaticTensor shape dt) := do
   -- rand produces [0, 1)
@@ -853,8 +915,8 @@ def avgPool2dPlaceholder {batch cin h w hOut wOut : Nat} {d : DType}
   pure (ofTU out x.requiresGrad)
 
 /-- Pad 1D tensor with symmetric padding on W dimension.
-    Input:  [batch, channels, width]
-    Output: [batch, channels, width + 2*pad] -/
+    Input:  {lit}`[batch, channels, width]`
+    Output: {lit}`[batch, channels, width + 2*pad]` -/
 def pad1d {batch cin w : Nat} {d : DType}
     (x : StaticTensor [batch, cin, w] d)
     (padW : Nat)
@@ -864,8 +926,8 @@ def pad1d {batch cin w : Nat} {d : DType}
   pure { uop := result.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
 
 /-- Pad 2D tensor with symmetric padding on H and W dimensions.
-    Input:  [batch, channels, height, width]
-    Output: [batch, channels, height + 2*pad, width + 2*pad] -/
+    Input:  {lit}`[batch, channels, height, width]`
+    Output: {lit}`[batch, channels, height + 2*pad, width + 2*pad]` -/
 def pad2d {batch cin h w : Nat} {d : DType}
     (x : StaticTensor [batch, cin, h, w] d)
     (padH padW : Nat)
@@ -875,8 +937,8 @@ def pad2d {batch cin h w : Nat} {d : DType}
   pure { uop := result.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
 
 /-- Max pooling 2D operation using pool/im2col + reduce.
-    Input:  [batch, channels, height, width]
-    Output: [batch, channels, outHeight, outWidth] -/
+    Input:  {lit}`[batch, channels, height, width]`
+    Output: {lit}`[batch, channels, outHeight, outWidth]` -/
 def maxPool2d {batch cin h w : Nat} {d : DType}
     (x : StaticTensor [batch, cin, h, w] d)
     (kernelSize : Nat)
@@ -905,8 +967,8 @@ def maxPool2d {batch cin h w : Nat} {d : DType}
   pure (ofTUCast reduced2 (Shape.pool2dShape [batch, cin, h, w] kernelSize padding stride) x.requiresGrad)
 
 /-- Average pooling 2D operation using pool/im2col + reduce.
-    Input:  [batch, channels, height, width]
-    Output: [batch, channels, outHeight, outWidth] -/
+    Input:  {lit}`[batch, channels, height, width]`
+    Output: {lit}`[batch, channels, outHeight, outWidth]` -/
 def avgPool2d {batch cin h w : Nat} {d : DType}
     (x : StaticTensor [batch, cin, h, w] d)
     (kernelSize : Nat)
@@ -940,9 +1002,9 @@ def avgPool2d {batch cin h w : Nat} {d : DType}
   pure (ofTUCast result (Shape.pool2dShape [batch, cin, h, w] kernelSize padding stride) x.requiresGrad)
 
 /-- Conv1d operation using pool/im2col + matmul.
-    Input:  [batch, inChannels, width]
-    Weight: [outChannels, inChannels, kernelW]
-    Output: [batch, outChannels, outWidth] -/
+    Input:  {lit}`[batch, inChannels, width]`
+    Weight: {lit}`[outChannels, inChannels, kernelW]`
+    Output: {lit}`[batch, outChannels, outWidth]` -/
 def conv1d {batch cin cout w kW : Nat} {d : DType}
     (x : StaticTensor [batch, cin, w] d)
     (weight : StaticTensor [cout, cin, kW] d)
@@ -1004,18 +1066,18 @@ def conv1d {batch cin cout w kW : Nat} {d : DType}
   pure { uop := finalCast.uop, requiresGrad := reqGrad, h_shape := sorry_proof }
 
 /-- Conv2d operation using pool/im2col + matmul.
-    Input:  [batch, inChannels, height, width]
-    Weight: [outChannels, inChannels, kernelH, kernelW]
-    Output: [batch, outChannels, outHeight, outWidth]
+    Input:  {lit}`[batch, inChannels, height, width]`
+    Weight: {lit}`[outChannels, inChannels, kernelH, kernelW]`
+    Output: {lit}`[batch, outChannels, outHeight, outWidth]`
 
     Algorithm:
     1. Pad input if needed
-    2. Apply pool/im2col to get patches: [batch, cin, hOut, wOut, kH, kW]
-    3. Reshape for matmul: patches -> [batch*hOut*wOut, cin*kH*kW]
-    4. Reshape weight: [cout, cin*kH*kW]
-    5. Matmul: [batch*hOut*wOut, cin*kH*kW] @ [cin*kH*kW, cout]^T = [batch*hOut*wOut, cout]
-    6. Reshape to [batch, hOut, wOut, cout]
-    7. Permute to [batch, cout, hOut, wOut]
+    2. Apply pool/im2col to get patches: {lit}`[batch, cin, hOut, wOut, kH, kW]`
+    3. Reshape for matmul: patches -> {lit}`[batch*hOut*wOut, cin*kH*kW]`
+    4. Reshape weight: {lit}`[cout, cin*kH*kW]`
+    5. Matmul: {lit}`[batch*hOut*wOut, cin*kH*kW] @ [cin*kH*kW, cout]^T = [batch*hOut*wOut, cout]`
+    6. Reshape to {lit}`[batch, hOut, wOut, cout]`
+    7. Permute to {lit}`[batch, cout, hOut, wOut]`
     8. Add bias if present -/
 def conv2d {batch cin cout h w kH kW : Nat} {d : DType}
     (x : StaticTensor [batch, cin, h, w] d)
@@ -1083,16 +1145,16 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType}
 /-- Depthwise 2D convolution: each input channel is convolved with its own filter.
     This is a specialized case of grouped convolution where groups = cin = cout.
 
-    Weight shape: [cin, 1, kH, kW] (each channel has one 1×kH×kW filter)
+    Weight shape: {lit}`[cin, 1, kH, kW]` (each channel has one {lit}`1×kH×kW` filter)
 
     Implementation using batched matmul (fast, like Python tinygrad):
-    1. Pool to get patches: [batch, cin, hOut, wOut, kH, kW]
-    2. Reshape patches: [batch, cin, hOut*wOut, kH*kW]
-    3. Reshape weight: [cin, 1, kH, kW] -> [1, cin, kH*kW, 1]
-    4. Batched matmul: [batch, cin, hOut*wOut, kH*kW] @ [1, cin, kH*kW, 1]
+    1. Pool to get patches: {lit}`[batch, cin, hOut, wOut, kH, kW]`
+    2. Reshape patches: {lit}`[batch, cin, hOut*wOut, kH*kW]`
+    3. Reshape weight: {lit}`[cin, 1, kH, kW] -> [1, cin, kH*kW, 1]`
+    4. Batched matmul: {lit}`[batch, cin, hOut*wOut, kH*kW] @ [1, cin, kH*kW, 1]`
        -> broadcasts batch dims, performs matmul for each (batch, cin)
-       -> result: [batch, cin, hOut*wOut, 1]
-    5. Squeeze and reshape to [batch, cin, hOut, wOut]
+       -> result: {lit}`[batch, cin, hOut*wOut, 1]`
+    5. Squeeze and reshape to {lit}`[batch, cin, hOut, wOut]`
 
     This uses a single batched CONTRACT operation instead of expand+multiply+sum.
 -/

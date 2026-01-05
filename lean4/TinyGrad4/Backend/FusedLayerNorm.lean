@@ -77,13 +77,13 @@ end Plan
 
     We look for:
     1. Root: ADD (bias) or MUL (scale) or FDIV (normalize)
-    2. FDIV: x_centered / sqrt(var + eps)
+    2. FDIV: {lit}`x_centered` / sqrt(var + eps)
     3. SQRT: sqrt(var + eps)
     4. ADD: var + eps (eps is a small constant)
-    5. REDUCE_AXIS with .ADD op: mean of squares
-    6. MUL: x_centered * x_centered (squaring)
+    5. {lit}`REDUCE_AXIS` with .ADD op: mean of squares
+    6. MUL: {lit}`x_centered * x_centered` (squaring)
     7. SUB: x - mean (centering)
-    8. REDUCE_AXIS with .ADD op: mean of x
+    8. {lit}`REDUCE_AXIS` with .ADD op: mean of x
 -/
 def detect? (u : UOp) (keep : UOpIdSet) (_refCnt : HashMap UOpId Nat) : Option Plan := do
   -- Start from potential output

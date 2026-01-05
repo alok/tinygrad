@@ -10,7 +10,7 @@ open Std
 # Fused SGD Pattern Matching
 
 Matches the SGD update pattern:
-  param_new = param - lr * grad
+  {lit}`param_new = param - lr * grad`
 
 In UOp terms:
   SUB
@@ -54,7 +54,7 @@ private def getScalarF32 (u : UOp) : Option Float :=
 
 /--
 Pattern match for SGD update:
-  param - lr * grad
+  {lit}`param - lr * grad`
 where lr is a scalar constant.
 -/
 def compile (u : UOp) (keep : UOpIdSet) (refCnt : HashMap UOpId Nat) : Option Plan := Id.run do

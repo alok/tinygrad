@@ -150,7 +150,7 @@ def metalCachePrintStats : IO Unit := do
 
 /-! ## Synchronous GPU Matmul -/
 
-/-- Execute matmul on GPU: C[m,n] = A[m,k] @ B[k,n]
+/-- Execute matmul on GPU: {lit}`C[m,n] = A[m,k] @ B[k,n]`
     Takes float32 ByteArrays, returns float32 ByteArray.
     Falls back to zeros on GPU error.
 

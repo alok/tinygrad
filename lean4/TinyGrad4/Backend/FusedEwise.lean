@@ -5,50 +5,13 @@ import TinyGrad4.Backend.ShapeTracker
 import Std.Data.HashMap
 
 /-!
-# Fused Elementwise Kernel Compiler
+Fused elementwise kernel compiler.
 
-Compiles elementwise UOp expressions into execution plans with specialized kernel dispatch.
+Compiles elementwise UOp expressions into execution plans and selects a native kernel.
+Pattern detection happens in Lean via {lit}`detectKernel`, and {lit}`Interpreter.evalFusedEwise`
+dispatches to a native kernel based on {lit}`plan.kernel`.
 
-## Architecture: Lean-Driven Dispatch
-
-Pattern detection happens entirely in Lean via `detectKernel`, not in C. The `Kernel` inductive
-classifies bytecode patterns at compile time, and `Interpreter.evalFusedEwise` dispatches to
-the appropriate native kernel based on `plan.kernel`.
-
-### Why Lean-side detection?
-
-1. **Extensibility**: Adding new kernel patterns requires only Lean changes (add to `Kernel`
-   inductive + `detectKernel` match). No C code growth.
-2. **Type safety**: Pattern classification is checked by Lean's type system.
-3. **Maintainability**: All fusion logic lives in one place (this module).
-
-### Performance Trade-offs (measured 2024-12-25)
-
-Moving pattern detection from C to Lean adds ~8μs overhead per kernel call due to Lean match
-dispatch + FFI boundary crossing. Benchmark on 10K f32 elements:
-
-| Kernel | C-side detection | Lean-side detection | Delta |
-|--------|------------------|---------------------|-------|
-| neg    | 14.2μs           | 22.6μs              | +59%  |
-| add    | 18.7μs           | 24.7μs              | +32%  |
-
-For small tensors (<50K elements), this overhead is noticeable. For larger tensors, it becomes
-negligible relative to compute time. The trade-off favors maintainability over micro-optimization.
-
-### Future optimizations
-
-1. **Bundled dispatch**: Pass kernel enum to single C dispatch function (fewer FFI crossings)
-2. **Dependent kernel types**: `Kernel.unary` / `Kernel.binary` carrying input refs as fields
-3. **Pre-allocated outputs**: Avoid allocation in hot path
-
-## Bytecode Format
-
-Instructions are 64-bit: `(imm << 8) | opcode`. Stack-based evaluation.
-
-- `PUSH imm`: Push leaf[imm] value onto stack
-- Unary ops (NEG, SQRT, etc.): Pop 1, push result
-- Binary ops (ADD, MUL, etc.): Pop 2, push result
-- Ternary ops (WHERE, MULACC): Pop 3, push result
+Bytecode instructions are 64-bit: {lit}`(imm << 8) | opcode`, evaluated with a stack machine.
 -/
 
 namespace TinyGrad4.Backend.FusedEwise
@@ -108,7 +71,7 @@ end Plan
 
 /-! ## Public instruction builders for tests -/
 
-/-- Create LOAD instruction: push leaf[idx] onto stack -/
+/-- Create LOAD instruction: push {lit}`leaf[idx]` onto stack. -/
 def instLoad (idx : Nat) : UInt64 := UInt64.ofNat idx <<< 8
 
 /-- Create binary op instruction (ADD=0, SUB=1, MUL=2, DIV=3, MAX=4) -/

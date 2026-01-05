@@ -15,7 +15,7 @@ This reduces kernel launch overhead by:
 
 ## Usage
 
-```lean
+```
 -- Create a JIT-wrapped function
 let jit ← JIT.create fun inputs => do
   let a ← inputs[0]!

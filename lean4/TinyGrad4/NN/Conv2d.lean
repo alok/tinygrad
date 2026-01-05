@@ -10,14 +10,14 @@ Applies a 2D convolution over an input signal composed of several input planes.
 Mirrors tinygrad's `nn.Conv2d` with Kaiming uniform initialization.
 
 ## Shape semantics
-- Input:  [batch, in_channels, height, width]
-- Weight: [out_channels, in_channels, kernel_height, kernel_width]
-- Bias:   [out_channels]
-- Output: [batch, out_channels, out_height, out_width]
+- Input:  {lit}`[batch, in_channels, height, width]`
+- Weight: {lit}`[out_channels, in_channels, kernel_height, kernel_width]`
+- Bias:   {lit}`[out_channels]`
+- Output: {lit}`[batch, out_channels, out_height, out_width]`
 
 where:
-  out_height = (height + 2*padding - dilation*(kernel_height-1) - 1) / stride + 1
-  out_width  = (width + 2*padding - dilation*(kernel_width-1) - 1) / stride + 1
+  {lit}`out_height = (height + 2*padding - dilation*(kernel_height-1) - 1) / stride + 1`
+  {lit}`out_width  = (width + 2*padding - dilation*(kernel_width-1) - 1) / stride + 1`
 -/
 
 namespace TinyGrad4.NN
@@ -27,9 +27,9 @@ open StaticTensor
 
 /-- Conv2d layer parameters -/
 structure Conv2dParams (inChannels outChannels kernelH kernelW : Nat) (dt : DType) where
-  /-- Weight tensor [outChannels, inChannels, kernelH, kernelW] -/
+  /-- Weight tensor {lit}`[outChannels, inChannels, kernelH, kernelW]`. -/
   weight : StaticTensor [outChannels, inChannels, kernelH, kernelW] dt
-  /-- Optional bias [outChannels] -/
+  /-- Optional bias {lit}`[outChannels]`. -/
   bias : Option (Vector outChannels dt)
   /-- Padding (same on all sides) -/
   padding : Nat
@@ -41,7 +41,7 @@ structure Conv2dParams (inChannels outChannels kernelH kernelW : Nat) (dt : DTyp
 namespace Conv2dParams
 
 /-- Create Conv2d layer with Kaiming uniform initialization.
-    bound = 1 / sqrt(in_channels * kernel_h * kernel_w), matching tinygrad's nn.Conv2d -/
+    bound = 1 / sqrt({lit}`in_channels * kernel_h * kernel_w`), matching tinygrad's nn.Conv2d -/
 def create (inChannels outChannels : Nat) (kernelSize : Nat := 3)
     (dt : DType := .float32) (useBias : Bool := true)
     (padding : Nat := 0) (stride : Nat := 1) (dilation : Nat := 1)
@@ -81,8 +81,8 @@ def createAsym (inChannels outChannels kernelH kernelW : Nat)
   pure { weight, bias, padding, stride, dilation }
 
 /-- Forward pass: apply convolution
-    Input:  [batch, inChannels, height, width]
-    Output: [batch, outChannels, outHeight, outWidth] -/
+    Input:  {lit}`[batch, inChannels, height, width]`
+    Output: {lit}`[batch, outChannels, outHeight, outWidth]` -/
 def forward {batch height width : Nat}
     (params : Conv2dParams inChannels outChannels kernelH kernelW dt)
     (x : StaticTensor [batch, inChannels, height, width] dt)

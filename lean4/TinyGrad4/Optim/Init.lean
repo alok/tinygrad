@@ -25,7 +25,7 @@ def zeros (shape : Shape) (dtype : DType := .float32) : TensorM (StaticTensor sh
 def ones (shape : Shape) (dtype : DType := .float32) : TensorM (StaticTensor shape dtype) :=
   full shape dtype 1.0
 
-/-- Uniform initializer in [0, 1). -/
+/-- Uniform initializer in {lit}`[0, 1)`. -/
 def uniform (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0) :
     TensorM (StaticTensor shape dtype) :=
   Tensor.rand shape dtype seed

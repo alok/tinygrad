@@ -10,13 +10,13 @@ Applies a 1D convolution over an input signal composed of several input planes.
 Mirrors tinygrad's `nn.Conv1d` with Kaiming uniform initialization.
 
 ## Shape semantics
-- Input:  [batch, in_channels, width]
-- Weight: [out_channels, in_channels, kernel_width]
-- Bias:   [out_channels]
-- Output: [batch, out_channels, out_width]
+- Input:  {lit}`[batch, in_channels, width]`
+- Weight: {lit}`[out_channels, in_channels, kernel_width]`
+- Bias:   {lit}`[out_channels]`
+- Output: {lit}`[batch, out_channels, out_width]`
 
 where:
-  out_width = (width + 2*padding - dilation*(kernel_width-1) - 1) / stride + 1
+  {lit}`out_width = (width + 2*padding - dilation*(kernel_width-1) - 1) / stride + 1`
 -/
 
 namespace TinyGrad4.NN
@@ -26,9 +26,9 @@ open StaticTensor
 
 /-- Conv1d layer parameters -/
 structure Conv1dParams (inChannels outChannels kernelW : Nat) (dt : DType) where
-  /-- Weight tensor [outChannels, inChannels, kernelW] -/
+  /-- Weight tensor {lit}`[outChannels, inChannels, kernelW]`. -/
   weight : StaticTensor [outChannels, inChannels, kernelW] dt
-  /-- Optional bias [outChannels] -/
+  /-- Optional bias {lit}`[outChannels]`. -/
   bias : Option (Vector outChannels dt)
   /-- Padding (same on both sides) -/
   padding : Nat
@@ -40,7 +40,7 @@ structure Conv1dParams (inChannels outChannels kernelW : Nat) (dt : DType) where
 namespace Conv1dParams
 
 /-- Create Conv1d layer with Kaiming uniform initialization.
-    bound = 1 / sqrt(in_channels * kernel_w), matching tinygrad's nn.Conv1d -/
+    bound = 1 / sqrt({lit}`in_channels * kernel_w`), matching tinygrad's nn.Conv1d -/
 def create (inChannels outChannels : Nat) (kernelSize : Nat := 3)
     (dt : DType := .float32) (useBias : Bool := true)
     (padding : Nat := 0) (stride : Nat := 1) (dilation : Nat := 1)
@@ -59,8 +59,8 @@ def create (inChannels outChannels : Nat) (kernelSize : Nat := 3)
   pure { weight, bias, padding, stride, dilation }
 
 /-- Forward pass: apply convolution
-    Input:  [batch, inChannels, width]
-    Output: [batch, outChannels, outWidth] -/
+    Input:  {lit}`[batch, inChannels, width]`
+    Output: {lit}`[batch, outChannels, outWidth]` -/
 def forward {batch width : Nat}
     (params : Conv1dParams inChannels outChannels kernelW dt)
     (x : StaticTensor [batch, inChannels, width] dt)

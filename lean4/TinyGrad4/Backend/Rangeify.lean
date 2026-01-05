@@ -149,7 +149,7 @@ def RangeContext.newRange (ctx : RangeContext) (size : Nat) (axisType : AxisType
 /-! ## Movement Op Application -/
 
 /-- Apply SHRINK movement op to ranges.
-    SHRINK[(start, end)] shifts the range by start. -/
+    {lit}`SHRINK[(start, end)]` shifts the range by start. -/
 def applyShrink (_inShape : Shape) (arg : List (Nat × Nat)) (ranges : Array IndexExpr)
     : Array IndexExpr := Id.run do
   let mut result : Array IndexExpr := #[]
@@ -163,7 +163,7 @@ def applyShrink (_inShape : Shape) (arg : List (Nat × Nat)) (ranges : Array Ind
   return result
 
 /-- Apply PERMUTE movement op to ranges.
-    PERMUTE[p] reorders the ranges by inverse permutation. -/
+    {lit}`PERMUTE[p]` reorders the ranges by inverse permutation. -/
 def applyPermute (arg : List Nat) (ranges : Array IndexExpr) : Array IndexExpr := Id.run do
   -- Compute inverse permutation (argsort)
   -- For each position i, find j such that arg[j] = i
@@ -178,7 +178,7 @@ def applyPermute (arg : List Nat) (ranges : Array IndexExpr) : Array IndexExpr :
   invPerm.map fun i => ranges.getD i .invalid
 
 /-- Apply FLIP movement op to ranges.
-    FLIP[f] reverses range r_i if f[i] is true: (size-1) - r_i -/
+    {lit}`FLIP[f]` reverses range {lit}`r_i` if {lit}`f[i]` is true: {lit}`(size-1) - r_i` -/
 def applyFlip (inShape : Shape) (arg : List Bool) (ranges : Array IndexExpr) : Array IndexExpr := Id.run do
   let mut result : Array IndexExpr := #[]
   for i in [:ranges.size] do
@@ -192,7 +192,7 @@ def applyFlip (inShape : Shape) (arg : List Bool) (ranges : Array IndexExpr) : A
   return result
 
 /-- Apply EXPAND movement op to ranges.
-    EXPAND[outShape] zeros out ranges for expanded dimensions (in_size=1, out_size>1). -/
+    {lit}`EXPAND[outShape]` zeros out ranges for expanded dimensions ({lit}`in_size=1`, {lit}`out_size>1`). -/
 def applyExpand (inShape : Shape) (arg : Shape) (ranges : Array IndexExpr) : Array IndexExpr := Id.run do
   let mut result : Array IndexExpr := #[]
   for i in [:ranges.size] do
@@ -206,7 +206,7 @@ def applyExpand (inShape : Shape) (arg : Shape) (ranges : Array IndexExpr) : Arr
   return result
 
 /-- Apply PAD movement op to ranges.
-    PAD[(start, end)] shifts ranges and adds validity conditions. -/
+    {lit}`PAD[(start, end)]` shifts ranges and adds validity conditions. -/
 def applyPad (_inShape : Shape) (arg : List (Nat × Nat)) (ranges : Array IndexExpr)
     : Array IndexExpr := Id.run do
   let mut result : Array IndexExpr := #[]
@@ -221,7 +221,7 @@ def applyPad (_inShape : Shape) (arg : List (Nat × Nat)) (ranges : Array IndexE
       result := result.push (IndexExpr.add r (.const (-(Int.ofNat padStart))))
   return result
 
-/-- Compute strides from shape (e.g., [2,3,4] → [12,4,1]) -/
+/-- Compute strides from shape (e.g., {lit}`[2,3,4] → [12,4,1]`). -/
 def computeStrides (shape : Shape) : List Nat := Id.run do
   let mut strides : List Nat := []
   let mut acc := 1

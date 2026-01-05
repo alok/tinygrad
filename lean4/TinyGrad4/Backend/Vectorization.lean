@@ -14,12 +14,10 @@ Principled, composable vectorization for GPU kernels.
 
 ## Usage
 
-```lean
--- Choose optimal vectorization for a kernel
-let config := VectorConfig.optimal dtype size
+```
+let config := VectorConfig.optimal backend dtype size
 let renderer := vectorizedRenderer baseRenderer config
 
--- Generate vectorized load/store
 let load := config.renderLoad "CUDA" "data" "idx"
 -- => "*(float4*)(data + idx)"
 ```
@@ -31,10 +29,14 @@ namespace TinyGrad4.Backend.Vectorization
 
 /-- Supported vector widths for SIMD operations -/
 inductive VectorWidth where
-  | w1 : VectorWidth  -- Scalar (fallback)
-  | w2 : VectorWidth  -- 2-wide (half4 on some GPUs)
-  | w4 : VectorWidth  -- 4-wide (optimal for most GPUs)
-  | w8 : VectorWidth  -- 8-wide (some AMD GPUs)
+  /-- Scalar width (fallback). -/
+  | w1 : VectorWidth
+  /-- 2-wide vector width (half4 on some GPUs). -/
+  | w2 : VectorWidth
+  /-- 4-wide vector width (optimal for most GPUs). -/
+  | w4 : VectorWidth
+  /-- 8-wide vector width (some AMD GPUs). -/
+  | w8 : VectorWidth
   deriving Repr, DecidableEq, Inhabited
 
 namespace VectorWidth
@@ -77,7 +79,7 @@ end VectorWidth
 /-- Proof that a size is aligned to a vector width (divisible) -/
 abbrev VectorAligned (w : VectorWidth) (n : Nat) : Prop := n % w.toNat = 0
 
-/-- VectorAligned is decidable, so native_decide works -/
+/-- VectorAligned is decidable, so `native_decide` works. -/
 instance (w : VectorWidth) (n : Nat) : Decidable (VectorAligned w n) :=
   inferInstanceAs (Decidable (n % w.toNat = 0))
 
@@ -101,8 +103,11 @@ def VectorWidth.component (w : VectorWidth) (i : Fin w.toNat) : String :=
 
 /-- Backend identifier for syntax selection -/
 inductive Backend where
+  /-- CUDA backend. -/
   | CUDA : Backend
+  /-- Metal backend. -/
   | Metal : Backend
+  /-- OpenCL backend. -/
   | OpenCL : Backend
   deriving Repr, DecidableEq
 

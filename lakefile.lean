@@ -11,6 +11,8 @@ package TinyGrad4 where
   leanOptions := #[
     ⟨`weak.linter.floatExplicit, false⟩,
     ⟨`weak.linter.useRawBuffer, true⟩,
+    ⟨`doc.verso, false⟩,
+    ⟨`linter.missingDocs, true⟩,
   ]
 
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
@@ -318,6 +320,10 @@ lean_exe metal_ewise_test where
 
 lean_exe mnist_gpu_bench where
   root := `TinyGrad4.Test.MNISTGPUBench
+  moreLinkArgs := metalLinkArgs
+
+lean_exe mnist_compiled_train where
+  root := `TinyGrad4.Test.MNISTCompiledTrain
   moreLinkArgs := metalLinkArgs
 
 lean_exe matmul_nan_debug where

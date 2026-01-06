@@ -35,3 +35,7 @@ import TinyGrad4.Optim.UOpOpt
 
 -- Tests are not imported here to avoid circular dependencies
 -- Run tests with: lake build TinyGrad4.Test.GradientCheck TinyGrad4.Test.MLP
+
+-- Experimental dependent type test (disabled due to type class issues)
+-- abbrev outType (keepdim:Bool) :Type:= if keepdim then  Int else String
+-- def prod (keepdim:Bool): outType keepdim :=if h: keepdim then (0 : outType keepdim) else "0"

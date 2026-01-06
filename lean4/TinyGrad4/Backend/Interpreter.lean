@@ -2412,9 +2412,53 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
   def evalMany (roots : List UOp) (env : Env) : HashMap UOpId RawBuffer := Id.run do
     evalCompiledRaw (compileMany roots) env
 
+  /-- IO-based schedule evaluation with GPU preference for gather/ewise (for evalManyCached) -/
+  private def evalCompiledRawIOInner (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) := do
+    let deps (u : UOp) : List UOpId := u.src.map (fun s => s.uid)
+
+    let mut refCnt : HashMap UOpId Nat := ∅
+    for u in c.nodes do
+      for sid in deps u do
+        refCnt := refCnt.insert sid (refCnt.getD sid 0 + 1)
+
+    let mut cache : HashMap UOpId RawBuffer := ∅
+    for item in c.schedule do
+      let u := item.ast
+      let v ←
+        match u.op with
+        | .KERNEL =>
+          match item.impl with
+          | some impl =>
+            match impl with
+            -- Use IO path for gather/ewise (GPU dispatch)
+            | .fusedGather plan => evalFusedGatherIO u plan env cache
+            | .fusedEwise plan => evalFusedEwiseIO u plan env cache
+            -- Use pure (CPU) path for others
+            | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
+            | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
+            | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
+            | .fusedContract plan => pure (evalFusedContract u plan env cache)
+            | .fusedSGD plan => pure (evalFusedSGD u plan env cache)
+            | .fusedLayerNorm _ => pure (evalNode u env cache)
+            | .fusedGELU _ => pure (evalNode u env cache)
+            | .node _ => pure (evalNode u env cache)
+          | none => pure (evalNode u env cache)
+        | _ => pure (evalNode u env cache)
+      cache := cache.insert u.uid v
+
+      for sid in deps u do
+        let cnt := refCnt.getD sid 0
+        if cnt > 0 then
+          let cnt' := cnt - 1
+          refCnt := refCnt.insert sid cnt'
+          if cnt' == 0 && !UOpIdSet.member c.keepIds sid then
+            cache := cache.erase sid
+
+    return cache
+
   def evalManyCached (roots : List UOp) (env : Env) : IO (HashMap UOpId RawBuffer) := do
     let compiled ← compileManyCached roots
-    pure (evalCompiledRaw compiled env)
+    evalCompiledRawIOInner compiled env
 
   def evalManyTimed (roots : List UOp) (env : Env) : IO (HashMap UOpId RawBuffer × Nat × Nat) := do
     let (compiled, compileNs) ← compileManyTimed roots

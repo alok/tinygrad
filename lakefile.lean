@@ -128,7 +128,7 @@ def cudaLinkArgs : Array String :=
       "-Wl,-rpath,/opt/cuda/targets/x86_64-linux/lib",
       "-Wl,-rpath,$ORIGIN",
       "-Wl,-rpath,$ORIGIN/../lib",
-      "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++"
+      "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++", "-ldl"
     ]
 
 package TinyGrad4 where

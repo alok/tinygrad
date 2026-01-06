@@ -3,6 +3,9 @@ import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Transform
 import TinyGrad4.Backend.Accelerate
 import TinyGrad4.Backend.Metal
+import TinyGrad4.Backend.Cuda
+import TinyGrad4.Backend.Interpreter
+import TinyGrad4.Tensor.Math
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Typed
 
@@ -36,6 +39,7 @@ let tensor ← mnist.toTensor batch [64, 1, 28, 28]
 namespace TinyGrad4.Data.MNISTRaw
 
 open TinyGrad4.Data
+open Interpreter
 
 /-- MNIST image buffer: raw bytes, uint8, shape [N, 784] or [N, 1, 28, 28]
     Uses ByteSlice for zero-copy - keeps reference to original file data. -/
@@ -274,6 +278,25 @@ def ByteSlice.sum (s : ByteSlice) : UInt64 := Id.run do
     total := total + (s.get! i).toUInt64
   total
 
+private def bytesFromUInt32 (v : UInt32) : Array UInt8 :=
+  let b0 : UInt8 := UInt8.ofNat (UInt32.toNat (v &&& 0xFF))
+  let b1 : UInt8 := UInt8.ofNat (UInt32.toNat ((v >>> 8) &&& 0xFF))
+  let b2 : UInt8 := UInt8.ofNat (UInt32.toNat ((v >>> 16) &&& 0xFF))
+  let b3 : UInt8 := UInt8.ofNat (UInt32.toNat ((v >>> 24) &&& 0xFF))
+  #[b0, b1, b2, b3]
+
+private def pushBytes (out : ByteArray) (bytes : Array UInt8) : ByteArray := Id.run do
+  let mut acc := out
+  for b in bytes do
+    acc := acc.push b
+  return acc
+
+private def packI32 (vals : Array Nat) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity (vals.size * 4)
+  for v in vals do
+    out := pushBytes out (bytesFromUInt32 (UInt32.ofNat v))
+  return out
+
 set_option linter.useRawBuffer false in
 /-- Comprehensive benchmark matching Python bench_data_loading.py -/
 def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
@@ -329,7 +352,7 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   IO.println s!"  Normalize to f32 + sum: {normalizeMedian} ms ({numBatches.toFloat * 1000.0 / normalizeMedian} batch/s)"
   IO.println s!"    total = {normalizeTotal}"
 
-  -- 3. Shuffle + batch - using RandKey from Dataset module
+  -- 3. Shuffle + batch (sum all bytes) - using RandKey from Dataset module
   let mut shuffleTimes : Array Nat := #[]
   let mut shuffleChecksum : UInt64 := 0
   for iter in [:iterations] do
@@ -342,15 +365,55 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
       -- Access shuffled samples
       for j in [:batchSize] do
         let idx := indices[i * batchSize + j]!
-        let px := mnist.images.getPixel idx 0  -- first pixel of each image
-        checksum := checksum + px.toUInt64
+        -- Sum all pixels for this image (matches numpy batch.sum)
+        for p in [:784] do
+          let px := mnist.images.getPixel idx p
+          checksum := checksum + px.toUInt64
     let stop ← IO.monoNanosNow
     shuffleTimes := shuffleTimes.push (stop - start)
     shuffleChecksum := checksum
 
   let shuffleMedian := (shuffleTimes[iterations / 2]!).toFloat / 1e6
-  IO.println s!"  Shuffle + batch (first pixel): {shuffleMedian} ms ({numBatches.toFloat * 1000.0 / shuffleMedian} batch/s)"
+  IO.println s!"  Shuffle + batch (sum all bytes): {shuffleMedian} ms ({numBatches.toFloat * 1000.0 / shuffleMedian} batch/s)"
   IO.println s!"    checksum = {shuffleChecksum}"
+
+  -- 3b. Shuffle + batch via indexSelect (tinygrad one-hot gather)
+  let (sumT, imgBuf, idxBuf) := runTensorM do
+    let img ← Tensor.buffer [mnist.images.numImages, 784] .uint8
+    let idx ← Tensor.buffer [batchSize] .int32
+    let gathered ← StaticTensor.indexSelect img 0 idx
+    let gatheredF ← StaticTensor.cast gathered .float32
+    let total ← StaticTensor.sum gatheredF
+    pure (total, img.uop, idx.uop)
+
+  let imgRaw : RawBuffer := { dtype := .uint8, data := mnist.images.data.toByteArray }
+  let baseEnv := setBuffer (∅ : Env) imgBuf imgRaw
+
+  let mut shuffleTGTimes : Array Nat := #[]
+  let mut shuffleTGTotal : Float := 0.0
+  for iter in [:iterations] do
+    let start ← IO.monoNanosNow
+    let key := RandKey.new (42 + iter)
+    let (indices, _) := key.shuffleIndices mnist.images.numImages
+    let mut total : Float := 0.0
+    for i in [:numBatches] do
+      let startIdx := i * batchSize
+      let endIdx := startIdx + batchSize
+      let idxSlice := indices.extract startIdx endIdx
+      let idxBytes := packI32 idxSlice
+      let idxRaw : RawBuffer := { dtype := .int32, data := idxBytes }
+      let env := setBuffer baseEnv idxBuf idxRaw
+      let out ← evalTensorCached sumT env
+      let vals := RawBuffer.toFloatArray out
+      let v := if vals.size == 0 then 0.0 else vals[0]!
+      total := total + v
+    let stop ← IO.monoNanosNow
+    shuffleTGTimes := shuffleTGTimes.push (stop - start)
+    shuffleTGTotal := total
+
+  let shuffleTGMedian := (shuffleTGTimes[iterations / 2]!).toFloat / 1e6
+  IO.println s!"  Shuffle + batch (indexSelect): {shuffleTGMedian} ms ({numBatches.toFloat * 1000.0 / shuffleTGMedian} batch/s)"
+  IO.println s!"    total = {shuffleTGTotal}"
 
   -- 4. Accelerate SIMD checksum
   IO.println ""
@@ -428,6 +491,32 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   IO.println s!"  Metal GPU normalize+matmul: {metalMedian} ms ({numBatches.toFloat * 1000.0 / metalMedian} batch/s)"
   IO.println s!"    output size = {metalOutputSize} bytes (expected {M * N * 4})"
 
+  -- 6b. CUDA GPU: normalize + matmul (if available)
+  IO.println ""
+  let cudaAvailable ← TinyGrad4.Backend.Cuda.isAvailable
+  IO.println s!"  CUDA GPU available: {cudaAvailable}"
+  let (cudaMedian?, cudaOutputSize?) ←
+    if !cudaAvailable then
+      pure (none, none)
+    else
+      let _ ← TinyGrad4.Backend.Cuda.setDevice 0
+      let mut cudaTimes : Array Nat := #[]
+      let mut cudaOutputSize : Nat := 0
+      for _ in [:iterations] do
+        let start ← IO.monoNanosNow
+        for i in [:numBatches] do
+          let batch := mnist.getBatch i batchSize
+          let normalized := TinyGrad4.Backend.Accel.normalizeU8ToF32
+            batch.images.parent batch.images.offset batch.images.length
+          let result := TinyGrad4.Backend.Cuda.cudaMatmulSync normalized wBytes M K N
+          cudaOutputSize := result.size
+        let stop ← IO.monoNanosNow
+        cudaTimes := cudaTimes.push (stop - start)
+      let cudaMedian := (cudaTimes[iterations / 2]!).toFloat / 1e6
+      IO.println s!"  CUDA GPU normalize+matmul: {cudaMedian} ms ({numBatches.toFloat * 1000.0 / cudaMedian} batch/s)"
+      IO.println s!"    output size = {cudaOutputSize} bytes (expected {M * N * 4})"
+      pure (some cudaMedian, some cudaOutputSize)
+
   IO.println ""
   IO.println "============================================================"
   IO.println "RESULTS SUMMARY"
@@ -441,6 +530,11 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   IO.println s!"Accel SIMD checksum                 {accelChecksumMedian}    {numBatches.toFloat * 1000.0 / accelChecksumMedian}"
   IO.println s!"Accel SIMD normalize+sum            {accelNormMedian}    {numBatches.toFloat * 1000.0 / accelNormMedian}"
   IO.println s!"Metal GPU normalize+matmul          {metalMedian}    {numBatches.toFloat * 1000.0 / metalMedian}"
+  match cudaMedian? with
+  | some cudaMedian =>
+      IO.println s!"CUDA GPU normalize+matmul           {cudaMedian}    {numBatches.toFloat * 1000.0 / cudaMedian}"
+  | none =>
+      IO.println s!"CUDA GPU normalize+matmul           skipped"
   IO.println ""
   IO.println s!"Speedup (Accel vs Lean loop):"
   IO.println s!"  Checksum:  {checksumMedian / accelChecksumMedian}x"
@@ -449,6 +543,11 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   IO.println s!"GPU vs CPU comparison:"
   IO.println s!"  Metal normalize+matmul: {metalMedian} ms"
   IO.println s!"  Accel normalize-only:   {accelNormMedian} ms"
+  match cudaMedian? with
+  | some cudaMedian =>
+      IO.println s!"  CUDA normalize+matmul:  {cudaMedian} ms"
+  | none =>
+      pure ()
 
   -- 7/8. Zero-copy + shared memory benchmarks (Metal only)
   let metalAvailable ← TinyGrad4.Backend.Metal.isAvailable

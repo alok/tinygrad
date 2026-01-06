@@ -43,6 +43,14 @@ open Interpreter
 
 private def hasNvrtcBuiltins : IO Bool := do
   let mut dirs : Array System.FilePath := #[]
+  let appPath ← IO.appPath
+  match appPath.parent with
+  | some binDir =>
+      match binDir.parent with
+      | some buildDir => dirs := dirs.push (buildDir / "lib")
+      | none => pure ()
+  | none => pure ()
+  dirs := dirs.push (System.FilePath.mk "./.lake/build/lib")
   match (← IO.getEnv "CUDA_HOME") with
   | some home =>
       let base := System.FilePath.mk home

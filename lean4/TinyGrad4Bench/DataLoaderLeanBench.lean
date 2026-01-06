@@ -415,6 +415,9 @@ initialize do
       let snap ← runIndexSelectSmall cfg
       indexSelectStats.set snap
       -- Print profile events (gather kernel timing) when PROFILE=1
+      let events ← TinyGrad4.Benchmark.getProfileEvents
+      let enabled ← TinyGrad4.Benchmark.isProfilingEnabled
+      IO.println s!"DEBUG: profiling enabled={enabled}, event count={events.size}"
       TinyGrad4.Benchmark.printProfileEvents
       TinyGrad4.Benchmark.resetProfileEvents
     report? := some do

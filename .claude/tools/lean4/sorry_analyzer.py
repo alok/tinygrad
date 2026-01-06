@@ -125,7 +125,7 @@ def format_text(sorries: List[Sorry]) -> str:
         output.append("\n    Context:")
         for line in sorry.context_before[-2:]:
             output.append(f"      {line}")
-        output.append("      >>> SORRY <<<")
+        output.append(f"      >>> SORRY <<<")
         for line in sorry.context_after[:2]:
             output.append(f"      {line}")
         output.append("")
@@ -135,7 +135,7 @@ def format_text(sorries: List[Sorry]) -> str:
 def format_markdown(sorries: List[Sorry]) -> str:
     """Format sorries as Markdown"""
     output = []
-    output.append("# Sorry Analysis Report\n")
+    output.append(f"# Sorry Analysis Report\n")
     output.append(f"**Total sorries found:** {len(sorries)}\n")
 
     # Group by file
@@ -282,7 +282,7 @@ def show_sorry_details(sorry: Sorry):
     print("─" * 40)
     for line in sorry.context_before[-5:]:
         print(f"  {line}")
-    print("  >>> SORRY HERE <<<")
+    print(f"  >>> SORRY HERE <<<")
     for line in sorry.context_after[:5]:
         print(f"  {line}")
     print("─" * 40)

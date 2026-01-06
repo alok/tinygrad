@@ -70,6 +70,15 @@ static void ensure_nvrtc_env(void) {
         setenv("LD_LIBRARY_PATH", buf, 1);
     }
 
+    char builtins[PATH_MAX];
+    snprintf(builtins, sizeof(builtins), "%s/libnvrtc-builtins.so", path);
+    void* builtins_handle = dlopen(builtins, RTLD_NOW | RTLD_GLOBAL);
+    if (builtins_handle == NULL) {
+        char builtins_ver[PATH_MAX];
+        snprintf(builtins_ver, sizeof(builtins_ver), "%s/libnvrtc-builtins.so.12.4", path);
+        (void)dlopen(builtins_ver, RTLD_NOW | RTLD_GLOBAL);
+    }
+
     const char* cuda_home = getenv("CUDA_HOME");
     const char* cuda_path = getenv("CUDA_PATH");
     if ((cuda_home == NULL || cuda_home[0] == '\0') &&

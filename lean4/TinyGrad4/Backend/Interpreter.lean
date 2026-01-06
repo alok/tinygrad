@@ -670,7 +670,6 @@ private def evalFusedEwiseIO (u : UOp) (plan : FusedEwise.Plan) (env : Env)
 private def evalFusedGatherIO (u : UOp) (plan : FusedGather.Plan) (env : Env)
     (cache : HashMap UOpId RawBuffer) : IO RawBuffer := do
   let numel := listProd u.shape
-  IO.eprintln s!"DEBUG evalFusedGatherIO: numel={numel}, threshold={gpuGatherMinElements}, shape={u.shape}"
   if numel == 0 then
     return RawBuffer.zeros u.dtype 0
 
@@ -680,17 +679,13 @@ private def evalFusedGatherIO (u : UOp) (plan : FusedGather.Plan) (env : Env)
   let idxBuf := cache.getD plan.idxBase idxFallback
 
   if numel < gpuGatherMinElements then
-    IO.eprintln "DEBUG evalFusedGatherIO: below threshold, using CPU"
     return evalFusedGather u plan env cache
 
   let cudaAvailable ← Cuda.isAvailable
-  IO.eprintln s!"DEBUG evalFusedGatherIO: cudaAvailable={cudaAvailable}"
   if cudaAvailable then
     try
-      IO.eprintln "DEBUG evalFusedGatherIO: calling CudaGather"
       return ← CudaGather.runFusedGatherWithFallback plan xBuf idxBuf u.shape u.dtype
-    catch e =>
-      IO.eprintln s!"DEBUG evalFusedGatherIO: CUDA failed: {e}"
+    catch _ =>
       pure ()
 
   let metalAvailable ← Metal.isAvailable

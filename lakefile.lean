@@ -48,18 +48,60 @@ def findNvcc : IO (Option String) := do
     | none => pure ()
   return none
 
+-- Find CUDA library directories (best-effort)
+def findCudaLibDirs : IO (Array FilePath) := do
+  let mut dirs : Array FilePath := #[]
+  let cudaLibDirsFor (base : FilePath) : Array FilePath :=
+    #[
+      base / "lib64",
+      base / "targets" / "x86_64-linux" / "lib",
+      base / "lib"
+    ]
+
+  let envHome ← IO.getEnv "CUDA_HOME"
+  let envPath ← IO.getEnv "CUDA_PATH"
+  match envHome with
+  | some base => dirs := dirs ++ cudaLibDirsFor (FilePath.mk base)
+  | none => pure ()
+  match envPath with
+  | some base => dirs := dirs ++ cudaLibDirsFor (FilePath.mk base)
+  | none => pure ()
+
+  let nvcc? ← findNvcc
+  match nvcc? with
+  | some nvcc =>
+      let nvccPath := FilePath.mk nvcc
+      match nvccPath.parent with
+      | some binDir =>
+          match binDir.parent with
+          | some base => dirs := dirs ++ cudaLibDirsFor base
+          | none => pure ()
+      | none => pure ()
+  | none => pure ()
+
+  dirs := dirs ++ cudaLibDirsFor (FilePath.mk "/usr/local/cuda")
+  dirs := dirs ++ cudaLibDirsFor (FilePath.mk "/opt/cuda")
+  dirs := dirs.push (FilePath.mk "/usr/lib/x86_64-linux-gnu")
+  dirs := dirs.push (FilePath.mk "/usr/lib")
+  pure dirs
+
 -- CUDA link args for Linux; requires CUDA libs to be installed when building.
 def cudaLinkArgs : Array String :=
   if System.Platform.isOSX || System.Platform.isWindows then
     #[]
   else
     #[
+      "-L.lake/build/lib",
       "-L/usr/lib/x86_64-linux-gnu",
       "-L/usr/local/cuda/lib64",
-      "-L/home/alok/cuda-12.4/lib64",  -- ww (freja.mit.edu) local install
+      "-L/usr/local/cuda/targets/x86_64-linux/lib",
+      "-L/opt/cuda/lib64",
+      "-L/opt/cuda/targets/x86_64-linux/lib",
       "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
       "-Wl,-rpath,/usr/local/cuda/lib64",
-      "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
+      "-Wl,-rpath,/usr/local/cuda/targets/x86_64-linux/lib",
+      "-Wl,-rpath,/opt/cuda/lib64",
+      "-Wl,-rpath,/opt/cuda/targets/x86_64-linux/lib",
       "-Wl,-rpath,$ORIGIN",
       "-Wl,-rpath,$ORIGIN/../lib",
       "-lcuda", "-lnvrtc", "-lcudart", "-lstdc++"
@@ -222,6 +264,34 @@ extern_lib tg4c pkg := do
           let out ← IO.Process.output { cmd := "ln", args := #["-sf", src.toString, dst.toString] }
           if out.exitCode != 0 then
             IO.eprintln s!"Failed to link {name} into {buildLib}: {out.stderr}"
+      -- Ensure NVRTC runtime + builtins are discoverable without env hacks.
+      let cudaLibDirs ← findCudaLibDirs
+      let mut chosenCudaDir : Option FilePath := none
+      for dir in cudaLibDirs do
+        if chosenCudaDir.isNone then
+          try
+            if ← dir.pathExists then
+              for entry in (← dir.readDir) do
+                let name := entry.fileName
+                if String.startsWith name "libnvrtc.so" || String.startsWith name "libnvrtc-builtins.so" then
+                  chosenCudaDir := some dir
+          catch _ =>
+            pure ()
+      match chosenCudaDir with
+      | none => pure ()
+      | some dir =>
+          try
+            for entry in (← dir.readDir) do
+              let name := entry.fileName
+              if String.startsWith name "libnvrtc.so" ||
+                 String.startsWith name "libnvrtc-builtins.so" ||
+                 String.startsWith name "libcudart.so" then
+                let dst := buildLib / name
+                let out ← IO.Process.output { cmd := "ln", args := #["-sf", entry.path.toString, dst.toString] }
+                if out.exitCode != 0 then
+                  IO.eprintln s!"Failed to link {name} into {buildLib}: {out.stderr}"
+          catch _ =>
+            pure ()
     let name := nameToStaticLib "tg4c"
     buildStaticLib (pkg.staticLibDir / name) oFiles
 

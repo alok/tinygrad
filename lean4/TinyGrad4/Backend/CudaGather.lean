@@ -1,4 +1,4 @@
-import TinyGrad4.Backend.Metal
+import TinyGrad4.Backend.Cuda
 import TinyGrad4.Backend.Buffer
 import TinyGrad4.Backend.FusedGather
 import TinyGrad4.Backend.GatherKernel
@@ -6,17 +6,17 @@ import TinyGrad4.Backend.Native
 import TinyGrad4.Shape
 
 /-!
-# GPU Gather Execution via Metal
+# GPU Gather Execution via CUDA
 
-Executes fused gather kernels on Metal GPU, falling back to CPU when unavailable.
+Executes fused gather kernels on CUDA GPU, falling back to CPU when unavailable.
 This is a temporary codegen path until ProgramSpec v2 lands.
 -/
 
-namespace TinyGrad4.Backend.MetalGather
+namespace TinyGrad4.Backend.CudaGather
 
 open TinyGrad4
 open TinyGrad4.Backend
-open TinyGrad4.Backend.Metal
+open TinyGrad4.Backend.Cuda
 open TinyGrad4.Backend.GatherKernel
 
 /-! ## Local Helpers -/
@@ -26,14 +26,14 @@ private def zerosRaw (dtype : DType) (numel : Nat) : RawBuffer :=
 
 /-! ## Program Cache -/
 
-initialize programCache : IO.Ref (Std.HashMap String MetalProgram) ← IO.mkRef ∅
+initialize programCache : IO.Ref (Std.HashMap String CUDAProgram) ← IO.mkRef ∅
 
-def getOrCompile (name : String) (shader : String) : IO MetalProgram := do
+def getOrCompile (name : String) (shader : String) : IO CUDAProgram := do
   let cache ← programCache.get
   match cache[name]? with
   | some prog => return prog
   | none =>
-    let prog ← metalCompile name shader
+    let prog ← cudaCompile name shader
     programCache.modify (·.insert name prog)
     return prog
 
@@ -50,24 +50,23 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
   let xBytes := x.data.size
   let idxBytes := idx.data.size
 
-  let xBuf ← metalAllocBytes xBytes
-  metalCopyInBytes xBuf x.data
-  let idxBuf ← metalAllocBytes idxBytes
-  metalCopyInBytes idxBuf idx.data
-
-  let outBuf ← metalAllocBytes outBytes
+  let xBuf ← cudaAllocBytes xBytes
+  cudaCopyInBytes xBuf x.data
+  let idxBuf ← cudaAllocBytes idxBytes
+  cudaCopyInBytes idxBuf idx.data
+  let outBuf ← cudaAllocBytes outBytes
 
   let prog ← getOrCompile name shader
-  let threadsPerGroup : Nat := 256
+  let threadsPerBlock : Nat := 256
   let totalThreads := numel
-  metalLaunch prog #[xBuf, idxBuf, outBuf] totalThreads 1 1 threadsPerGroup 1 1
-  metalSync
+  cudaLaunch2D prog #[xBuf, idxBuf, outBuf] totalThreads 1 threadsPerBlock 1
+  cudaSync
 
-  let outBytes' ← metalCopyOutBytes outBuf outBytes
+  let outBytes' ← cudaCopyOutBytes outBuf outBytes
 
-  metalFree xBuf
-  metalFree idxBuf
-  metalFree outBuf
+  cudaFree xBuf
+  cudaFree idxBuf
+  cudaFree outBuf
 
   return { dtype := dtype, data := outBytes' }
 
@@ -86,7 +85,7 @@ def runFusedGather (plan : FusedGather.Plan) (x idx : RawBuffer)
      outShape.toArray, plan.maskShape, plan.reduceAxis, elemSize, idxElemSize, xNumel, idxNumel)
   let name := s!"fused_gather_{progHash}"
 
-  let shader := renderGatherKernel .metal name plan outShape xNumel idxNumel elemSize idxElemSize
+  let shader := renderGatherKernel .cuda name plan outShape xNumel idxNumel elemSize idxElemSize
   runGatherKernel name shader x idx outShape dtype
 
 private def runGatherCPU (plan : FusedGather.Plan) (x idx : RawBuffer)
@@ -101,7 +100,7 @@ private def runGatherCPU (plan : FusedGather.Plan) (x idx : RawBuffer)
 
 def runFusedGatherWithFallback (plan : FusedGather.Plan) (x idx : RawBuffer)
     (outShape : Shape) (dtype : DType) : IO RawBuffer := do
-  let available ← Metal.isAvailable
+  let available ← Cuda.isAvailable
   if available then
     try
       runFusedGather plan x idx outShape dtype
@@ -110,4 +109,4 @@ def runFusedGatherWithFallback (plan : FusedGather.Plan) (x idx : RawBuffer)
   else
     return runGatherCPU plan x idx outShape dtype
 
-end TinyGrad4.Backend.MetalGather
+end TinyGrad4.Backend.CudaGather

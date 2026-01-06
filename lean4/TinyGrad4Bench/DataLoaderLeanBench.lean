@@ -12,6 +12,7 @@ import TinyGrad4.Backend.FusedGather
 import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Tensor.Math
 import TinyGrad4.UOp.Graph
+import TinyGrad4.Benchmark.Instrumentation
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -408,6 +409,9 @@ initialize do
     action := do
       let snap ← runIndexSelectSmall cfg
       indexSelectStats.set snap
+      -- Print profile events (gather kernel timing) when PROFILE=1
+      TinyGrad4.Benchmark.printProfileEvents
+      TinyGrad4.Benchmark.resetProfileEvents
     report? := some do
       indexSelectJson cfg <$> indexSelectStats.get
     config := indexSelectConfig cfg ["data", "mnist", "indexselect", "small"]

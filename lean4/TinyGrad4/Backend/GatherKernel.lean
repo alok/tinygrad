@@ -139,7 +139,7 @@ def renderGatherKernel (target : Target) (name : String) (plan : FusedGather.Pla
       if j < axis then
         s!"o{j}"
       else if j == axis then
-        "(uint)idx_val"
+        s!"({u32Type})idx_val"
       else
         s!"o{j - 1}"
     let start := plan.xView.maskStart.getD j 0

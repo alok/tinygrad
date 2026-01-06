@@ -126,6 +126,9 @@ DEBUG=2 python -m pytest test/test_schedule.py::test_name -xvs
 VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 ```
 
+Notes:
+- If local Python deps block on macOS, use Runpod or `ssh ww` (you can `sudo su` there) to run Linux tests where Triton is available.
+
 ## Common Environment Variables
 
 - `DEBUG=1-4` - Increasing verbosity

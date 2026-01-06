@@ -4,6 +4,19 @@ open Lake DSL System
 
 -- Find CUDA include path (returns none if headers not found)
 
+def listCudaHomes (base : FilePath) : IO (Array FilePath) := do
+  let mut homes : Array FilePath := #[]
+  if !(← base.pathExists) then
+    return homes
+  try
+    for entry in (← base.readDir) do
+      let name := entry.fileName
+      if name == "cuda" || String.startsWith name "cuda-" then
+        homes := homes.push entry.path
+  catch _ =>
+    pure ()
+  return homes
+
 def findCudaInclude : IO (Option String) := do
   -- Respect CUDA_HOME/CUDA_PATH when set
   let envHome ← IO.getEnv "CUDA_HOME"
@@ -18,10 +31,13 @@ def findCudaInclude : IO (Option String) := do
     | none => pure ()
   if ← FilePath.pathExists "/usr/local/cuda/include/cuda.h" then
     return some "/usr/local/cuda/include"
-  -- Check $HOME/cuda-12.4 for local installs
+  -- Check $HOME/cuda* for local installs
   let home := (← IO.getEnv "HOME").getD ""
-  if !home.isEmpty && (← FilePath.pathExists (home ++ "/cuda-12.4/include/cuda.h")) then
-    return some (home ++ "/cuda-12.4/include")
+  if !home.isEmpty then
+    for dir in (← listCudaHomes (FilePath.mk home)) do
+      let inc := dir / "include" / "cuda.h"
+      if ← inc.pathExists then
+        return some (dir / "include").toString
   if ← FilePath.pathExists "/usr/include/cuda.h" then
     return some "/usr/include"
   return none
@@ -32,13 +48,11 @@ def findNvcc : IO (Option String) := do
   -- Respect CUDA_HOME/CUDA_PATH when set
   let envHome ← IO.getEnv "CUDA_HOME"
   let envPath ← IO.getEnv "CUDA_PATH"
-  let home := (← IO.getEnv "HOME").getD ""
   let candidates : Array (Option String) := #[
     envHome.map (· ++ "/bin/nvcc"),
     envPath.map (· ++ "/bin/nvcc"),
     some "/usr/local/cuda/bin/nvcc",
-    some "/opt/cuda/bin/nvcc",
-    if !home.isEmpty then some (home ++ "/cuda-12.4/bin/nvcc") else none
+    some "/opt/cuda/bin/nvcc"
   ]
   for path? in candidates do
     match path? with
@@ -46,6 +60,12 @@ def findNvcc : IO (Option String) := do
         if ← FilePath.pathExists path then
           return some path
     | none => pure ()
+  let home := (← IO.getEnv "HOME").getD ""
+  if !home.isEmpty then
+    for dir in (← listCudaHomes (FilePath.mk home)) do
+      let nvcc := dir / "bin" / "nvcc"
+      if ← nvcc.pathExists then
+        return some nvcc.toString
   return none
 
 -- Find CUDA library directories (best-effort)
@@ -83,6 +103,10 @@ def findCudaLibDirs : IO (Array FilePath) := do
   dirs := dirs ++ cudaLibDirsFor (FilePath.mk "/opt/cuda")
   dirs := dirs.push (FilePath.mk "/usr/lib/x86_64-linux-gnu")
   dirs := dirs.push (FilePath.mk "/usr/lib")
+  let home := (← IO.getEnv "HOME").getD ""
+  if !home.isEmpty then
+    for dir in (← listCudaHomes (FilePath.mk home)) do
+      dirs := dirs ++ cudaLibDirsFor dir
   pure dirs
 
 -- CUDA link args for Linux; requires CUDA libs to be installed when building.

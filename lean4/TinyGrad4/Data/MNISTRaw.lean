@@ -495,9 +495,9 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   IO.println ""
   let cudaAvailable ← TinyGrad4.Backend.Cuda.isAvailable
   IO.println s!"  CUDA GPU available: {cudaAvailable}"
-  let (cudaMedian?, cudaOutputSize?) ←
+  let cudaMedian? ←
     if !cudaAvailable then
-      pure (none, none)
+      pure none
     else
       let _ ← TinyGrad4.Backend.Cuda.setDevice 0
       let mut cudaTimes : Array Nat := #[]
@@ -515,7 +515,7 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
       let cudaMedian := (cudaTimes[iterations / 2]!).toFloat / 1e6
       IO.println s!"  CUDA GPU normalize+matmul: {cudaMedian} ms ({numBatches.toFloat * 1000.0 / cudaMedian} batch/s)"
       IO.println s!"    output size = {cudaOutputSize} bytes (expected {M * N * 4})"
-      pure (some cudaMedian, some cudaOutputSize)
+      pure (some cudaMedian)
 
   IO.println ""
   IO.println "============================================================"

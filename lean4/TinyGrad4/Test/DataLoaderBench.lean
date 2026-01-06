@@ -7,6 +7,7 @@ import TinyGrad4.Data.Profile
 import TinyGrad4.Data.GPULoader
 import TinyGrad4.Data.Shuffle
 import TinyGrad4.Data.Transform
+import TinyGrad4.Benchmark.Instrumentation
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -179,3 +180,6 @@ def main : IO Unit := do
   prefetcher.cancel
   IO.println s!"  batches={count}"
   IO.println (← profiler.summaryWithConcurrencyByStage)
+
+  -- Print profile events if PROFILE=1 was set
+  TinyGrad4.Benchmark.printProfileEvents

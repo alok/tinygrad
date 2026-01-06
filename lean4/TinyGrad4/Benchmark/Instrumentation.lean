@@ -1,4 +1,6 @@
 import TinyGrad4.Backend.Metal
+import Lean.Data.Json
+
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -28,6 +30,7 @@ namespace TinyGrad4.Benchmark
 
 open TinyGrad4.Backend
 open TinyGrad4.Backend.Metal
+open Lean (ToJson toJson Json)
 
 /-- Kernel timing breakdown -/
 structure KernelTiming where
@@ -221,5 +224,95 @@ def benchmarkWithWarmup (warmup n : Nat) (action : IO α) : IO (MultiRunStats ×
     let _ ← action
   -- Timed runs
   benchmarkN n action
+
+/-! ## tinygrad-style Profile Events
+
+Mirrors `tinygrad/helpers.py` ProfileRangeEvent pattern for fine-grained
+kernel-level profiling with global event collection.
+
+Enable with `PROFILE=1` environment variable.
+-/
+
+/-- Profile event mirroring tinygrad/helpers.py ProfileRangeEvent -/
+structure ProfileRangeEvent where
+  device : String              -- "CUDA", "METAL", "CPU", "TINY"
+  name : String                -- operation name
+  stUs : Nat                   -- start time (microseconds since epoch)
+  enUs : Nat                   -- end time (microseconds since epoch)
+  isCopy : Bool := false
+  deriving Repr, Inhabited
+
+namespace ProfileRangeEvent
+
+/-- Duration in microseconds -/
+def durationUs (e : ProfileRangeEvent) : Nat := e.enUs - e.stUs
+
+/-- Duration in milliseconds -/
+def durationMs (e : ProfileRangeEvent) : Float := e.durationUs.toFloat / 1000.0
+
+/-- Format as human-readable string -/
+def format (e : ProfileRangeEvent) : String :=
+  s!"{e.device} {e.name}: {e.durationUs} μs"
+
+end ProfileRangeEvent
+
+instance : ToJson ProfileRangeEvent where
+  toJson e := .mkObj [
+    ("device", .str e.device),
+    ("name", .str e.name),
+    ("st_us", .num e.stUs),
+    ("en_us", .num e.enUs),
+    ("is_copy", .bool e.isCopy)
+  ]
+
+/-- Global profile events (mirrors cpu_events in tinygrad/helpers.py) -/
+initialize profileEvents : IO.Ref (Array ProfileRangeEvent) ← IO.mkRef #[]
+
+/-- Whether profiling is enabled (checked from PROFILE env once at init) -/
+initialize profileEnabled : IO.Ref Bool ← IO.mkRef false
+
+/-- Initialize profile enabled flag from environment -/
+initialize do
+  let env ← IO.getEnv "PROFILE"
+  profileEnabled.set env.isSome
+
+/-- Profile an IO action with device and operation name.
+    Mirrors tinygrad cpu_profile context manager.
+    Only records events when PROFILE=1 is set. -/
+def withProfile (device name : String) (action : IO α) : IO α := do
+  if !(← profileEnabled.get) then
+    return ← action
+  let st ← IO.monoNanosNow
+  let result ← action
+  let en ← IO.monoNanosNow
+  profileEvents.modify (·.push {
+    device, name,
+    stUs := st / 1000,
+    enUs := en / 1000
+  })
+  return result
+
+/-- Get all recorded profile events -/
+def getProfileEvents : IO (Array ProfileRangeEvent) := profileEvents.get
+
+/-- Reset/clear profile events -/
+def resetProfileEvents : IO Unit := profileEvents.set #[]
+
+/-- Check if profiling is enabled -/
+def isProfilingEnabled : IO Bool := profileEnabled.get
+
+/-- Print all profile events to stdout -/
+def printProfileEvents : IO Unit := do
+  let events ← getProfileEvents
+  if events.isEmpty then return
+  IO.println "=== Profile Events ==="
+  for e in events do
+    IO.println e.format
+  IO.println "======================"
+
+/-- Export profile events as JSON array -/
+def profileEventsToJson : IO Lean.Json := do
+  let events ← getProfileEvents
+  return .arr (events.map toJson)
 
 end TinyGrad4.Benchmark

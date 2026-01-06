@@ -41,6 +41,37 @@ namespace TinyGrad4.Data.MNISTRaw
 open TinyGrad4.Data
 open Interpreter
 
+private def hasNvrtcBuiltins : IO Bool := do
+  let mut dirs : Array System.FilePath := #[]
+  match (← IO.getEnv "CUDA_HOME") with
+  | some home =>
+      let base := System.FilePath.mk home
+      dirs := dirs.push (base / "lib64")
+      dirs := dirs.push (base / "lib")
+  | none => pure ()
+  match (← IO.getEnv "CUDA_PATH") with
+  | some home =>
+      let base := System.FilePath.mk home
+      dirs := dirs.push (base / "lib64")
+      dirs := dirs.push (base / "lib")
+  | none => pure ()
+  dirs := dirs ++ #[
+    System.FilePath.mk "/usr/local/cuda/lib64",
+    System.FilePath.mk "/usr/local/cuda/lib",
+    System.FilePath.mk "/usr/lib/x86_64-linux-gnu",
+    System.FilePath.mk "/usr/lib"
+  ]
+
+  for dir in dirs do
+    try
+      if ← dir.pathExists then
+        for entry in (← dir.readDir) do
+          if entry.fileName.startsWith "libnvrtc-builtins.so" then
+            return true
+    catch _ =>
+      pure ()
+  return false
+
 /-- MNIST image buffer: raw bytes, uint8, shape [N, 784] or [N, 1, 28, 28]
     Uses ByteSlice for zero-copy - keeps reference to original file data. -/
 structure ImageBuffer where
@@ -494,9 +525,19 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   -- 6b. CUDA GPU: normalize + matmul (if available)
   IO.println ""
   let cudaAvailable ← TinyGrad4.Backend.Cuda.isAvailable
+  let cudaBuiltinsAvailable ← if cudaAvailable then hasNvrtcBuiltins else pure false
   IO.println s!"  CUDA GPU available: {cudaAvailable}"
-  let cudaMedian? ←
+  if cudaAvailable && !cudaBuiltinsAvailable then
+    IO.println "  CUDA NVRTC builtins: missing (skipping CUDA matmul)"
+  let cudaSkipReason? : Option String :=
     if !cudaAvailable then
+      some "CUDA unavailable"
+    else if !cudaBuiltinsAvailable then
+      some "missing libnvrtc-builtins"
+    else
+      none
+  let cudaMedian? ←
+    if cudaSkipReason?.isSome then
       pure none
     else
       let _ ← TinyGrad4.Backend.Cuda.setDevice 0
@@ -534,7 +575,9 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   | some cudaMedian =>
       IO.println s!"CUDA GPU normalize+matmul           {cudaMedian}    {numBatches.toFloat * 1000.0 / cudaMedian}"
   | none =>
-      IO.println s!"CUDA GPU normalize+matmul           skipped"
+      match cudaSkipReason? with
+      | some reason => IO.println s!"CUDA GPU normalize+matmul           skipped ({reason})"
+      | none => IO.println s!"CUDA GPU normalize+matmul           skipped"
   IO.println ""
   IO.println s!"Speedup (Accel vs Lean loop):"
   IO.println s!"  Checksum:  {checksumMedian / accelChecksumMedian}x"

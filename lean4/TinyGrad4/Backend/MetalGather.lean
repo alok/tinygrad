@@ -4,6 +4,7 @@ import TinyGrad4.Backend.FusedGather
 import TinyGrad4.Backend.GatherKernel
 import TinyGrad4.Backend.Native
 import TinyGrad4.Shape
+import TinyGrad4.Benchmark.Instrumentation
 
 /-!
 # GPU Gather Execution via Metal
@@ -18,6 +19,7 @@ open TinyGrad4
 open TinyGrad4.Backend
 open TinyGrad4.Backend.Metal
 open TinyGrad4.Backend.GatherKernel
+open TinyGrad4.Benchmark (withProfile)
 
 /-! ## Local Helpers -/
 
@@ -57,11 +59,12 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
 
   let outBuf ← metalAllocBytes outBytes
 
-  let prog ← getOrCompile name shader
+  let prog ← withProfile "METAL" "gather_compile" (getOrCompile name shader)
   let threadsPerGroup : Nat := 256
   let totalThreads := numel
-  metalLaunch prog #[xBuf, idxBuf, outBuf] totalThreads 1 1 threadsPerGroup 1 1
-  metalSync
+  withProfile "METAL" "gather_launch" do
+    metalLaunch prog #[xBuf, idxBuf, outBuf] totalThreads 1 1 threadsPerGroup 1 1
+    metalSync
 
   let outBytes' ← metalCopyOutBytes outBuf outBytes
 

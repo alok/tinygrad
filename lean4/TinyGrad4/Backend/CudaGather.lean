@@ -4,6 +4,7 @@ import TinyGrad4.Backend.FusedGather
 import TinyGrad4.Backend.GatherKernel
 import TinyGrad4.Backend.Native
 import TinyGrad4.Shape
+import TinyGrad4.Benchmark.Instrumentation
 
 /-!
 # GPU Gather Execution via CUDA
@@ -18,6 +19,7 @@ open TinyGrad4
 open TinyGrad4.Backend
 open TinyGrad4.Backend.Cuda
 open TinyGrad4.Backend.GatherKernel
+open TinyGrad4.Benchmark (withProfile)
 
 /-! ## Local Helpers -/
 
@@ -56,11 +58,12 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
   cudaCopyInBytes idxBuf idx.data
   let outBuf ← cudaAllocBytes outBytes
 
-  let prog ← getOrCompile name shader
+  let prog ← withProfile "CUDA" "gather_compile" (getOrCompile name shader)
   let threadsPerBlock : Nat := 256
   let totalThreads := numel
-  cudaLaunch2D prog #[xBuf, idxBuf, outBuf] totalThreads 1 threadsPerBlock 1
-  cudaSync
+  withProfile "CUDA" "gather_launch" do
+    cudaLaunch2D prog #[xBuf, idxBuf, outBuf] totalThreads 1 threadsPerBlock 1
+    cudaSync
 
   let outBytes' ← cudaCopyOutBytes outBuf outBytes
 

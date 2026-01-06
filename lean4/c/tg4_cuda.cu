@@ -7,6 +7,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <dlfcn.h>
+#include <limits.h>
 
 // ============================================================================
 // Global CUDA State
@@ -41,8 +43,52 @@ static __thread int g_current_device = 0;
     } \
 } while(0)
 
+static int g_nvrtc_env_set = 0;
+
+static void ensure_nvrtc_env(void) {
+    if (g_nvrtc_env_set) return;
+    g_nvrtc_env_set = 1;
+
+    Dl_info info;
+    if (!dladdr((void*)nvrtcCreateProgram, &info) || info.dli_fname == NULL) return;
+
+    char path[PATH_MAX];
+    strncpy(path, info.dli_fname, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    char* last = strrchr(path, '/');
+    if (last == NULL) return;
+    *last = '\0';
+
+    const char* ld = getenv("LD_LIBRARY_PATH");
+    if (ld == NULL || strstr(ld, path) == NULL) {
+        char buf[PATH_MAX * 2];
+        if (ld != NULL && ld[0] != '\0') {
+            snprintf(buf, sizeof(buf), "%s:%s", path, ld);
+        } else {
+            snprintf(buf, sizeof(buf), "%s", path);
+        }
+        setenv("LD_LIBRARY_PATH", buf, 1);
+    }
+
+    const char* cuda_home = getenv("CUDA_HOME");
+    const char* cuda_path = getenv("CUDA_PATH");
+    if ((cuda_home == NULL || cuda_home[0] == '\0') &&
+        (cuda_path == NULL || cuda_path[0] == '\0')) {
+        char home[PATH_MAX];
+        strncpy(home, path, sizeof(home) - 1);
+        home[sizeof(home) - 1] = '\0';
+        char* tail = strrchr(home, '/');
+        if (tail != NULL && (!strcmp(tail + 1, "lib64") || !strcmp(tail + 1, "lib"))) {
+            *tail = '\0';
+            setenv("CUDA_HOME", home, 0);
+            setenv("CUDA_PATH", home, 0);
+        }
+    }
+}
+
 static int ensure_cuda_runtime(void) {
     if (!g_initialized) {
+        ensure_nvrtc_env();
         CHECK_CU(cuInit(0));
         g_initialized = 1;
     }

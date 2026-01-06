@@ -12,6 +12,8 @@ import TinyGrad4.Backend.FusedSGD
 import TinyGrad4.Backend.FusedMatmul
 import TinyGrad4.Backend.FusedSoftmax
 import TinyGrad4.Backend.FusedGather
+import TinyGrad4.Backend.Cuda
+import TinyGrad4.Backend.CudaGather
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.MetalMatmul
 import TinyGrad4.Backend.MetalEwise
@@ -679,8 +681,15 @@ private def evalFusedGatherIO (u : UOp) (plan : FusedGather.Plan) (env : Env)
   if numel < gpuGatherMinElements then
     return evalFusedGather u plan env cache
 
-  let available ← Metal.isAvailable
-  if available then
+  let cudaAvailable ← Cuda.isAvailable
+  if cudaAvailable then
+    try
+      return ← CudaGather.runFusedGatherWithFallback plan xBuf idxBuf u.shape u.dtype
+    catch _ =>
+      pure ()
+
+  let metalAvailable ← Metal.isAvailable
+  if metalAvailable then
     try
       return ← MetalGather.runFusedGatherWithFallback plan xBuf idxBuf u.shape u.dtype
     catch _ =>

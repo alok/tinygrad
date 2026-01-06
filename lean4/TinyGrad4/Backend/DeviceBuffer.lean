@@ -40,6 +40,7 @@ structure GPUBufferEntry where
   byteSize : Nat
   dtype : DType
   refCount : Nat := 1  -- Reference counting for shared buffers
+  external : Bool := false  -- External buffers are not freed by the registry
 
 /-- Global GPU buffer registry -/
 initialize gpuRegistry : IO.Ref (Std.HashMap GPUBufferId GPUBufferEntry) ← IO.mkRef ∅
@@ -78,7 +79,13 @@ namespace DeviceBuffer
 def allocGPU (byteSize : Nat) (dtype : DType) : IO GPUBufferId := do
   let buf ← metalAllocBytes byteSize
   let id ← gpuIdCounter.modifyGet fun n => (⟨n⟩, n + 1)
-  gpuRegistry.modify (·.insert id { buffer := buf, byteSize, dtype })
+  gpuRegistry.modify (·.insert id { buffer := buf, byteSize, dtype, external := false })
+  return id
+
+/-- Register an externally-owned Metal buffer (will not be freed by registry). -/
+def registerExternal (buf : MetalBuffer) (byteSize : Nat) (dtype : DType) : IO GPUBufferId := do
+  let id ← gpuIdCounter.modifyGet fun n => (⟨n⟩, n + 1)
+  gpuRegistry.modify (·.insert id { buffer := buf, byteSize, dtype, external := true })
   return id
 
 /-- Get Metal buffer handle from ID -/
@@ -94,7 +101,8 @@ def freeGPU (id : GPUBufferId) : IO Unit := do
   match registry[id]? with
   | some entry =>
     if entry.refCount <= 1 then
-      metalFree entry.buffer
+      if !entry.external then
+        metalFree entry.buffer
       gpuRegistry.modify (·.erase id)
     else
       gpuRegistry.modify (·.insert id { entry with refCount := entry.refCount - 1 })

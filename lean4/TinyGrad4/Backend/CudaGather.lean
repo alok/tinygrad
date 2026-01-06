@@ -107,7 +107,8 @@ def runFusedGatherWithFallback (plan : FusedGather.Plan) (x idx : RawBuffer)
   if available then
     try
       runFusedGather plan x idx outShape dtype
-    catch _ =>
+    catch e =>
+      IO.eprintln s!"DEBUG: CUDA gather failed, falling back to CPU: {e}"
       return runGatherCPU plan x idx outShape dtype
   else
     return runGatherCPU plan x idx outShape dtype

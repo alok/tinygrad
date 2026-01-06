@@ -1,6 +1,7 @@
 import TinyGrad4
 import TinyGrad4.Data.MNIST
 import TinyGrad4.Backend.Metal
+import TinyGrad4.Backend.Cuda
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -20,6 +21,47 @@ open StaticTensor
 open Interpreter
 open Backend
 open Std
+
+private def getEnvNat (key : String) (default : Nat) : IO Nat := do
+  match (← IO.getEnv key) with
+  | some v =>
+    match v.toNat? with
+    | some n => pure n
+    | none => pure default
+  | none => pure default
+
+private def getEnvString (key : String) (default : String) : IO String := do
+  match (← IO.getEnv key) with
+  | some v => pure v
+  | none => pure default
+
+private def parseFloat32? (raw : String) : Option Float32 := do
+  let s := raw.trimAscii.toString
+  if s.isEmpty then
+    none
+  else
+    let parts := s.splitOn "."
+    match parts with
+    | [whole] =>
+        whole.toNat? |>.map (fun n => (Float.ofNat n).toFloat32)
+    | [whole, frac] =>
+        let wholeNat? := if whole.isEmpty then some 0 else whole.toNat?
+        let fracNat? := if frac.isEmpty then some 0 else frac.toNat?
+        match wholeNat?, fracNat? with
+        | some w, some f =>
+            let denom := (10 : Nat) ^ frac.length
+            let val := Float.ofNat w + (Float.ofNat f / Float.ofNat denom)
+            some val.toFloat32
+        | _, _ => none
+    | _ => none
+
+private def getEnvFloat32 (key : String) (default : Float32) : IO Float32 := do
+  match (← IO.getEnv key) with
+  | some v =>
+    match parseFloat32? v with
+    | some f => pure f
+    | none => pure default
+  | none => pure default
 
 private def emptyBuf : RawBuffer := RawBuffer.zeros .float32 0
 
@@ -139,20 +181,27 @@ def runGPU (p : Program) (batches : Array (RawBuffer × RawBuffer)) (numBatches 
   let avgLoss := totalLoss / (Float.ofNat numBatches)
   pure (avgLoss, elapsedNs)
 
-def run (batchSize : Nat := 64) (hidden : Nat := 256) (numBatches : Nat := 20) (lr : Float32 := 0.01) : IO Unit := do
+def run (dataDir : String := "data") (batchSize : Nat := 64) (hidden : Nat := 256)
+    (numBatches : Nat := 20) (lr : Float32 := 0.01) : IO Unit := do
   IO.println "=== MNIST GPU vs CPU Benchmark ==="
 
   -- Check Metal availability
   let metalAvail ← Metal.isAvailable
   IO.println s!"Metal available: {metalAvail}"
+  let cudaAvail ← Cuda.isAvailable
+  let cudaCount ← if cudaAvail then Cuda.deviceCount else pure 0
+  IO.println s!"CUDA available: {cudaAvail} (count={cudaCount})"
+  if cudaAvail && cudaCount > 0 then
+    let info ← Cuda.deviceInfoFor 0
+    IO.println s!"CUDA device[0]: {info}"
 
-  let trainImagesPath := "data/train-images-idx3-ubyte"
-  let trainLabelsPath := "data/train-labels-idx1-ubyte"
+  let trainImagesPath := s!"{dataDir}/train-images-idx3-ubyte"
+  let trainLabelsPath := s!"{dataDir}/train-labels-idx1-ubyte"
   if !(← fileExists trainImagesPath) || !(← fileExists trainLabelsPath) then
-    throw (IO.userError s!"missing MNIST files in `data/`")
+    throw (IO.userError s!"missing MNIST files in `{dataDir}`")
 
   let maxImages := batchSize * numBatches
-  let (images, labels) ← loadTrain "data" (maxImages? := some maxImages)
+  let (images, labels) ← loadTrain dataDir (maxImages? := some maxImages)
 
   -- Prepare batches
   let mut batches : Array (RawBuffer × RawBuffer) := #[]
@@ -204,6 +253,20 @@ def run (batchSize : Nat := 64) (hidden : Nat := 256) (numBatches : Nat := 20) (
   else
     IO.println s!"✓ Losses match (diff={lossDiff})"
 
+def main : IO Unit := do
+  let dataDir ← getEnvString "TG4_DATA_DIR" "data"
+  let batchSize ← getEnvNat "TG4_MNIST_BATCH" 256
+  let hidden ← getEnvNat "TG4_MNIST_HIDDEN" 256
+  let numBatches ← getEnvNat "TG4_MNIST_BATCHES" 10
+  let lr ← getEnvFloat32 "TG4_MNIST_LR" 0.01
+  run
+    (dataDir := dataDir)
+    (batchSize := batchSize)
+    (hidden := hidden)
+    (numBatches := numBatches)
+    (lr := lr)
+
 end TinyGrad4.Test.MNISTGPUBench
 
-def main : IO Unit := TinyGrad4.Test.MNISTGPUBench.run (batchSize := 256) (hidden := 256) (numBatches := 10)
+def main : IO Unit :=
+  TinyGrad4.Test.MNISTGPUBench.main

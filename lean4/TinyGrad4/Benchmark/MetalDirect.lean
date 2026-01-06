@@ -1,6 +1,7 @@
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Benchmark.Framework
 import TinyGrad4.Benchmark.Kernels
+import TinyGrad4.Benchmark.Trace
 
 -- Disable RawBuffer linter for benchmark files that need FloatArray for data generation
 set_option linter.useRawBuffer false
@@ -31,7 +32,7 @@ open TinyGrad4.Benchmark
 open TinyGrad4.Benchmark.Kernels
 
 /-- Timing helper: returns elapsed microseconds -/
-def timeKernel (_iterations : Nat) (action : IO Unit) : IO Float := do
+def timeKernel (_iterations : Nat) (action : IO Unit) : IO (Float × Nat × Nat) := do
   -- Warmup run
   action
   metalSync
@@ -42,22 +43,30 @@ def timeKernel (_iterations : Nat) (action : IO Unit) : IO Float := do
   metalSync
   let stop ← IO.monoNanosNow
 
-  let elapsed : Float := (stop - start).toFloat
-  let perIter : Float := elapsed / 1000.0  -- ns to μs
-  return perIter
+  let elapsedNs := stop - start
+  let elapsedUs : Float := elapsedNs.toFloat / 1000.0
+  return (elapsedUs, start, elapsedNs)
+
+structure DirectBenchRun where
+  result : BenchmarkResult
+  trace : Trace.TraceReport
 
 /-- Run a direct Metal FFI benchmark -/
-def runDirectBenchmark (kernel : BenchKernel) (size : Nat) (iterations : Nat := 100) : IO BenchmarkResult := do
+def runDirectBenchmarkWithTrace (kernel : BenchKernel) (size : Nat) (iterations : Nat := 100) : IO DirectBenchRun := do
   -- Get device info
   let device ← metalDeviceName
 
   -- Generate shader from MetalRenderer
-  let shader ← match generateShader kernel size with
-    | some s => pure s
+  let renderStart ← IO.monoNanosNow
+  let (shader, uopStats) ← match generateShaderWithStats kernel size with
+    | some pair => pure pair
     | none => throw (IO.Error.userError s!"Failed to generate shader for {repr kernel}")
+  let renderStop ← IO.monoNanosNow
 
   -- Compile shader
+  let compileStart ← IO.monoNanosNow
   let prog ← metalCompile kernel.name shader
+  let compileStop ← IO.monoNanosNow
 
   -- Allocate buffers
   let numInputs := kernel.numInputs
@@ -76,7 +85,7 @@ def runDirectBenchmark (kernel : BenchKernel) (size : Nat) (iterations : Nat := 
   let gridSize := (size + 3) / 4
 
   -- Benchmark
-  let timeUs ← timeKernel iterations do
+  let (timeUs, launchStart, launchNs) ← timeKernel iterations do
     metalLaunch prog bufs gridSize 1 1 256 1 1
 
   -- Verify output
@@ -93,8 +102,37 @@ def runDirectBenchmark (kernel : BenchKernel) (size : Nat) (iterations : Nat := 
   for buf in bufs do
     metalFree buf
 
-  let timestamp ← IO.monoMsNow
-  return {
+  let timestamp ← IO.monoNanosNow
+  let events : Array Trace.TraceEvent := #[
+    {
+      phase := "render"
+      startNs := renderStart
+      durationNs := renderStop - renderStart
+      uopStats := uopStats
+    },
+    {
+      phase := "compile"
+      startNs := compileStart
+      durationNs := compileStop - compileStart
+    },
+    {
+      phase := "launch"
+      startNs := launchStart
+      durationNs := launchNs
+    }
+  ]
+  let report : Trace.TraceReport := {
+    metaInfo := {
+      backend := "METAL_DIRECT"
+      device := device
+      kernel := kernel.name
+      size := size
+      iterations := iterations
+      timestampNs := timestamp
+    }
+    events := events
+  }
+  let result : BenchmarkResult := {
     spec := {
       name := s!"{kernel.name}_{size}"
       size := size
@@ -118,6 +156,16 @@ def runDirectBenchmark (kernel : BenchKernel) (size : Nat) (iterations : Nat := 
     timestamp := timestamp
     gitCommit := none
   }
+  return { result := result, trace := report }
+
+/-- Run a direct Metal FFI benchmark -/
+def runDirectBenchmark (kernel : BenchKernel) (size : Nat) (iterations : Nat := 100) : IO BenchmarkResult := do
+  let run ← runDirectBenchmarkWithTrace kernel size iterations
+  let traceOut? ← Trace.traceOutPath?
+  match traceOut? with
+  | some path => Trace.writeReport path run.trace
+  | none => pure ()
+  return run.result
 
 /-- Run all direct Metal benchmarks -/
 def runAll : IO (Array BenchmarkResult) := do

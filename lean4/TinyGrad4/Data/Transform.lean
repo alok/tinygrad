@@ -128,36 +128,33 @@ def dropDs [Dataset D T] (n : Nat) (ds : D) : DroppedDataset D T :=
 
 /-- Dataset filtered by predicate.
     Note: This requires pre-computing the valid indices for random access. -/
-structure FilteredDataset (D : Type) (T : Type) where
+structure FilteredDataset (D : Type) (T : Type) [Dataset D T] where
   inner : D
-  /-- Indices that pass the filter (computed on construction) -/
-  validIndices : Array Nat
+  /-- Cached length of the inner dataset (for index proofs). -/
+  innerLen : Nat
+  /-- Proof that cached length matches the inner dataset length. -/
+  lenEq : innerLen = Dataset.len inner
+  /-- Indices that pass the filter (computed on construction). -/
+  validIndices : Array (Fin innerLen)
 
 /-- Filter a dataset by predicate (computes valid indices eagerly) -/
 def filterDs [Dataset D T] (pred : T → Bool) (ds : D) : IO (FilteredDataset D T) := do
   let n := Dataset.len ds
-  let mut indices := Array.mkEmpty n
+  let mut indices : Array (Fin n) := Array.mkEmpty n
   for i in [:n] do
     if h : i < n then
       let x ← Dataset.getItem ds i h
       if pred x then
-        indices := indices.push i
-  pure { inner := ds, validIndices := indices }
+        indices := indices.push ⟨i, h⟩
+  pure { inner := ds, innerLen := n, lenEq := rfl, validIndices := indices }
 
-/-- Filtered datasets store valid indices along with proof they're in bounds -/
-structure FilteredDatasetWithProof (D : Type) (T : Type) [Dataset D T] where
-  inner : D
-  validIndices : Array Nat
-  /-- All stored indices are valid -/
-  hValid : ∀ i, (h : i < validIndices.size) → validIndices[i] < Dataset.len inner
-
-instance [Dataset D T] [Inhabited T] : Dataset (FilteredDataset D T) T where
+instance [Dataset D T] : Dataset (FilteredDataset D T) T where
   len ds := ds.validIndices.size
   getItem ds idx h := do
-    let realIdx := ds.validIndices[idx]
-    -- Note: We can't prove realIdx < inner.len without additional invariant
-    -- Using getItem! for now; could use FilteredDatasetWithProof for full safety
-    Dataset.getItem! ds.inner realIdx
+    let realIdx := ds.validIndices[idx]'(h)
+    have hReal : realIdx.val < Dataset.len ds.inner := by
+      simpa [ds.lenEq] using realIdx.isLt
+    Dataset.getItem ds.inner realIdx.val hReal
 
 /-! ## ConcatDataset -/
 

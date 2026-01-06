@@ -12,10 +12,23 @@ set_option linter.monoNanosNow false
 
 open TinyGrad4
 
+private def getEnvNat (key : String) (default : Nat) : IO Nat := do
+  match (← IO.getEnv key) with
+  | some v =>
+    match v.toNat? with
+    | some n => pure n
+    | none => pure default
+  | none => pure default
+
+private def getEnvString (key : String) (default : String) : IO String := do
+  match (← IO.getEnv key) with
+  | some v => pure v
+  | none => pure default
+
 def main : IO Unit := do
-  let dataDir := "../data"
-  let batchSize := 64
-  let maxImages := 10000
+  let dataDir ← getEnvString "TG4_DATA_DIR" "data"
+  let batchSize ← getEnvNat "TG4_BATCH" 64
+  let maxImages ← getEnvNat "TG4_MAX_IMAGES" 10000
 
   IO.println "=== Lean Data Loader Bench Suite ==="
   IO.println s!"dataDir={dataDir} batch={batchSize} maxImages={maxImages}"

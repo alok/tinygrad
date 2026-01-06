@@ -107,6 +107,23 @@ def testDropDs : IO Unit := do
 
   IO.println "✓ dropDs tests passed"
 
+def testFilterDs : IO Unit := do
+  IO.println "Testing filterDs..."
+
+  let ds ← filterDs (fun x => x % 2 == 0) testArray
+
+  assert (Dataset.len ds == 5) "Filtered dataset should have 5 elements"
+
+  if h : 0 < Dataset.len ds then
+    let item ← Dataset.getItem ds 0 h
+    assert (item == 0) "First filtered item should be 0"
+
+  if h : 4 < Dataset.len ds then
+    let item ← Dataset.getItem ds 4 h
+    assert (item == 8) "Last filtered item should be 8"
+
+  IO.println "✓ filterDs tests passed"
+
 def testConcatDs : IO Unit := do
   IO.println "Testing concatDs..."
 
@@ -416,6 +433,8 @@ def runAll : IO Unit := do
   testTakeDs
   IO.println "Running testDropDs..."
   testDropDs
+  IO.println "Running testFilterDs..."
+  testFilterDs
   IO.println "Running testConcatDs..."
   testConcatDs
   IO.println "Running testZipDs..."

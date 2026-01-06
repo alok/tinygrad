@@ -11,13 +11,13 @@ for different domains within TinyGrad4.
 ## Usage
 
 Tag lemmas with the appropriate attribute:
-```lean
+```lean +error
 @[simp_shape]
 theorem listProd_singleton (n : Nat) : listProd [n] = n := by simp [listProd]
 ```
 
 Use in proofs:
-```lean
+```lean +error
 simp [simp_shape]
 ```
 -/

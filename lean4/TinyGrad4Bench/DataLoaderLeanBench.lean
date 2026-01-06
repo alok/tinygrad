@@ -13,6 +13,7 @@ import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Tensor.Math
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Benchmark.Instrumentation
+import TinyGrad4.Backend.Cuda
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -305,6 +306,10 @@ private def runIndexSelectSmall (cfg : BenchParams) : IO IndexSelectSnapshot := 
   let batchSize := cfg.indexSelectBatchSize
   let mnist ← getMnistRaw cfg
   let batches := indexSelectBatchCount cfg
+  -- Debug: Check CUDA availability
+  let cudaAvail ← TinyGrad4.Backend.Cuda.isAvailable
+  let numel := batchSize * 784  -- pixels per image
+  IO.println s!"DEBUG: CUDA available={cudaAvail}, numel={numel}, threshold=16384"
   if batchSize == 0 || batches == 0 then
     return {
       batches := 0, total := 0.0, expectedTotal := 0.0, mismatchCount := 0,

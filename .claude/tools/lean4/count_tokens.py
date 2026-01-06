@@ -8,7 +8,7 @@ Provides rough token estimates to compare optimization candidates.
 import re
 import sys
 from pathlib import Path
-from typing import Tuple
+from typing import List, Tuple
 
 # Token weight estimates based on typical Lean tokenization
 TOKEN_WEIGHTS = {
@@ -115,13 +115,13 @@ def format_comparison(before: Tuple[int, int], after: Tuple[int, int]) -> str:
     output.append("\n" + "="*60)
     output.append("Optimization Comparison")
     output.append("="*60)
-    output.append("\nBEFORE:")
+    output.append(f"\nBEFORE:")
     output.append(f"  Lines:  {before_lines}")
     output.append(f"  Tokens: {before_tokens} (estimated)")
-    output.append("\nAFTER:")
+    output.append(f"\nAFTER:")
     output.append(f"  Lines:  {after_lines}")
     output.append(f"  Tokens: {after_tokens} (estimated)")
-    output.append("\nREDUCTION:")
+    output.append(f"\nREDUCTION:")
     output.append(f"  Lines:  -{line_diff} ({line_pct:.1f}%)")
     output.append(f"  Tokens: -{token_diff} ({token_pct:.1f}%)")
 
@@ -222,7 +222,7 @@ Token estimates are rough approximations for comparison purposes.
 
     lines, tokens = count_code_tokens(code)
 
-    print("\nToken Count")
+    print(f"\nToken Count")
     print("="*40)
     print(f"Lines:  {lines}")
     print(f"Tokens: {tokens} (estimated)")

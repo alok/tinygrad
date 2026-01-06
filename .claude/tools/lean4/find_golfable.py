@@ -8,7 +8,7 @@ Identifies optimization patterns with estimated reduction potential.
 import re
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
 @dataclass
@@ -63,6 +63,7 @@ def find_let_have_exact(file_path: Path, lines: List[str], filter_multi_use: boo
 
             # Check if followed by have and exact within next 15 lines
             has_have = False
+            has_exact = False
             end_idx = min(i + 15, len(lines))
 
             for j in range(i + 1, end_idx):
@@ -70,6 +71,8 @@ def find_let_have_exact(file_path: Path, lines: List[str], filter_multi_use: boo
                 if re.match(r'have\s+\w+\s*:', next_line):
                     has_have = True
                 if next_line.startswith('exact '):
+                    has_exact = True
+
                     if has_have:
                         # Check if this is a false positive (multiple uses)
                         if filter_multi_use:
@@ -387,7 +390,7 @@ def format_output(patterns: List[GolfablePattern], verbose: bool = False) -> str
         output.append(f"   Lines: {pattern.line_count} | Est. reduction: {pattern.reduction_estimate}")
 
         if verbose:
-            output.append("\n   Preview:")
+            output.append(f"\n   Preview:")
             for line in pattern.snippet.split('\n')[:5]:
                 output.append(f"   | {line}")
 
@@ -399,7 +402,7 @@ def format_output(patterns: List[GolfablePattern], verbose: bool = False) -> str
     low = sum(1 for p in patterns if p.priority == 'LOW')
 
     output.append(f"Summary: {high} HIGH, {med} MEDIUM, {low} LOW priority")
-    output.append("Expected total reduction: 30-40% with systematic optimization\n")
+    output.append(f"Expected total reduction: 30-40% with systematic optimization\n")
 
     return '\n'.join(output)
 

@@ -163,9 +163,7 @@ def format_output(file_path: Path, bindings: List[LetBinding],
         output.append(f"{'─'*70}")
         for b in dont_inline:
             output.append(f"\n  {b.name} (line {b.line_number})")
-            use_preview = ", ".join(map(str, b.use_locations[:5]))
-            use_suffix = "..." if len(b.use_locations) > 5 else ""
-            output.append(f"    Used: {b.uses_count} times (lines: {use_preview}{use_suffix})")
+            output.append(f"    Used: {b.uses_count} times (lines: {', '.join(map(str, b.use_locations[:5]))}{'...' if len(b.use_locations) > 5 else ''})")
             output.append(f"    Definition: ~{b.definition_tokens} tokens")
             output.append(f"    Impact: {b.token_impact}")
             output.append(f"    → {b.recommendation}")
@@ -207,7 +205,7 @@ def format_output(file_path: Path, bindings: List[LetBinding],
 
     # Summary
     output.append(f"{'='*70}")
-    output.append("SUMMARY")
+    output.append(f"SUMMARY")
     output.append(f"{'='*70}")
     output.append(f"  Total let bindings: {len(bindings)}")
     output.append(f"  ⚠️  Don't inline (used ≥3 times): {len(dont_inline)}")
@@ -218,7 +216,7 @@ def format_output(file_path: Path, bindings: List[LetBinding],
 
     if dont_inline:
         output.append(f"⚠️  WARNING: {len(dont_inline)} bindings would INCREASE tokens if inlined!")
-        output.append("   These are FALSE POSITIVES for let+have+exact pattern.")
+        output.append(f"   These are FALSE POSITIVES for let+have+exact pattern.")
         output.append("")
 
     return '\n'.join(output)
@@ -237,10 +235,10 @@ def analyze_specific_binding(file_path: Path, line_number: int) -> Optional[str]
             output.append(f"{'='*70}\n")
             output.append(f"Definition: {definition}")
             output.append(f"Definition size: ~{binding.definition_tokens} tokens\n")
-            output.append("Usage:")
+            output.append(f"Usage:")
             output.append(f"  Count: {binding.uses_count} times")
             output.append(f"  Locations: {', '.join(map(str, binding.use_locations))}\n")
-            output.append("Token Impact:")
+            output.append(f"Token Impact:")
             output.append(f"  Current: ~{binding.definition_tokens + binding.uses_count * 2} tokens")
             output.append(f"           ({binding.definition_tokens} def + {binding.uses_count} × 2 uses)")
             output.append(f"  Inlined: ~{binding.definition_tokens * binding.uses_count} tokens")
@@ -303,7 +301,7 @@ Key insight:
     # Specific line analysis
     if args.line:
         if not path.is_file():
-            print("Error: --line requires a file, not a directory", file=sys.stderr)
+            print(f"Error: --line requires a file, not a directory", file=sys.stderr)
             return 1
         result = analyze_specific_binding(path, args.line)
         print(result)

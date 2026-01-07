@@ -141,12 +141,12 @@ def traceEventsToJson : IO Lean.Json := do
   return .arr (events.map toJson)
 
 /-- Build and optionally write trace report if TG4_TRACE_OUT is set -/
-def maybeWriteTraceReport (meta : TraceMeta) : IO Unit := do
+def maybeWriteTraceReport (traceMeta : TraceMeta) : IO Unit := do
   match ← traceOutPath? with
   | none => return
   | some path =>
     let events ← getTraceEvents
-    let report : TraceReport := { metaInfo := meta, events }
+    let report : TraceReport := { metaInfo := traceMeta, events }
     writeReport path report
 
 end TinyGrad4.Benchmark.Trace

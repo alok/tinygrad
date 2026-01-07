@@ -20,6 +20,7 @@ import TinyGrad4.Backend.MetalEwise
 import TinyGrad4.Backend.MetalGather
 import TinyGrad4.Backend.DeviceBuffer
 import TinyGrad4.Tags
+import TinyGrad4.Benchmark.Trace
 import Std.Data.HashMap
 
 -- Disable IO.monoNanosNow linter: interpreter instrumentation uses raw monotonic clocks.
@@ -2465,6 +2466,14 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
     let (cache, evalNs) ← evalCompiledRawTimedTotal compiled env
     pure (cache, compileNs, evalNs)
 
+  /-- Traced version of evalManyCached that emits trace events when TG4_TRACE=1.
+      Emits: schedule (compile phase), eval (execution phase) with UOp stats. -/
+  def evalManyCachedTraced (roots : List UOp) (env : Env) : IO (HashMap UOpId RawBuffer) := do
+    open Benchmark.Trace in
+    let uopStats := UOp.UOpStats.ofNodes (UOp.toposortMany roots)
+    let compiled ← withTrace "schedule" (some uopStats) (compileManyCached roots)
+    withTrace "eval" none (evalCompiledRawIOInner compiled env)
+
   def evalCached (u : UOp) (env : Env) : IO RawBuffer := do
     let cache ← evalManyCached [u] env
     pure (cache.getD u.uid (RawBuffer.zeros u.dtype (listProd u.shape)))
@@ -2478,6 +2487,11 @@ def evalTensor {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := �
 
 def evalTensorCached {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer :=
   evalCached t.uop env
+
+/-- Traced version of evalTensorCached that emits trace events when TG4_TRACE=1 -/
+def evalTensorCachedTraced {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer := do
+  let cache ← evalManyCachedTraced [t.uop] env
+  pure (cache.getD t.uop.uid (RawBuffer.zeros t.uop.dtype (listProd t.uop.shape)))
 
 def setBuffer (env : Env) (u : UOp) (data : RawBuffer) : Env :=
   env.insert u.uid data

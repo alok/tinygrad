@@ -2469,10 +2469,9 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
   /-- Traced version of evalManyCached that emits trace events when TG4_TRACE=1.
       Emits: schedule (compile phase), eval (execution phase) with UOp stats. -/
   def evalManyCachedTraced (roots : List UOp) (env : Env) : IO (HashMap UOpId RawBuffer) := do
-    open Benchmark.Trace in
     let uopStats := UOp.UOpStats.ofNodes (UOp.toposortMany roots)
-    let compiled ← withTrace "schedule" (some uopStats) (compileManyCached roots)
-    withTrace "eval" none (evalCompiledRawIOInner compiled env)
+    let compiled ← Benchmark.Trace.withTrace "schedule" (some uopStats) (compileManyCached roots)
+    Benchmark.Trace.withTrace "eval" none (evalCompiledRawIOInner compiled env)
 
   def evalCached (u : UOp) (env : Env) : IO RawBuffer := do
     let cache ← evalManyCached [u] env

@@ -13,6 +13,7 @@ import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Tensor.Math
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Benchmark.Instrumentation
+import TinyGrad4.Benchmark.Trace
 -- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
 set_option linter.monoNanosNow false
 
@@ -188,14 +189,16 @@ private def extrasJson (cfg : BenchParams) (snap : ProfileSnapshot) : Lean.Json 
     ("stages", stageArr)
   ]
 
-private def indexSelectJson (cfg : BenchParams) (snap : IndexSelectSnapshot) : Lean.Json :=
+private def indexSelectJson (cfg : BenchParams) (snap : IndexSelectSnapshot) : IO Lean.Json := do
   let configObj := Lean.Json.mkObj [
     ("data_dir", Lean.Json.str cfg.dataDir),
     ("max_images", Lean.Json.num cfg.indexSelectMaxImages),
     ("batch_size", Lean.Json.num cfg.indexSelectBatchSize),
     ("validate", Lean.Json.bool cfg.indexSelectValidate)
   ]
-  Lean.Json.mkObj [
+  -- Include trace events if tracing is enabled
+  let traceJson ← Benchmark.Trace.traceEventsToJson
+  return Lean.Json.mkObj [
     ("config", configObj),
     ("batches", Lean.Json.num snap.batches),
     ("total", jsonNumOfFloat snap.total),
@@ -205,7 +208,8 @@ private def indexSelectJson (cfg : BenchParams) (snap : IndexSelectSnapshot) : L
     ("out_dtype", Lean.Json.str snap.outDType),
     ("fused_gather_count", Lean.Json.num snap.fusedGatherCount),
     ("fused_gather_match_count", Lean.Json.num snap.fusedGatherMatchCount),
-    ("validated", Lean.Json.bool snap.validated)
+    ("validated", Lean.Json.bool snap.validated),
+    ("trace_events", traceJson)
   ]
 
 private def bytesFromUInt32 (v : UInt32) : Array UInt8 :=
@@ -347,7 +351,8 @@ private def runIndexSelectSmall (cfg : BenchParams) : IO IndexSelectSnapshot := 
     let idxBytes := packI32 idxSlice
     let idxRaw : RawBuffer := { dtype := .int32, data := idxBytes }
     let env := TinyGrad4.Interpreter.setBuffer baseEnv idxBuf idxRaw
-    let out ← TinyGrad4.Interpreter.evalTensorCached sumT env
+    -- Use traced version to emit trace events when TG4_TRACE=1
+    let out ← TinyGrad4.Interpreter.evalTensorCachedTraced sumT env
     if i == 0 then
       outDType := toString (repr out.dtype)
     let v := RawBuffer.decodeScalarF32 out
@@ -407,13 +412,18 @@ initialize do
   LeanBench.register {
     name := "dataloader/mnist/indexselect-small"
     action := do
+      -- Reset trace events before running
+      Benchmark.Trace.resetTraceEvents
       let snap ← runIndexSelectSmall cfg
       indexSelectStats.set snap
       -- Print profile events (gather kernel timing) when PROFILE=1
       TinyGrad4.Benchmark.printProfileEvents
       TinyGrad4.Benchmark.resetProfileEvents
+      -- Print trace events when TG4_TRACE=1
+      Benchmark.Trace.printTraceEvents
     report? := some do
-      indexSelectJson cfg <$> indexSelectStats.get
+      let snap ← indexSelectStats.get
+      indexSelectJson cfg snap
     config := indexSelectConfig cfg ["data", "mnist", "indexselect", "small"]
   }
 

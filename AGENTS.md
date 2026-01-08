@@ -65,6 +65,10 @@ Use **2-space indentation**, and keep lines to a maximum of **150 characters**. 
 
 Default to full benchmark runs. Only use quick runs when explicitly setting `TINYGRAD4_BENCH_QUICK=1` to speed local iteration.
 
+## Linear
+
+When writing Linear updates (issues, docs, comments), tag yourself explicitly in the Linear entry (e.g., prefix with `[agent: codex]`) so it's traceable.
+
 ## Handoff notes
 
 - Lean backend now supports view stacks end-to-end (ewise/reduce/matmul); fused reduce supports multi-axis (sum/max) with view/stack paths.

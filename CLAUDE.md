@@ -138,6 +138,10 @@ Where `{arch}` is one of: `rdna3`, `rdna4`, `cdna`
 
 To add missing instruction implementations, add them to `extra/assembly/amd/emu.py` instead.
 
+## Linear
+
+When writing Linear updates (issues, docs, comments), tag yourself explicitly in the Linear entry (e.g., prefix with `[agent: codex]`) so it's traceable.
+
 ## Style Notes
 
 - 2-space indentation, 150 char line limit

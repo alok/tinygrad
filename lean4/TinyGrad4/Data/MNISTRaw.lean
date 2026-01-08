@@ -4,6 +4,8 @@ import TinyGrad4.Data.Transform
 import TinyGrad4.Backend.Accelerate
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.Cuda
+import TinyGrad4.Backend.MetalGather
+import TinyGrad4.Backend.CudaGather
 import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Tensor.Math
 import TinyGrad4.UOp.UOp
@@ -428,6 +430,9 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   let imgRaw : RawBuffer := { dtype := .uint8, data := mnist.images.data.toByteArray }
   let baseEnv := setBuffer (∅ : Env) imgBuf imgRaw
 
+  TinyGrad4.Backend.MetalGather.clearGatherKernelStats
+  TinyGrad4.Backend.CudaGather.clearGatherKernelStats
+
   let mut shuffleTGTimes : Array Nat := #[]
   let mut shuffleTGTotal : Float := 0.0
   for iter in [:iterations] do
@@ -453,6 +458,32 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
   let shuffleTGMedian := (shuffleTGTimes[iterations / 2]!).toFloat / 1e6
   IO.println s!"  Shuffle + batch (indexSelect): {shuffleTGMedian} ms ({numBatches.toFloat * 1000.0 / shuffleTGMedian} batch/s)"
   IO.println s!"    total = {shuffleTGTotal}"
+
+  let printGatherStats (label : String) (launches kernelNs totalNs minKernelNs maxKernelNs minTotalNs maxTotalNs : Nat) : IO Unit := do
+    if launches == 0 then
+      return
+    let launchesF := launches.toFloat
+    let avgKernelMs := kernelNs.toFloat / launchesF / 1.0e6
+    let avgTotalMs := totalNs.toFloat / launchesF / 1.0e6
+    let minKernelMs := minKernelNs.toFloat / 1.0e6
+    let maxKernelMs := maxKernelNs.toFloat / 1.0e6
+    let minTotalMs := minTotalNs.toFloat / 1.0e6
+    let maxTotalMs := maxTotalNs.toFloat / 1.0e6
+    IO.println (
+      s!"  Gather kernel timing ({label}): launches={launches} " ++
+      s!"kernel_avg_ms={avgKernelMs} min={minKernelMs} max={maxKernelMs} " ++
+      s!"total_avg_ms={avgTotalMs} min={minTotalMs} max={maxTotalMs}"
+    )
+
+  let cudaStats ← TinyGrad4.Backend.CudaGather.getGatherKernelStats
+  printGatherStats "CUDA"
+    cudaStats.launches cudaStats.kernelNs cudaStats.totalNs
+    cudaStats.minKernelNs cudaStats.maxKernelNs cudaStats.minTotalNs cudaStats.maxTotalNs
+
+  let metalStats ← TinyGrad4.Backend.MetalGather.getGatherKernelStats
+  printGatherStats "Metal"
+    metalStats.launches metalStats.kernelNs metalStats.totalNs
+    metalStats.minKernelNs metalStats.maxKernelNs metalStats.minTotalNs metalStats.maxTotalNs
 
   -- 4. Accelerate SIMD checksum
   IO.println ""

@@ -39,6 +39,44 @@ def getOrCompile (name : String) (shader : String) : IO MetalProgram := do
     programCache.modify (·.insert name prog)
     return prog
 
+/-! ## Timing Stats -/
+
+structure GatherKernelStats where
+  launches : Nat := 0
+  kernelNs : Nat := 0
+  totalNs : Nat := 0
+  minKernelNs : Nat := 0
+  maxKernelNs : Nat := 0
+  minTotalNs : Nat := 0
+  maxTotalNs : Nat := 0
+  deriving Repr
+
+instance : Inhabited GatherKernelStats := ⟨{}⟩
+
+initialize gatherKernelStatsRef : IO.Ref GatherKernelStats ← IO.mkRef {}
+
+def clearGatherKernelStats : IO Unit :=
+  gatherKernelStatsRef.set {}
+
+def getGatherKernelStats : IO GatherKernelStats :=
+  gatherKernelStatsRef.get
+
+private def updateGatherKernelStats (kernelNs totalNs : Nat) : IO Unit := do
+  gatherKernelStatsRef.modify fun s =>
+    let launches := s.launches + 1
+    let minKernel := if s.launches == 0 then kernelNs else Nat.min s.minKernelNs kernelNs
+    let maxKernel := if s.launches == 0 then kernelNs else Nat.max s.maxKernelNs kernelNs
+    let minTotal := if s.launches == 0 then totalNs else Nat.min s.minTotalNs totalNs
+    let maxTotal := if s.launches == 0 then totalNs else Nat.max s.maxTotalNs totalNs
+    { s with
+      launches
+      kernelNs := s.kernelNs + kernelNs
+      totalNs := s.totalNs + totalNs
+      minKernelNs := minKernel
+      maxKernelNs := maxKernel
+      minTotalNs := minTotal
+      maxTotalNs := maxTotal }
+
 /-! ## Kernel Dispatch -/
 
 def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
@@ -46,6 +84,8 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
   let numel := listProd outShape
   if numel == 0 then
     return zerosRaw dtype 0
+
+  let totalStart ← IO.monoNanosNow
 
   let elemSize := dtype.itemsize
   let outBytes := numel * elemSize
@@ -62,15 +102,20 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
   let prog ← withProfile "METAL" "gather_compile" (getOrCompile name shader)
   let threadsPerGroup : Nat := 256
   let totalThreads := numel
+  let kernelStart ← IO.monoNanosNow
   withProfile "METAL" "gather_launch" do
     metalLaunch prog #[xBuf, idxBuf, outBuf] totalThreads 1 1 threadsPerGroup 1 1
     metalSync
+  let kernelStop ← IO.monoNanosNow
 
   let outBytes' ← metalCopyOutBytes outBuf outBytes
+  let totalStop ← IO.monoNanosNow
 
   metalFree xBuf
   metalFree idxBuf
   metalFree outBuf
+
+  updateGatherKernelStats (kernelStop - kernelStart) (totalStop - totalStart)
 
   return { dtype := dtype, data := outBytes' }
 

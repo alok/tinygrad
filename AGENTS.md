@@ -59,7 +59,7 @@ When adding a new subsystem:
 
 ## style
 
-Use **2-space indentation**, and keep lines to a maximum of **150 characters**. Match the existing style.
+Use **2-space indentation**, and keep lines to a maximum of **150 characters**. Match the existing style.<<<<<<< ours
 
 ## Bench workflow
 
@@ -107,3 +107,50 @@ Located in `.claude/tools/lean4/`, these scripts assist with Lean 4 development.
 
 Bench code after creating it. Write benchmarks like you write property/unit
 tests. See tinygrad's testing.
+||||||| original
+
+=======
+
+## Bench workflow
+
+Default to full benchmark runs. Only use quick runs when explicitly setting `TINYGRAD4_BENCH_QUICK=1` to speed local iteration.
+
+## Handoff notes
+
+- Lean backend now supports view stacks end-to-end (ewise/reduce/matmul); fused reduce supports multi-axis (sum/max) with view/stack paths.
+- Build passes: `cd lean4 && lake build TinyGrad4`.
+
+## Handoff TODO (hierarchical)
+
+- 1. Upstream Python parity
+  - 1.1 Pull upstream `tinygrad` Python changes; rebase/merge in small pieces and resolve renames/deletions.
+  - 1.2 Keep Python toolchain current; use `uv` for pytest and general Python workflows.
+  - 1.3 Compare upstream design changes to local patches; remove/adjust local code accordingly, keep tests green.
+- 2. Lean runtime parity + improvements
+  - 2.1 Add regression tests for view stacks (ewise/reduce/matmul) and multi-axis reduce (keepdim true/false).
+  - 2.2 Expand dtype coverage (float64/float16/bfloat16) and non-f32 movement ops; add smoke tests.
+  - 2.3 Add a GC/graph-growth guard option to prevent hangs when the graph grows.
+  - 2.4 Improve fusion/ShapeTracker correctness and performance; remove remaining stack fallbacks where safe.
+  - 2.5 Add benchmark instrumentation to measure compile time, wait time, and kernel time.
+- 3. Core ML lib + array work
+  - 3.1 Bring core ML library parity with Python (nn/optim/data loaders).
+  - 3.2 Strengthen array/tensor ergonomics and performance (ByteArray/BitVec paths, fewer bounds checks).
+
+## Helper Tools (Lean 4)
+
+Located in `.claude/tools/lean4/`, these scripts assist with Lean 4 development.
+
+- **`search_mathlib.sh <query> [type]`**: Search Mathlib for declarations.
+  - Types: `name` (default), `type` (signature), `content`.
+  - Example: `.claude/tools/lean4/search_mathlib.sh "continuous" name`
+- **`analyze_let_usage.py <file>`**: Detects inefficient `let` bindings that increase token count when inlined.
+  - Example: `python3 .claude/tools/lean4/analyze_let_usage.py lean4/MyFile.lean`
+- **`check_axioms.sh`**: Verify axioms used by declarations.
+- **`sorry_analyzer.py`**: Analyze `sorry` usage to track missing proofs.
+- **`find_golfable.py`**: Identify code sections that might be shortened.
+
+---
+
+Bench code after creating it. Write benchmarks like you write property/unit
+tests. See tinygrad's testing.
+>>>>>>> theirs

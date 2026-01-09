@@ -1,16 +1,18 @@
 -- Import linters early so they run on all files that import Basic
 import TinyGrad4.Linter.FloatLinter
 import TinyGrad4.Linter.RawBufferLinter
+import TinyGrad4.Linter.ByteArrayCapacityLinter
+import TinyGrad4.Linter.MonoNanosNowLinter
 
 namespace TinyGrad4
 
 /-!
 # Basic utilities and axioms for TinyGrad4
 
-## sorry_proof axiom
+## `sorry_proof` axiom
 Following the pattern from Grassmann4 and SciLean, we use `sorry_proof` to defer
 proof obligations for Float operations. This allows:
-- Computation to work via `#eval`
+- Computation to work via {lit}`#eval`
 - Type-checking to pass
 - Proofs to be filled in later (or left as axioms for practical use)
 
@@ -21,7 +23,7 @@ but for practical deep learning this is acceptable.
 /-- Axiom for deferring proof obligations. Use sparingly and document why. -/
 axiom sorryProofAxiom {P : Prop} : P
 
-/-- Macro for convenient sorry_proof usage -/
+/-- Macro for convenient `sorry_proof` usage. -/
 macro "sorry_proof" : term => `(sorryProofAxiom)
 
 /-- Product of a list of natural numbers -/
@@ -39,6 +41,30 @@ def listZipWith (f : α → β → γ) : List α → List β → List γ
   | [], _ => []
   | _, [] => []
   | a :: as, b :: bs => f a b :: listZipWith f as bs
+
+/-- Zip three lists with a function -/
+def listZipWith3 (f : α → β → γ → δ) : List α → List β → List γ → List δ
+  | [], _, _ => []
+  | _, [], _ => []
+  | _, _, [] => []
+  | a :: as, b :: bs, c :: cs => f a b c :: listZipWith3 f as bs cs
+
+/-- Zip four lists with a function -/
+def listZipWith4 (f : α → β → γ → δ → ε) : List α → List β → List γ → List δ → List ε
+  | [], _, _, _ => []
+  | _, [], _, _ => []
+  | _, _, [], _ => []
+  | _, _, _, [] => []
+  | a :: as, b :: bs, c :: cs, d :: ds => f a b c d :: listZipWith4 f as bs cs ds
+
+/-- Zip five lists with a function -/
+def listZipWith5 (f : α → β → γ → δ → ε → ζ) : List α → List β → List γ → List δ → List ε → List ζ
+  | [], _, _, _, _ => []
+  | _, [], _, _, _ => []
+  | _, _, [], _, _ => []
+  | _, _, _, [], _ => []
+  | _, _, _, _, [] => []
+  | a :: as, b :: bs, c :: cs, d :: ds, e :: es => f a b c d e :: listZipWith5 f as bs cs ds es
 
 /-- Check if all elements satisfy a predicate -/
 def listAll (p : α → Bool) : List α → Bool
@@ -74,6 +100,7 @@ def listIndexOf [DecidableEq α] (xs : List α) (a : α) : Nat :=
 
 /-- Unique identifier type -/
 structure Id where
+  /-- Raw numeric identifier. -/
   val : Nat
   deriving DecidableEq, Repr, Hashable, Ord
 

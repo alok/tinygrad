@@ -13,7 +13,6 @@ Usage:
 import os
 import sys
 import json
-import time
 import urllib.request
 import urllib.error
 
@@ -29,9 +28,12 @@ CUDA_BENCHMARK = '''
 #include <time.h>
 #include <math.h>
 
-#define CHECK_CU(x) { CUresult err = (x); if (err != CUDA_SUCCESS) { const char* s; cuGetErrorString(err, &s); fprintf(stderr, "CUDA error: %s\\n", s); exit(1); } }
+#define CHECK_CU(x) { CUresult err = (x); if (err != CUDA_SUCCESS) { const char* s; \
+    cuGetErrorString(err, &s); fprintf(stderr, "CUDA error: %s\\n", s); exit(1); } }
 
-const char* KERNEL = "extern \\"C\\" __global__ void add(const float* a, const float* b, float* out, int n) { int i = blockIdx.x * blockDim.x + threadIdx.x; if (i < n) out[i] = a[i] + b[i]; }";
+const char* KERNEL =
+    "extern \\"C\\" __global__ void add(const float* a, const float* b, float* out, int n) "
+    "{ int i = blockIdx.x * blockDim.x + threadIdx.x; if (i < n) out[i] = a[i] + b[i]; }";
 
 int main() {
     printf("=== TinyGrad4 CUDA Benchmark ===\\n");

@@ -3,13 +3,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_ROOT"
+LEAN4_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="$(cd "$LEAN4_DIR/.." && pwd)"
+cd "$ROOT_DIR"
 
 echo "=== Building Comprehensive Benchmark ==="
 
 # 1. Build Metal FFI
-./scripts/build_metal.sh
+"$LEAN4_DIR/scripts/build_metal.sh"
 
 # 2. Build Lean components (will fail at link stage due to Metal symbols)
 echo ""
@@ -19,11 +20,11 @@ lake build comprehensive_bench 2>&1 | grep -v "undefined symbol" | tail -20 || t
 # 3. Find object files from Lake build
 echo ""
 echo "Step 3: Extracting object files..."
-OBJ_DIR=".lake/build/ir"
+OBJ_DIR="$ROOT_DIR/.lake/build/ir"
 LAKE_CACHE="$HOME/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/lake/cache/artifacts"
 
 # Get the list of object files that Lake tried to link
-OBJS=$(find "$LAKE_CACHE" -name "*.o" -newer .lake/build/lib/lean/TinyGrad4/Test/ComprehensiveBench.olean 2>/dev/null | head -20)
+OBJS=$(find "$LAKE_CACHE" -name "*.o" -newer "$ROOT_DIR/.lake/build/lib/lean/TinyGrad4/Test/ComprehensiveBench.olean" 2>/dev/null | head -20)
 echo "Found $(echo "$OBJS" | wc -l | tr -d ' ') object files"
 
 # 4. Link with system clang (has Metal framework support)
@@ -31,17 +32,17 @@ echo ""
 echo "Step 4: Linking with system clang..."
 
 LEAN_ROOT="$HOME/.elan/toolchains/leanprover--lean4---v4.27.0-rc1"
-OUTPUT=".lake/build/bin/comprehensive_bench"
+OUTPUT="$ROOT_DIR/.lake/build/bin/comprehensive_bench"
 
 # Get ALL object files from the lake cache that are newer than the olean
 ALL_OBJS=$(ls -t "$LAKE_CACHE"/*.o 2>/dev/null | head -20)
 
-mkdir -p .lake/build/bin
+mkdir -p "$ROOT_DIR/.lake/build/bin"
 
 /usr/bin/clang++ \
     $ALL_OBJS \
-    .lake/build/lib/libtg4c.a \
-    .lake/build/metal/libtg4metal.a \
+    "$ROOT_DIR/.lake/build/lib/libtg4c.a" \
+    "$ROOT_DIR/.lake/build/metal/libtg4metal.a" \
     -L"$LEAN_ROOT/lib/lean" \
     -L"$LEAN_ROOT/lib" \
     -lleancpp -lInit -lStd -lLean -lleanrt -lLake -lgmp -luv \

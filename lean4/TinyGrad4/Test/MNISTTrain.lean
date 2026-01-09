@@ -2,6 +2,9 @@ import TinyGrad4
 import TinyGrad4.Data.MNIST
 import TinyGrad4.Optim.SGD
 
+-- Disable RawBuffer linter for test files that need Array Float literals
+set_option linter.useRawBuffer false
+
 /-!
 # Real MNIST Training
 

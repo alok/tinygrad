@@ -1,4 +1,5 @@
 import TinyGrad4
+import TinyGrad4.Data.ArrayN
 
 /-!
 # MathOpsSmoke
@@ -7,6 +8,9 @@ Smoke tests for new activations, norms, and losses.
 -/
 
 namespace TinyGrad4.Test.MathOpsSmoke
+
+-- Disable RawBuffer linter for test files that need Array Float literals
+set_option linter.useRawBuffer false
 
 open TinyGrad4
 open Interpreter
@@ -236,6 +240,20 @@ def testGatherScatter : IO Unit := do
   assertEqF32 gVals #[0.0, 4.0] "gatherLast"
   let sVals := evalTensor scattered
   assertEqF32 sVals #[5.0, 0.0, 0.0, 0.0, 5.0, 0.0] "scatterLast"
+
+def testIndexSelect : IO Unit := do
+  let selected := runTensorM do
+    let base ← Tensor.arange 6
+    let base2 ← reshape base [3, 2]
+    let idx0 ← Tensor.arange 2
+    let two ← Tensor.full [2] .float32 2.0
+    let idx1 ← mul idx0 two
+    let idx2 ← flip idx1 [0]
+    let idx ← cast idx2 .int32
+    let gathered ← indexSelect base2 0 idx
+    pure gathered
+  let vals := evalTensor selected
+  assertEqF32 vals #[4.0, 5.0, 0.0, 1.0] "indexSelect"
 
 def testArangeLinspaceRand : IO Unit := do
   let (a, l, r, rn, ri, zLike, oLike, fLike) := runTensorM do
@@ -556,6 +574,8 @@ def runAll : IO Unit := do
   IO.println "✓ movement int16 eval"
   testGatherScatter
   IO.println "✓ gather/scatter eval"
+  testIndexSelect
+  IO.println "✓ indexSelect eval"
   testArangeLinspaceRand
   IO.println "✓ arange/linspace/rand eval"
   testMaxMinArg

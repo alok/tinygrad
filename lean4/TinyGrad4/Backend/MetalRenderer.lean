@@ -20,7 +20,7 @@ type system for correctness.
 
 ## Example Output
 
-```metal
+```
 kernel void fused_add_mul(
     device const float* a [[buffer(0)]],
     device const float* b [[buffer(1)]],
@@ -448,7 +448,7 @@ def ReduceOp.atomicOp : ReduceOp → String
     - threadgroupSize: threads per threadgroup (typically 256 or 1024)
 
     Generates Metal kernel like:
-    ```metal
+    ```
     kernel void reduce_sum(
         device const float* input [[buffer(0)]],
         device float* output [[buffer(1)]],
@@ -601,5 +601,206 @@ def opsToReduceOp : Ops → Option ReduceOp
   | .ADD => some .sum
   | .MAX => some .max
   | _ => none
+
+/-! ## Matrix Multiplication Kernels -/
+
+/-- Tile sizes for GEMM kernel. These should be tuned for the target GPU.
+    - {lit}`TILE_M`, {lit}`TILE_N`: Output tile computed by each threadgroup
+    - {lit}`TILE_K`: Reduction dimension chunk size for loading A and B tiles
+    - {lit}`THREADS_M`, {lit}`THREADS_N`: Thread layout within threadgroup -/
+structure GemmConfig where
+  tileM : Nat := 32
+  tileN : Nat := 32
+  tileK : Nat := 8
+  threadsM : Nat := 8
+  threadsN : Nat := 8
+  deriving Repr
+
+/-- Default GEMM configuration tuned for Apple Silicon -/
+def defaultGemmConfig : GemmConfig := {}
+
+/-- Generate a tiled GEMM kernel for C = A @ B.
+    A: {lit}`[M, K]`, B: {lit}`[K, N]`, C: {lit}`[M, N]`
+
+    Each threadgroup computes a TILE_M × TILE_N block of output.
+    Uses threadgroup memory to cache tiles of A and B.
+    Each thread computes a 4×4 block of output using register blocking.
+
+    This is a standard tiled GEMM suitable for most problem sizes.
+    For very small matrices, consider a simpler approach.
+-/
+def renderGemmKernel (name : String) (m k n : Nat) (cfg : GemmConfig := defaultGemmConfig) : String :=
+  let tileM := cfg.tileM
+  let tileN := cfg.tileN
+  let tileK := cfg.tileK
+  let threadsM := cfg.threadsM
+  let threadsN := cfg.threadsN
+  -- Each thread computes a sub-tile
+  let perThreadM := tileM / threadsM  -- e.g., 32/8 = 4
+  let perThreadN := tileN / threadsN  -- e.g., 32/8 = 4
+
+  s!"#include <metal_stdlib>
+using namespace metal;
+
+// Tiled GEMM: C[{m},{n}] = A[{m},{k}] @ B[{k},{n}]
+// Tile: {tileM}x{tileN}, K-tile: {tileK}, Threads: {threadsM}x{threadsN}
+// Each thread computes {perThreadM}x{perThreadN} output elements
+constant uint M = {m};
+constant uint K = {k};
+constant uint N = {n};
+constant uint TILE_M = {tileM};
+constant uint TILE_N = {tileN};
+constant uint TILE_K = {tileK};
+
+kernel void {name}(
+    device const float* A [[buffer(0)]],
+    device const float* B [[buffer(1)]],
+    device float* C [[buffer(2)]],
+    uint2 tgid [[threadgroup_position_in_grid]],
+    uint2 tid [[thread_position_in_threadgroup]]
+) \{
+    // Threadgroup shared memory for tiles
+    threadgroup float As[TILE_M][TILE_K];
+    threadgroup float Bs[TILE_K][TILE_N];
+
+    // Output tile position
+    uint row_base = tgid.y * TILE_M;
+    uint col_base = tgid.x * TILE_N;
+
+    // Thread's position within the tile
+    uint local_row = tid.y;  // 0..{threadsM-1}
+    uint local_col = tid.x;  // 0..{threadsN-1}
+
+    // Register accumulator for this thread's {perThreadM}x{perThreadN} sub-tile
+    float acc[{perThreadM}][{perThreadN}];
+    for (uint i = 0; i < {perThreadM}; i++) \{
+        for (uint j = 0; j < {perThreadN}; j++) \{
+            acc[i][j] = 0.0f;
+        }
+    }
+
+    // Loop over K dimension in tiles
+    for (uint t = 0; t < K; t += TILE_K) \{
+        // Cooperatively load A tile [TILE_M x TILE_K] into shared memory
+        // Each thread loads multiple elements
+        for (uint i = local_row; i < TILE_M; i += {threadsM}) \{
+            for (uint kk = local_col; kk < TILE_K; kk += {threadsN}) \{
+                uint global_row = row_base + i;
+                uint global_k = t + kk;
+                As[i][kk] = (global_row < M && global_k < K) ? A[global_row * K + global_k] : 0.0f;
+            }
+        }
+
+        // Cooperatively load B tile [TILE_K x TILE_N] into shared memory
+        for (uint kk = local_row; kk < TILE_K; kk += {threadsM}) \{
+            for (uint j = local_col; j < TILE_N; j += {threadsN}) \{
+                uint global_k = t + kk;
+                uint global_col = col_base + j;
+                Bs[kk][j] = (global_k < K && global_col < N) ? B[global_k * N + global_col] : 0.0f;
+            }
+        }
+
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        // Compute partial dot products for this thread's sub-tile
+        for (uint kk = 0; kk < TILE_K; kk++) \{
+            for (uint i = 0; i < {perThreadM}; i++) \{
+                float a_val = As[local_row * {perThreadM} + i][kk];
+                for (uint j = 0; j < {perThreadN}; j++) \{
+                    float b_val = Bs[kk][local_col * {perThreadN} + j];
+                    acc[i][j] += a_val * b_val;
+                }
+            }
+        }
+
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    // Write output
+    for (uint i = 0; i < {perThreadM}; i++) \{
+        for (uint j = 0; j < {perThreadN}; j++) \{
+            uint out_row = row_base + local_row * {perThreadM} + i;
+            uint out_col = col_base + local_col * {perThreadN} + j;
+            if (out_row < M && out_col < N) \{
+                C[out_row * N + out_col] = acc[i][j];
+            }
+        }
+    }
+}"
+
+/-- Generate a simple matmul kernel for small matrices (no tiling).
+    Good for M, K, N < 64 where tiling overhead isn't worth it. -/
+def renderSimpleGemmKernel (name : String) (m k n : Nat) : String :=
+  s!"#include <metal_stdlib>
+using namespace metal;
+
+// Simple GEMM: C[{m},{n}] = A[{m},{k}] @ B[{k},{n}]
+// Each thread computes one output element
+kernel void {name}(
+    device const float* A [[buffer(0)]],
+    device const float* B [[buffer(1)]],
+    device float* C [[buffer(2)]],
+    uint2 gid [[thread_position_in_grid]]
+) \{
+    uint row = gid.y;
+    uint col = gid.x;
+    if (row >= {m} || col >= {n}) return;
+
+    float sum = 0.0f;
+    for (uint k = 0; k < {k}; k++) \{
+        sum += A[row * {k} + k] * B[k * {n} + col];
+    }
+    C[row * {n} + col] = sum;
+}"
+
+/-- Generate a batched matmul kernel: {lit}`C[B, M, N] = A[B, M, K] @ B[B, K, N]`
+    or with broadcast: {lit}`A[1, M, K] @ B[B, K, N] -> C[B, M, N]`
+
+    This is what conv2d needs - a batch of independent matrix multiplications.
+-/
+def renderBatchedGemmKernel (name : String) (batch m k n : Nat)
+    (aBatch kBatch : Nat := 1) : String :=
+  -- aBatch = 1 means A is shared across batch dimension
+  -- kBatch = 1 means B is shared across batch dimension
+  let aStride := if aBatch == 1 then 0 else m * k
+  let bStride := if kBatch == 1 then 0 else k * n
+
+  s!"#include <metal_stdlib>
+using namespace metal;
+
+// Batched GEMM: C[{batch},{m},{n}] = A @ B
+// A stride: {aStride} (per batch), B stride: {bStride} (per batch)
+// Each thread computes one output element
+kernel void {name}(
+    device const float* A [[buffer(0)]],
+    device const float* B [[buffer(1)]],
+    device float* C [[buffer(2)]],
+    uint3 gid [[thread_position_in_grid]]
+) \{
+    uint b = gid.z;   // batch index
+    uint row = gid.y; // M index
+    uint col = gid.x; // N index
+
+    if (b >= {batch} || row >= {m} || col >= {n}) return;
+
+    // Offset into A and B for this batch
+    device const float* A_b = A + b * {aStride};
+    device const float* B_b = B + b * {bStride};
+
+    float sum = 0.0f;
+    for (uint kk = 0; kk < {k}; kk++) \{
+        sum += A_b[row * {k} + kk] * B_b[kk * {n} + col];
+    }
+    C[b * {m * n} + row * {n} + col] = sum;
+}"
+
+/-- Choose appropriate GEMM kernel based on matrix sizes -/
+def renderGemmKernelAuto (name : String) (m k n : Nat) : String :=
+  if m ≤ 64 && k ≤ 64 && n ≤ 64 then
+    -- Small matrices: simple approach
+    renderSimpleGemmKernel name m k n
+  else
+    -- Larger matrices: tiled approach
+    renderGemmKernel name m k n
 
 end TinyGrad4.Backend.MetalRenderer

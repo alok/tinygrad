@@ -72,25 +72,34 @@ def isContiguousOrBroadcast (v : View) : Bool := Id.run do
       ok := false
   return ok
 
-/-- Expand to target shape (broadcast-friendly). -/
+/-- Expand to target shape (broadcast-friendly).
+    Handles rank mismatches by prepending dimensions with stride 0. -/
 def expand (v : View) (target : Shape) : Option View := Id.run do
   let tgt := target.toArray
-  if v.kernelShape.size != tgt.size then
+  let inRank := v.kernelShape.size
+  let outRank := tgt.size
+  if v.maskStart.size != inRank || v.maskEnd.size != inRank then
     return none
-  if v.maskStart.size != v.kernelShape.size || v.maskEnd.size != v.kernelShape.size then
+  -- Handle rank mismatch: prepend 1s to input shape
+  let prependCount := if outRank > inRank then outRank - inRank else 0
+  let paddedShape := (Array.replicate prependCount 1) ++ v.kernelShape
+  let paddedStrides := (Array.replicate prependCount 0) ++ v.strides
+  let paddedMaskStart := (Array.replicate prependCount 0) ++ v.maskStart
+  let paddedMaskEnd := (Array.replicate prependCount 1) ++ v.maskEnd
+  if paddedShape.size != outRank then
     return none
-  let mut strides := Array.emptyWithCapacity tgt.size
-  let mut maskStart := Array.emptyWithCapacity tgt.size
-  let mut maskEnd := Array.emptyWithCapacity tgt.size
-  for i in [:tgt.size] do
-    let inDim := v.kernelShape[i]!
+  let mut strides := Array.emptyWithCapacity outRank
+  let mut maskStart := Array.emptyWithCapacity outRank
+  let mut maskEnd := Array.emptyWithCapacity outRank
+  for i in [:outRank] do
+    let inDim := paddedShape[i]!
     let outDim := tgt[i]!
     if inDim == outDim then
-      strides := strides.push v.strides[i]!
-      maskStart := maskStart.push v.maskStart[i]!
-      maskEnd := maskEnd.push v.maskEnd[i]!
+      strides := strides.push paddedStrides[i]!
+      maskStart := maskStart.push paddedMaskStart[i]!
+      maskEnd := maskEnd.push paddedMaskEnd[i]!
     else if inDim == 1 then
-      if v.maskStart[i]! != 0 || v.maskEnd[i]! != 1 then
+      if paddedMaskStart[i]! != 0 || paddedMaskEnd[i]! != 1 then
         return none
       strides := strides.push 0
       maskStart := maskStart.push 0

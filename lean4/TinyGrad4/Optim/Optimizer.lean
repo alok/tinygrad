@@ -1,4 +1,5 @@
 import TinyGrad4.Tensor.Tensor
+import TinyGrad4.UOp.Typed
 import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Gradient.Autodiff
 import TinyGrad4.Optim.Adam
@@ -70,9 +71,10 @@ def applyUpdates {s : List Nat} {d : DType}
   let mut result : List (StaticTensor s d) := []
   for (p, u) in params.zip updates do
     -- Create new tensor from updated values
-    let newUop ← UOp.vconstRaw u s
-    let reshaped ← UOp.reshape newUop s
-    result := result ++ [{ uop := reshaped, h_shape := sorry_proof, requiresGrad := p.requiresGrad }]
+    let newUop ← TUOp.vconstRaw u s
+    let newUop := TUOp.castDType newUop d
+    let reshaped ← TUOp.reshape newUop s
+    result := result ++ [StaticTensor.ofTUOp reshaped p.requiresGrad]
   pure result
 
 -- Instance: Adam implements Optimizer

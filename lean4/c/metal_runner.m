@@ -83,17 +83,20 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // Allocate buffers
+        // Allocate buffers (3 buffers: a, b, out)
         size_t buf_size = size * sizeof(float);
         id<MTLBuffer> buf0 = [device newBufferWithLength:buf_size options:MTLResourceStorageModeShared];
         id<MTLBuffer> buf1 = [device newBufferWithLength:buf_size options:MTLResourceStorageModeShared];
+        id<MTLBuffer> buf2 = [device newBufferWithLength:buf_size options:MTLResourceStorageModeShared];
 
         // Initialize input data
         float* data0 = (float*)[buf0 contents];
         float* data1 = (float*)[buf1 contents];
+        float* data2 = (float*)[buf2 contents];
         for (size_t i = 0; i < size; i++) {
             data0[i] = (float)(i % 1000) / 1000.0f;
             data1[i] = (float)((i + 500) % 1000) / 1000.0f;
+            data2[i] = 0.0f;  // Zero output buffer
         }
 
         // Create command queue
@@ -106,9 +109,9 @@ int main(int argc, char* argv[]) {
             [encoder setComputePipelineState:pipeline];
             [encoder setBuffer:buf0 offset:0 atIndex:0];
             [encoder setBuffer:buf1 offset:0 atIndex:1];
+            [encoder setBuffer:buf2 offset:0 atIndex:2];
 
             NSUInteger threadGroupSize = MIN(pipeline.maxTotalThreadsPerThreadgroup, 256);
-            MTLSize threads = MTLSizeMake(size, 1, 1);
             MTLSize threadgroups = MTLSizeMake((size + threadGroupSize - 1) / threadGroupSize, 1, 1);
             MTLSize groupSize = MTLSizeMake(threadGroupSize, 1, 1);
 
@@ -128,6 +131,7 @@ int main(int argc, char* argv[]) {
             [encoder setComputePipelineState:pipeline];
             [encoder setBuffer:buf0 offset:0 atIndex:0];
             [encoder setBuffer:buf1 offset:0 atIndex:1];
+            [encoder setBuffer:buf2 offset:0 atIndex:2];
 
             NSUInteger threadGroupSize = MIN(pipeline.maxTotalThreadsPerThreadgroup, 256);
             MTLSize threadgroups = MTLSizeMake((size + threadGroupSize - 1) / threadGroupSize, 1, 1);
@@ -145,7 +149,7 @@ int main(int argc, char* argv[]) {
         double avg_time_us = total_time / iterations;
         double flops = (double)size;  // 1 flop per element for simple ops
         double gflops = (flops / avg_time_us) * 1e6 / 1e9;
-        double bandwidth_gb = (2.0 * buf_size / avg_time_us) * 1e6 / 1e9;  // read + write
+        double bandwidth_gb = (3.0 * buf_size / avg_time_us) * 1e6 / 1e9;  // 2 reads + 1 write
 
         printf("\n=== Results ===\n");
         printf("Size: %zu elements (%.2f MB)\n", size, buf_size / 1e6);
@@ -156,7 +160,7 @@ int main(int argc, char* argv[]) {
         // Verify first few results
         printf("\nFirst 5 outputs: ");
         for (int i = 0; i < 5 && i < (int)size; i++) {
-            printf("%.4f ", data1[i]);
+            printf("%.4f ", data2[i]);
         }
         printf("\n");
 

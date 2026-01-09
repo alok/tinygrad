@@ -3,6 +3,9 @@ import TinyGrad4.Backend.Buffer
 
 namespace TinyGrad4.Backend.FusedSoftmaxExpr
 
+-- Disable RawBuffer linter: uses Array Float for internal accumulator arrays
+set_option linter.useRawBuffer false
+
 /-!
 # Fused Softmax Kernel Evaluator
 
@@ -47,8 +50,8 @@ private def allocBytes (n : Nat) : ByteArray :=
 /--
 Evaluate softmax kernel on input buffer.
 
-The input is laid out as [outer, inner] where we compute softmax along inner dimension.
-For a tensor of shape [B, N] with axis=1: outer=B, inner=N
+The input is laid out as {lit}`[outer, inner]` where we compute softmax along inner dimension.
+For a tensor of shape {lit}`[B, N]` with axis=1: outer=B, inner=N
 
 Returns a RawBuffer with the softmax result.
 -/

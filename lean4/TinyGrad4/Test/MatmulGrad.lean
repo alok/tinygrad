@@ -74,4 +74,3 @@ def testEval : IO Unit := do
 end TinyGrad4.Test
 
 -- Run the test
-#eval TinyGrad4.Test.testEval

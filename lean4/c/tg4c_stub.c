@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* View information for strided access with optional masking */
 struct view_info {
@@ -26,6 +30,94 @@ typedef struct view_stack view_stack;
 
 static inline lean_object* mk_byte_array(size_t size) {
   return lean_alloc_sarray(1, size, size);
+}
+
+static lean_object* tg4_mk_io_error(const char* action, const char* path) {
+  const char* err = strerror(errno);
+  char buf[256];
+  if (path && path[0] != '\0') {
+    snprintf(buf, sizeof(buf), "%s failed: %s (%s)", action, path, err);
+  } else {
+    snprintf(buf, sizeof(buf), "%s failed: %s", action, err);
+  }
+  return lean_mk_io_user_error(lean_mk_string(buf));
+}
+
+/* FastFile.openRO : String -> IO USize */
+LEAN_EXPORT lean_obj_res tg4_fast_open(b_lean_obj_arg path) {
+#ifdef _WIN32
+  (void)path;
+  return lean_io_result_mk_error(
+      lean_mk_io_user_error(lean_mk_string("FastFile.open: not supported on Windows")));
+#else
+  const char* cpath = lean_string_cstr(path);
+  int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+  int fd = open(cpath, flags);
+  if (fd < 0) {
+    return lean_io_result_mk_error(tg4_mk_io_error("FastFile.open", cpath));
+  }
+  return lean_io_result_mk_ok(lean_box_usize((size_t)fd));
+#endif
+}
+
+/* FastFile.close : USize -> IO Unit */
+LEAN_EXPORT lean_obj_res tg4_fast_close(size_t fd_val) {
+#ifdef _WIN32
+  (void)fd_obj;
+  return lean_io_result_mk_error(
+      lean_mk_io_user_error(lean_mk_string("FastFile.close: not supported on Windows")));
+#else
+  int fd = (int)fd_val;
+  if (close(fd) != 0) {
+    return lean_io_result_mk_error(tg4_mk_io_error("FastFile.close", ""));
+  }
+  return lean_io_result_mk_ok(lean_box(0));
+#endif
+}
+
+/* FastFile.rewind : USize -> IO Unit */
+LEAN_EXPORT lean_obj_res tg4_fast_rewind(size_t fd_val) {
+#ifdef _WIN32
+  (void)fd_obj;
+  return lean_io_result_mk_error(
+      lean_mk_io_user_error(lean_mk_string("FastFile.rewind: not supported on Windows")));
+#else
+  int fd = (int)fd_val;
+  if (lseek(fd, 0, SEEK_SET) < 0) {
+    return lean_io_result_mk_error(tg4_mk_io_error("FastFile.rewind", ""));
+  }
+  return lean_io_result_mk_ok(lean_box(0));
+#endif
+}
+
+/* FastFile.readInto : USize -> ByteArray -> USize -> IO ByteArray
+   Caller must provide a ByteArray with enough capacity and treat it as unique. */
+LEAN_EXPORT lean_obj_res tg4_fast_read_into(size_t fd_val, b_lean_obj_arg buf_obj, size_t nbytes) {
+#ifdef _WIN32
+  (void)fd_obj;
+  (void)buf_obj;
+  (void)nbytes;
+  return lean_io_result_mk_error(
+      lean_mk_io_user_error(lean_mk_string("FastFile.readInto: not supported on Windows")));
+#else
+  lean_object* buf = (lean_object*)buf_obj;
+  size_t cap = lean_sarray_capacity(buf);
+  if (nbytes > cap) {
+    return lean_io_result_mk_error(
+        lean_mk_io_user_error(lean_mk_string("FastFile.readInto: buffer too small")));
+  }
+  int fd = (int)fd_val;
+  ssize_t n = read(fd, lean_sarray_cptr(buf), nbytes);
+  if (n < 0) {
+    return lean_io_result_mk_error(tg4_mk_io_error("FastFile.readInto", ""));
+  }
+  lean_sarray_set_size(buf, (size_t)n);
+  lean_inc(buf);
+  return lean_io_result_mk_ok(buf);
+#endif
 }
 
 static inline uint8_t* byte_array_cptr(lean_object* a) {
@@ -155,13 +247,13 @@ static void view_info_free(view_info* v);
 static int view_info_init(view_info* v, b_lean_obj_arg strides, int64_t offset,
   b_lean_obj_arg mask_start, b_lean_obj_arg mask_end);
 static float view_read_value(const uint8_t* data, const view_info* v, const size_t* idx,
-  int is_bool);
+  uint8_t dtype);
 static float view_read_f32(const uint8_t* data, const view_info* v, const size_t* idx);
 static void view_stack_free(view_stack* v);
 static int view_stack_init(view_stack* v, b_lean_obj_arg shapes, b_lean_obj_arg strides,
   b_lean_obj_arg offsets, b_lean_obj_arg mask_start, b_lean_obj_arg mask_end);
 static float view_stack_read_value(const uint8_t* data, const view_stack* v, const size_t* idx,
-  size_t* idx_buf, size_t* tmp_buf, int is_bool);
+  size_t* idx_buf, size_t* tmp_buf, uint8_t dtype);
 static float view_stack_read_f32(const uint8_t* data, const view_stack* v, const size_t* idx,
   size_t* idx_buf, size_t* tmp_buf);
 
@@ -801,7 +893,7 @@ static int fused_ewise_init(fused_ewise_ctx* ctx, b_lean_obj_arg inputs, b_lean_
     lean_object* inp = lean_array_get_core(inputs, i);
     lean_object* sh = lean_array_get_core(inputShapes, i);
     ctx->inputs[i] = byte_array_cptr(inp);
-    ctx->in_is_bool[i] = nat_array_get(inputDtypes, i) == 1 ? 1 : 0;
+    ctx->in_is_bool[i] = (uint8_t)nat_array_get(inputDtypes, i);
     size_t rank = array_size(sh);
     ctx->in_ranks[i] = rank;
     if (rank == 0) {
@@ -838,8 +930,9 @@ static float fused_ewise_eval_at(const fused_ewise_ctx* ctx, const size_t* out_i
         size_t idx = (size_t)imm;
         size_t flat = broadcast_flat_index(out_idx, ctx->out_rank, ctx->in_dims[idx],
           ctx->in_ranks[idx], ctx->in_strides[idx]);
-        float v = ctx->in_is_bool[idx] ? (ctx->inputs[idx][flat] ? 1.0f : 0.0f)
-                                       : read_f32(ctx->inputs[idx], flat);
+        uint8_t dtype = ctx->in_is_bool[idx];
+        float v = dtype == 1 ? (ctx->inputs[idx][flat] ? 1.0f : 0.0f)
+                   : (dtype == 2 ? (float)ctx->inputs[idx][flat] : read_f32(ctx->inputs[idx], flat));
         stack[sp++] = v;
         break;
       }
@@ -1008,7 +1101,7 @@ static int fused_ewise_stack_init(fused_ewise_stack_ctx* ctx, b_lean_obj_arg inp
     lean_object* maskStartArr = lean_array_get_core(stackMaskStarts, i);
     lean_object* maskEndArr = lean_array_get_core(stackMaskEnds, i);
     ctx->inputs[i] = byte_array_cptr(inp);
-    ctx->in_is_bool[i] = nat_array_get(inputDtypes, i) == 1 ? 1 : 0;
+    ctx->in_is_bool[i] = (uint8_t)nat_array_get(inputDtypes, i);
     if (!view_stack_init(&ctx->stacks[i], shapesArr, stridesArr, offsetsArr, maskStartArr,
         maskEndArr)) {
       fused_ewise_stack_free(ctx);
@@ -1058,7 +1151,7 @@ static int fused_ewise_view_init(fused_ewise_view_ctx* ctx, b_lean_obj_arg input
     lean_object* maskStart = lean_array_get_core(inputMaskStarts, i);
     lean_object* maskEnd = lean_array_get_core(inputMaskEnds, i);
     ctx->inputs[i] = byte_array_cptr(inp);
-    ctx->in_is_bool[i] = nat_array_get(inputDtypes, i) == 1 ? 1 : 0;
+    ctx->in_is_bool[i] = (uint8_t)nat_array_get(inputDtypes, i);
     size_t rank = array_size(strides);
     if (rank != ctx->out_rank) {
       fused_ewise_view_free(ctx);
@@ -1117,7 +1210,7 @@ static int fused_ewise_view_init_stack(fused_ewise_view_ctx* ctx, b_lean_obj_arg
     lean_object* maskEnd = lean_array_get_core(maskEndArr, 0);
     int64_t off = int64_array_get(offsetsArr, 0);
     ctx->inputs[i] = byte_array_cptr(inp);
-    ctx->in_is_bool[i] = nat_array_get(inputDtypes, i) == 1 ? 1 : 0;
+    ctx->in_is_bool[i] = (uint8_t)nat_array_get(inputDtypes, i);
     size_t rank = array_size(strides);
     if (rank != ctx->out_rank) {
       fused_ewise_view_free(ctx);
@@ -2290,10 +2383,10 @@ LEAN_EXPORT lean_obj_res tg4_fused_reduce_max_all_view_stack_f32(lean_obj_arg in
 }
 
 LEAN_EXPORT lean_obj_res tg4_softmax_last_f32(b_lean_obj_arg a, b_lean_obj_arg outer,
-    b_lean_obj_arg inner, b_lean_obj_arg scaleBits) {
+    b_lean_obj_arg inner, uint32_t scaleBits) {
   size_t outer_n = nat_to_size(outer);
   size_t inner_n = nat_to_size(inner);
-  float scale = f32_from_bits(unbox_u32(scaleBits));
+  float scale = f32_from_bits(scaleBits);
   size_t total = outer_n * inner_n;
   lean_object* out = mk_byte_array(total * 4);
   uint8_t* o = byte_array_cptr(out);
@@ -2320,11 +2413,11 @@ LEAN_EXPORT lean_obj_res tg4_softmax_last_f32(b_lean_obj_arg a, b_lean_obj_arg o
 }
 
 LEAN_EXPORT lean_obj_res tg4_logsoftmax_last_f32(b_lean_obj_arg a, b_lean_obj_arg outer,
-    b_lean_obj_arg inner, b_lean_obj_arg scaleBits, b_lean_obj_arg ln2Bits) {
+    b_lean_obj_arg inner, uint32_t scaleBits, uint32_t ln2Bits) {
   size_t outer_n = nat_to_size(outer);
   size_t inner_n = nat_to_size(inner);
-  float scale = f32_from_bits(unbox_u32(scaleBits));
-  float ln2 = f32_from_bits(unbox_u32(ln2Bits));
+  float scale = f32_from_bits(scaleBits);
+  float ln2 = f32_from_bits(ln2Bits);
   size_t total = outer_n * inner_n;
   lean_object* out = mk_byte_array(total * 4);
   uint8_t* o = byte_array_cptr(out);
@@ -2464,8 +2557,12 @@ LEAN_EXPORT lean_obj_res tg4_permute_f32(b_lean_obj_arg a, b_lean_obj_arg shape,
   size_t* out_idx = malloc(rank * sizeof(size_t));
   size_t* in_idx = malloc(rank * sizeof(size_t));
 
+  // First populate all dims, then compute out_dims
+  // (bug fix: out_dims[i] = dims[perm[i]] requires dims to be fully populated)
   for (size_t i = 0; i < rank; ++i) {
     dims[i] = nat_array_get(shape, i);
+  }
+  for (size_t i = 0; i < rank; ++i) {
     size_t p = nat_array_get(perm, i);
     out_dims[i] = p < rank ? dims[p] : 0;
   }
@@ -2506,8 +2603,12 @@ LEAN_EXPORT lean_obj_res tg4_permute_u8(b_lean_obj_arg a, b_lean_obj_arg shape,
   size_t* out_idx = malloc(rank * sizeof(size_t));
   size_t* in_idx = malloc(rank * sizeof(size_t));
 
+  // First populate all dims, then compute out_dims
+  // (bug fix: out_dims[i] = dims[perm[i]] requires dims to be fully populated)
   for (size_t i = 0; i < rank; ++i) {
     dims[i] = nat_array_get(shape, i);
+  }
+  for (size_t i = 0; i < rank; ++i) {
     size_t p = nat_array_get(perm, i);
     out_dims[i] = p < rank ? dims[p] : 0;
   }
@@ -2956,6 +3057,17 @@ LEAN_EXPORT lean_obj_res tg4_unpack_f64_from_f32(b_lean_obj_arg a) {
   return out;
 }
 
+LEAN_EXPORT lean_obj_res tg4_cast_u8_f32(b_lean_obj_arg a) {
+  size_t n = byte_array_size(a);
+  lean_object* out = mk_byte_array(n * 4);
+  uint8_t* o = byte_array_cptr(out);
+  const uint8_t* x = byte_array_cptr((lean_object*)a);
+  for (size_t i = 0; i < n; ++i) {
+    write_f32(o, i, (float)x[i]);
+  }
+  return out;
+}
+
 LEAN_EXPORT lean_obj_res tg4_matmul_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n) {
   size_t m_n = nat_to_size(m);
@@ -3008,7 +3120,7 @@ static int view_info_init(view_info* v, b_lean_obj_arg strides, int64_t offset,
 }
 
 static float view_read_value(const uint8_t* data, const view_info* v, const size_t* idx,
-    int is_bool) {
+    uint8_t dtype) {
   int64_t off = v->offset;
   for (size_t i = 0; i < v->rank; ++i) {
     size_t ix = idx[i];
@@ -3016,12 +3128,246 @@ static float view_read_value(const uint8_t* data, const view_info* v, const size
     off += (int64_t)ix * v->strides[i];
   }
   if (off < 0) return 0.0f;
-  if (is_bool) return data[(size_t)off] ? 1.0f : 0.0f;
+  if (dtype == 1) return data[(size_t)off] ? 1.0f : 0.0f;
+  if (dtype == 2) return (float)data[(size_t)off];
   return read_f32(data, (size_t)off);
 }
 
 static float view_read_f32(const uint8_t* data, const view_info* v, const size_t* idx) {
   return view_read_value(data, v, idx, 0);
+}
+
+static int view_offset(const view_info* v, const size_t* idx, int64_t* out) {
+  int64_t off = v->offset;
+  for (size_t i = 0; i < v->rank; ++i) {
+    size_t ix = idx[i];
+    if (ix < v->mask_start[i] || ix >= v->mask_end[i]) return 0;
+    off += (int64_t)ix * v->strides[i];
+  }
+  if (off < 0) return 0;
+  *out = off;
+  return 1;
+}
+
+static int64_t read_index_value(const uint8_t* data, size_t elem, size_t elem_size, int idx_signed) {
+  const uint8_t* p = data + elem * elem_size;
+  if (elem_size == 4) {
+    if (idx_signed) {
+      int32_t v;
+      memcpy(&v, p, 4);
+      return (int64_t)v;
+    } else {
+      uint32_t v;
+      memcpy(&v, p, 4);
+      return (int64_t)v;
+    }
+  } else if (elem_size == 8) {
+    if (idx_signed) {
+      int64_t v;
+      memcpy(&v, p, 8);
+      return v;
+    } else {
+      uint64_t v;
+      memcpy(&v, p, 8);
+      return (int64_t)v;
+    }
+  } else if (elem_size == 2) {
+    if (idx_signed) {
+      int16_t v;
+      memcpy(&v, p, 2);
+      return (int64_t)v;
+    } else {
+      uint16_t v;
+      memcpy(&v, p, 2);
+      return (int64_t)v;
+    }
+  } else if (elem_size == 1) {
+    if (idx_signed) {
+      int8_t v = (int8_t)p[0];
+      return (int64_t)v;
+    } else {
+      uint8_t v = p[0];
+      return (int64_t)v;
+    }
+  }
+  return 0;
+}
+
+LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b_lean_obj_arg outShape,
+    b_lean_obj_arg xStrides, int64_t xOffset, b_lean_obj_arg xMaskStarts, b_lean_obj_arg xMaskEnds,
+    b_lean_obj_arg idxStrides, int64_t idxOffset, b_lean_obj_arg idxMaskStarts, b_lean_obj_arg idxMaskEnds,
+    b_lean_obj_arg axis, b_lean_obj_arg classDim, b_lean_obj_arg elemSize, b_lean_obj_arg idxElemSize,
+    b_lean_obj_arg idxSigned) {
+  size_t out_rank = array_size(outShape);
+  size_t axis_n = nat_to_size(axis);
+  size_t class_n = nat_to_size(classDim);
+  size_t elem = nat_to_size(elemSize);
+  size_t idx_elem = nat_to_size(idxElemSize);
+  int idx_signed = nat_to_size(idxSigned) != 0;
+  size_t out_numel = shape_numel(outShape);
+  size_t x_bytes = byte_array_size(x);
+  size_t idx_bytes = byte_array_size(idx);
+  size_t x_numel = elem == 0 ? 0 : (x_bytes / elem);
+  size_t idx_numel = idx_elem == 0 ? 0 : (idx_bytes / idx_elem);
+  lean_object* out = mk_byte_array(out_numel * elem);
+  uint8_t* o = byte_array_cptr(out);
+  const uint8_t* x_data = byte_array_cptr((lean_object*)x);
+  const uint8_t* idx_data = byte_array_cptr((lean_object*)idx);
+
+  if (out_numel == 0 || out_rank == 0 || elem == 0 || axis_n > out_rank) {
+    return out;
+  }
+
+  view_info xView = {0}, idxView = {0};
+  if (!view_info_init(&xView, xStrides, xOffset, xMaskStarts, xMaskEnds) ||
+      !view_info_init(&idxView, idxStrides, idxOffset, idxMaskStarts, idxMaskEnds)) {
+    view_info_free(&xView);
+    view_info_free(&idxView);
+    memset(o, 0, out_numel * elem);
+    return out;
+  }
+
+  size_t* out_dims = out_rank == 0 ? NULL : malloc(out_rank * sizeof(size_t));
+  size_t* out_idx = out_rank == 0 ? NULL : malloc(out_rank * sizeof(size_t));
+  size_t mask_rank = out_rank + 1;
+  size_t* mask_idx = malloc(mask_rank * sizeof(size_t));
+  if ((out_rank && (!out_dims || !out_idx)) || !mask_idx) {
+    view_info_free(&xView);
+    view_info_free(&idxView);
+    free(out_dims);
+    free(out_idx);
+    free(mask_idx);
+    memset(o, 0, out_numel * elem);
+    return out;
+  }
+
+  for (size_t i = 0; i < out_rank; ++i) out_dims[i] = nat_array_get(outShape, i);
+
+  int fast_ok = 1;
+  size_t stride = 1;
+  for (size_t rev = 0; rev < mask_rank; ++rev) {
+    size_t i = mask_rank - 1 - rev;
+    size_t dim = (i < axis_n) ? out_dims[i] : (i == axis_n ? class_n : out_dims[i - 1]);
+    int64_t x_stride = xView.strides[i];
+    if (i < axis_n) {
+      if (x_stride != 0) fast_ok = 0;
+    } else if (x_stride != (int64_t)stride) {
+      fast_ok = 0;
+    }
+    if (i >= axis_n && idxView.strides[i] != 0) {
+      fast_ok = 0;
+    }
+    stride *= dim;
+  }
+
+  if (fast_ok) {
+    size_t pre_rank = axis_n;
+    size_t* pre_dims = pre_rank == 0 ? NULL : malloc(pre_rank * sizeof(size_t));
+    size_t* pre_idx = pre_rank == 0 ? NULL : malloc(pre_rank * sizeof(size_t));
+    if ((pre_rank && (!pre_dims || !pre_idx))) {
+      view_info_free(&xView);
+      view_info_free(&idxView);
+      free(out_dims);
+      free(out_idx);
+      free(mask_idx);
+      free(pre_dims);
+      free(pre_idx);
+      memset(o, 0, out_numel * elem);
+      return out;
+    }
+    size_t pre_outer = 1;
+    for (size_t i = 0; i < pre_rank; ++i) {
+      pre_dims[i] = out_dims[i];
+      pre_outer *= pre_dims[i];
+    }
+    size_t tail = 1;
+    for (size_t i = axis_n; i < out_rank; ++i) tail *= out_dims[i];
+    size_t block_bytes = tail * elem;
+
+    for (size_t pre = 0; pre < pre_outer; ++pre) {
+      if (pre_rank) {
+        unflatten_index(pre, pre_dims, pre_rank, pre_idx);
+      }
+      for (size_t j = 0; j < mask_rank; ++j) {
+        if (j < axis_n) {
+          mask_idx[j] = pre_rank ? pre_idx[j] : 0;
+        } else {
+          mask_idx[j] = 0;
+        }
+      }
+      int64_t idx_off = 0;
+      if (!view_offset(&idxView, mask_idx, &idx_off) || (size_t)idx_off >= idx_numel) {
+        memset(o + pre * block_bytes, 0, block_bytes);
+        continue;
+      }
+      int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem, idx_signed);
+      if (idx_val < 0 || (size_t)idx_val >= class_n) {
+        memset(o + pre * block_bytes, 0, block_bytes);
+        continue;
+      }
+      int64_t x_off = xView.offset + (int64_t)idx_val * xView.strides[axis_n];
+      if (x_off < 0 || (size_t)x_off + tail > x_numel) {
+        memset(o + pre * block_bytes, 0, block_bytes);
+        continue;
+      }
+      memcpy(o + pre * block_bytes, x_data + ((size_t)x_off) * elem, block_bytes);
+    }
+
+    view_info_free(&xView);
+    view_info_free(&idxView);
+    free(out_dims);
+    free(out_idx);
+    free(mask_idx);
+    free(pre_dims);
+    free(pre_idx);
+    return out;
+  }
+
+  for (size_t i = 0; i < out_numel; ++i) {
+    unflatten_index(i, out_dims, out_rank, out_idx);
+    for (size_t j = 0; j < mask_rank; ++j) {
+      if (j < axis_n) {
+        mask_idx[j] = out_idx[j];
+      } else if (j == axis_n) {
+        mask_idx[j] = 0;
+      } else {
+        mask_idx[j] = out_idx[j - 1];
+      }
+    }
+
+    int64_t idx_off = 0;
+    if (!view_offset(&idxView, mask_idx, &idx_off)) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    if ((size_t)idx_off >= idx_numel) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem, idx_signed);
+    if (idx_val < 0 || (size_t)idx_val >= class_n) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    mask_idx[axis_n] = (size_t)idx_val;
+    int64_t x_off = 0;
+    if (!view_offset(&xView, mask_idx, &x_off)) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    if ((size_t)x_off >= x_numel) {
+      memset(o + i * elem, 0, elem);
+      continue;
+    }
+    memcpy(o + i * elem, x_data + ((size_t)x_off) * elem, elem);
+  }
+
+  view_info_free(&xView);
+  view_info_free(&idxView);
+  free(out_dims);
+  free(out_idx);
+  free(mask_idx);
+  return out;
 }
 
 static void view_stack_free(view_stack* v) {
@@ -3091,7 +3437,7 @@ static int view_stack_init(view_stack* v, b_lean_obj_arg shapes, b_lean_obj_arg 
 }
 
 static float view_stack_read_value(const uint8_t* data, const view_stack* v, const size_t* idx,
-    size_t* idx_buf, size_t* tmp_buf, int is_bool) {
+    size_t* idx_buf, size_t* tmp_buf, uint8_t dtype) {
   if (!v || v->depth == 0) return 0.0f;
   size_t top = v->depth - 1;
   size_t top_rank = v->views[top].rank;
@@ -3110,7 +3456,8 @@ static float view_stack_read_value(const uint8_t* data, const view_stack* v, con
     if (off < 0) return 0.0f;
     if (level == 0) {
       size_t flat = (size_t)off;
-      if (is_bool) return data[flat] ? 1.0f : 0.0f;
+      if (dtype == 1) return data[flat] ? 1.0f : 0.0f;
+      if (dtype == 2) return (float)data[flat];
       return read_f32(data, flat);
     }
     size_t flat = (size_t)off;
@@ -3433,8 +3780,8 @@ LEAN_EXPORT lean_obj_res tg4_matmul_bias_f32(b_lean_obj_arg a, b_lean_obj_arg b,
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias_scale_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias, b_lean_obj_arg biasShape, b_lean_obj_arg m, b_lean_obj_arg k,
-    b_lean_obj_arg n, b_lean_obj_arg scaleBits) {
-  return matmul_bias_core(a, b, bias, biasShape, m, k, n, 0, 1, unbox_u32(scaleBits));
+    b_lean_obj_arg n, uint32_t scaleBits) {
+  return matmul_bias_core(a, b, bias, biasShape, m, k, n, 0, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3445,8 +3792,8 @@ LEAN_EXPORT lean_obj_res tg4_matmul_bias_relu_f32(b_lean_obj_arg a, b_lean_obj_a
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias_scale_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias, b_lean_obj_arg biasShape, b_lean_obj_arg m, b_lean_obj_arg k,
-    b_lean_obj_arg n, b_lean_obj_arg scaleBits) {
-  return matmul_bias_core(a, b, bias, biasShape, m, k, n, 1, 1, unbox_u32(scaleBits));
+    b_lean_obj_arg n, uint32_t scaleBits) {
+  return matmul_bias_core(a, b, bias, biasShape, m, k, n, 1, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias2_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3457,9 +3804,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_bias2_f32(b_lean_obj_arg a, b_lean_obj_arg b
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias2_scale_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias0, b_lean_obj_arg bias0Shape, b_lean_obj_arg bias1, b_lean_obj_arg bias1Shape,
-    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n, b_lean_obj_arg scaleBits) {
+    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n, uint32_t scaleBits) {
   return matmul_bias2_core(a, b, bias0, bias0Shape, bias1, bias1Shape, m, k, n, 0, 1,
-    unbox_u32(scaleBits));
+    scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias2_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3470,9 +3817,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_bias2_relu_f32(b_lean_obj_arg a, b_lean_obj_
 
 LEAN_EXPORT lean_obj_res tg4_matmul_bias2_scale_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias0, b_lean_obj_arg bias0Shape, b_lean_obj_arg bias1, b_lean_obj_arg bias1Shape,
-    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n, b_lean_obj_arg scaleBits) {
+    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n, uint32_t scaleBits) {
   return matmul_bias2_core(a, b, bias0, bias0Shape, bias1, bias1Shape, m, k, n, 1, 1,
-    unbox_u32(scaleBits));
+    scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_view_bias_f32(lean_obj_arg a, lean_obj_arg b, lean_obj_arg bias,
@@ -3490,10 +3837,10 @@ LEAN_EXPORT lean_obj_res tg4_matmul_view_bias_scale_f32(lean_obj_arg a, lean_obj
     lean_obj_arg aMaskEnds, lean_obj_arg bStrides, lean_obj_arg bOffset, lean_obj_arg bMaskStarts,
     lean_obj_arg bMaskEnds, lean_obj_arg biasStrides, lean_obj_arg biasOffset,
     lean_obj_arg biasMaskStarts, lean_obj_arg biasMaskEnds, lean_obj_arg outShape, lean_obj_arg k,
-    lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_view_bias_core(a, b, bias, NULL, aStrides, aOffset, aMaskStarts, aMaskEnds,
     bStrides, bOffset, bMaskStarts, bMaskEnds, biasStrides, biasOffset, biasMaskStarts,
-    biasMaskEnds, NULL, NULL, NULL, NULL, outShape, k, 0, 1, unbox_u32(scaleBits), 0);
+    biasMaskEnds, NULL, NULL, NULL, NULL, outShape, k, 0, 1, scaleBits, 0);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_view_bias_relu_f32(lean_obj_arg a, lean_obj_arg b,
@@ -3511,10 +3858,10 @@ LEAN_EXPORT lean_obj_res tg4_matmul_view_bias_scale_relu_f32(lean_obj_arg a, lea
     lean_obj_arg aMaskEnds, lean_obj_arg bStrides, lean_obj_arg bOffset, lean_obj_arg bMaskStarts,
     lean_obj_arg bMaskEnds, lean_obj_arg biasStrides, lean_obj_arg biasOffset,
     lean_obj_arg biasMaskStarts, lean_obj_arg biasMaskEnds, lean_obj_arg outShape, lean_obj_arg k,
-    lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_view_bias_core(a, b, bias, NULL, aStrides, aOffset, aMaskStarts, aMaskEnds,
     bStrides, bOffset, bMaskStarts, bMaskEnds, biasStrides, biasOffset, biasMaskStarts,
-    biasMaskEnds, NULL, NULL, NULL, NULL, outShape, k, 1, 1, unbox_u32(scaleBits), 0);
+    biasMaskEnds, NULL, NULL, NULL, NULL, outShape, k, 1, 1, scaleBits, 0);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_view_bias2_f32(lean_obj_arg a, lean_obj_arg b, lean_obj_arg bias0,
@@ -3536,11 +3883,11 @@ LEAN_EXPORT lean_obj_res tg4_matmul_view_bias2_scale_f32(lean_obj_arg a, lean_ob
     lean_obj_arg bMaskStarts, lean_obj_arg bMaskEnds, lean_obj_arg bias0Strides,
     lean_obj_arg bias0Offset, lean_obj_arg bias0MaskStarts, lean_obj_arg bias0MaskEnds,
     lean_obj_arg bias1Strides, lean_obj_arg bias1Offset, lean_obj_arg bias1MaskStarts,
-    lean_obj_arg bias1MaskEnds, lean_obj_arg outShape, lean_obj_arg k, lean_obj_arg scaleBits) {
+    lean_obj_arg bias1MaskEnds, lean_obj_arg outShape, lean_obj_arg k, uint32_t scaleBits) {
   return matmul_view_bias_core(a, b, bias0, bias1, aStrides, aOffset, aMaskStarts, aMaskEnds,
     bStrides, bOffset, bMaskStarts, bMaskEnds, bias0Strides, bias0Offset, bias0MaskStarts,
     bias0MaskEnds, bias1Strides, bias1Offset, bias1MaskStarts, bias1MaskEnds, outShape, k, 0, 1,
-    unbox_u32(scaleBits), 1);
+    scaleBits, 1);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_view_bias2_relu_f32(lean_obj_arg a, lean_obj_arg b,
@@ -3562,11 +3909,11 @@ LEAN_EXPORT lean_obj_res tg4_matmul_view_bias2_scale_relu_f32(lean_obj_arg a, le
     lean_obj_arg bMaskStarts, lean_obj_arg bMaskEnds, lean_obj_arg bias0Strides,
     lean_obj_arg bias0Offset, lean_obj_arg bias0MaskStarts, lean_obj_arg bias0MaskEnds,
     lean_obj_arg bias1Strides, lean_obj_arg bias1Offset, lean_obj_arg bias1MaskStarts,
-    lean_obj_arg bias1MaskEnds, lean_obj_arg outShape, lean_obj_arg k, lean_obj_arg scaleBits) {
+    lean_obj_arg bias1MaskEnds, lean_obj_arg outShape, lean_obj_arg k, uint32_t scaleBits) {
   return matmul_view_bias_core(a, b, bias0, bias1, aStrides, aOffset, aMaskStarts, aMaskEnds,
     bStrides, bOffset, bMaskStarts, bMaskEnds, bias0Strides, bias0Offset, bias0MaskStarts,
     bias0MaskEnds, bias1Strides, bias1Offset, bias1MaskStarts, bias1MaskEnds, outShape, k, 1, 1,
-    unbox_u32(scaleBits), 1);
+    scaleBits, 1);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3681,9 +4028,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_f32(b_lean_obj_arg a, b_lean_ob
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_scale_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias, b_lean_obj_arg biasShape, b_lean_obj_arg aStarts, b_lean_obj_arg bStarts,
     b_lean_obj_arg biasStarts, b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n,
-    b_lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_batched_bias_core(a, b, bias, biasShape, aStarts, bStarts, biasStarts, m, k, n,
-    0, 1, unbox_u32(scaleBits));
+    0, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3695,9 +4042,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_relu_f32(b_lean_obj_arg a, b_le
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias_scale_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
     b_lean_obj_arg bias, b_lean_obj_arg biasShape, b_lean_obj_arg aStarts, b_lean_obj_arg bStarts,
     b_lean_obj_arg biasStarts, b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n,
-    b_lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_batched_bias_core(a, b, bias, biasShape, aStarts, bStarts, biasStarts, m, k, n,
-    1, 1, unbox_u32(scaleBits));
+    1, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias2_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3712,9 +4059,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias2_scale_f32(b_lean_obj_arg a, b_
     b_lean_obj_arg bias0, b_lean_obj_arg bias0Shape, b_lean_obj_arg bias1, b_lean_obj_arg bias1Shape,
     b_lean_obj_arg aStarts, b_lean_obj_arg bStarts, b_lean_obj_arg bias0Starts,
     b_lean_obj_arg bias1Starts, b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n,
-    b_lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_batched_bias2_core(a, b, bias0, bias0Shape, bias1, bias1Shape, aStarts, bStarts,
-    bias0Starts, bias1Starts, m, k, n, 0, 1, unbox_u32(scaleBits));
+    bias0Starts, bias1Starts, m, k, n, 0, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias2_relu_f32(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3729,9 +4076,9 @@ LEAN_EXPORT lean_obj_res tg4_matmul_batched_bias2_scale_relu_f32(b_lean_obj_arg 
     b_lean_obj_arg bias0, b_lean_obj_arg bias0Shape, b_lean_obj_arg bias1, b_lean_obj_arg bias1Shape,
     b_lean_obj_arg aStarts, b_lean_obj_arg bStarts, b_lean_obj_arg bias0Starts,
     b_lean_obj_arg bias1Starts, b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n,
-    b_lean_obj_arg scaleBits) {
+    uint32_t scaleBits) {
   return matmul_batched_bias2_core(a, b, bias0, bias0Shape, bias1, bias1Shape, aStarts, bStarts,
-    bias0Starts, bias1Starts, m, k, n, 1, 1, unbox_u32(scaleBits));
+    bias0Starts, bias1Starts, m, k, n, 1, 1, scaleBits);
 }
 
 LEAN_EXPORT lean_obj_res tg4_matmul_f64(b_lean_obj_arg a, b_lean_obj_arg b,
@@ -3755,3 +4102,261 @@ LEAN_EXPORT lean_obj_res tg4_matmul_f64(b_lean_obj_arg a, b_lean_obj_arg b,
   }
   return out;
 }
+
+/* ============================================================================
+   CUDA Stubs (for linking on non-CUDA systems)
+   ============================================================================ */
+
+#ifndef TG4_HAS_CUDA
+
+// CUDA stubs for non-CUDA builds (signatures must match tg4_cuda.cu)
+
+LEAN_EXPORT lean_obj_res tg4_cuda_alloc_bytes(b_lean_obj_arg nbytes_obj, lean_object* world) {
+  (void)nbytes_obj; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_free(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_in_bytes(b_lean_obj_arg buf, b_lean_obj_arg data, lean_object* world) {
+  (void)buf; (void)data; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_out_bytes(b_lean_obj_arg buf, b_lean_obj_arg nbytes, lean_object* world) {
+  (void)buf; (void)nbytes; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_compile(b_lean_obj_arg name, b_lean_obj_arg source, lean_object* world) {
+  (void)name; (void)source; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_launch_2d(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg bx, b_lean_obj_arg by_, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)bx; (void)by_; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_sync(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_device_name(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_device_count(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_set_device(b_lean_obj_arg idx, lean_object* world) {
+  (void)idx; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+// Legacy float-based API stubs (for backward compatibility)
+LEAN_EXPORT lean_obj_res tg4_cuda_alloc(b_lean_obj_arg n, lean_object* world) {
+  (void)n; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_in(b_lean_obj_arg buf, b_lean_obj_arg arr, lean_object* world) {
+  (void)buf; (void)arr; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_copy_out(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_size(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_launch(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg gz,
+    b_lean_obj_arg bx, b_lean_obj_arg by_, b_lean_obj_arg bz, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)gz; (void)bx; (void)by_; (void)bz; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+// Pure API - return empty/zero result instead of error
+LEAN_EXPORT lean_obj_res tg4_cuda_matmul_sync(b_lean_obj_arg a, b_lean_obj_arg b,
+    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n) {
+  (void)a; (void)b;
+  // Return zero-filled ByteArray of correct size
+  size_t M = lean_usize_of_nat(m);
+  size_t N = lean_usize_of_nat(n);
+  size_t out_bytes = M * N * sizeof(float);
+  lean_object* arr = lean_alloc_sarray(1, out_bytes, out_bytes);
+  memset(lean_sarray_cptr(arr), 0, out_bytes);
+  return arr;
+}
+
+#endif /* TG4_HAS_CUDA */
+
+/* ============================================================================
+   Metal Stubs (for linking on non-macOS systems)
+   ============================================================================ */
+
+#ifndef __APPLE__
+
+// Metal stubs for non-macOS builds (signatures must match tg4_metal.m)
+
+LEAN_EXPORT lean_obj_res tg4_metal_alloc(b_lean_obj_arg n, lean_object* world) {
+  (void)n; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_free(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_copy_in(b_lean_obj_arg buf, b_lean_obj_arg arr, lean_object* world) {
+  (void)buf; (void)arr; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_copy_out(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_size(b_lean_obj_arg buf, lean_object* world) {
+  (void)buf; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_compile(b_lean_obj_arg name, b_lean_obj_arg source, lean_object* world) {
+  (void)name; (void)source; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_launch(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg gz,
+    b_lean_obj_arg bx, b_lean_obj_arg by_, b_lean_obj_arg bz, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)gz; (void)bx; (void)by_; (void)bz; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_alloc_bytes(b_lean_obj_arg nbytes, lean_object* world) {
+  (void)nbytes; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_copy_in_bytes(b_lean_obj_arg buf, b_lean_obj_arg data, lean_object* world) {
+  (void)buf; (void)data; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_copy_out_bytes(b_lean_obj_arg buf, b_lean_obj_arg nbytes, lean_object* world) {
+  (void)buf; (void)nbytes; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_launch_2d(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg bx, b_lean_obj_arg by_, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)bx; (void)by_; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_sync(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_device_name(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_cache_hits(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_cache_misses(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_cache_size(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_cache_clear(lean_object* world) {
+  (void)world;
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_matmul_sync(b_lean_obj_arg a, b_lean_obj_arg b,
+    b_lean_obj_arg m, b_lean_obj_arg k, b_lean_obj_arg n) {
+  (void)a; (void)b;
+  // Return zero-filled ByteArray of correct size
+  size_t M = lean_usize_of_nat(m);
+  size_t N = lean_usize_of_nat(n);
+  size_t out_bytes = M * N * sizeof(float);
+  lean_object* arr = lean_alloc_sarray(1, out_bytes, out_bytes);
+  memset(lean_sarray_cptr(arr), 0, out_bytes);
+  return arr;
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_wrap_bytes_nocopy(b_lean_obj_arg data, lean_object* world) {
+  (void)data; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT uint8_t tg4_metal_is_aligned(b_lean_obj_arg buf) {
+  (void)buf;
+  return 0;
+}
+
+// Shared memory stubs (used by Metal IPC)
+LEAN_EXPORT lean_obj_res tg4_shm_create(b_lean_obj_arg name, b_lean_obj_arg size, lean_object* world) {
+  (void)name; (void)size; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_open(b_lean_obj_arg name, lean_object* world) {
+  (void)name; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_map(b_lean_obj_arg fd, b_lean_obj_arg size, lean_object* world) {
+  (void)fd; (void)size; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_write(b_lean_obj_arg ptr, b_lean_obj_arg data, lean_object* world) {
+  (void)ptr; (void)data; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_read(b_lean_obj_arg ptr, b_lean_obj_arg size, lean_object* world) {
+  (void)ptr; (void)size; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_close(b_lean_obj_arg fd, lean_object* world) {
+  (void)fd; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_shm_unlink(b_lean_obj_arg name, lean_object* world) {
+  (void)name; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Shared memory not available (not macOS)")));
+}
+
+#endif /* not __APPLE__ */

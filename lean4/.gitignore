@@ -1,6 +1,9 @@
-data/
+/data/
 .lake/
 
 # Build artifacts (executables)
 c/matmul_runner
 c/metal_runner
+
+# Benchmark results (use Wandb for storage)
+benchmark_results/

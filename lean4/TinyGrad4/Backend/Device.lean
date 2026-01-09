@@ -19,15 +19,6 @@ Tensor API → Scheduler → CodeGen → Renderer → Compiler → Runtime
 
 Each layer has a single responsibility and clean interface.
 Backends are swapped at compile time via typeclass resolution.
-
-## Comparison to Python tinygrad
-
-| Python tinygrad | Lean TinyGrad4 |
-|-----------------|----------------|
-| `class Device`  | `structure Device` |
-| `class Compiled`| Typeclass bundle |
-| `ops_metal.py`  | `Metal.lean` + FFI |
-| `renderer/cstyle.py` | `MetalRenderer.lean` |
 -/
 
 namespace TinyGrad4.Backend
@@ -50,18 +41,18 @@ structure CompiledKernel where
 
 /-! ## Allocator Typeclass -/
 
-/-- Memory allocator interface for GPU buffers -/
+/-- Memory allocator interface for GPU buffers (byte-based, dtype-generic) -/
 class Allocator (Buf : Type) where
-  /-- Allocate a buffer of n elements (float32) -/
-  alloc : Nat → IO Buf
+  /-- Allocate a buffer of n bytes -/
+  allocBytes : Nat → IO Buf
   /-- Free a buffer -/
   free : Buf → IO Unit
-  /-- Copy data from host to device -/
-  copyIn : Buf → FloatArray → IO Unit
-  /-- Copy data from device to host -/
-  copyOut : Buf → IO FloatArray
-  /-- Get buffer size in elements -/
-  size : Buf → Nat
+  /-- Copy raw bytes from host to device -/
+  copyInBytes : Buf → ByteArray → IO Unit
+  /-- Copy raw bytes from device to host -/
+  copyOutBytes : Buf → Nat → IO ByteArray
+  /-- Get buffer size in bytes -/
+  sizeBytes : Buf → Nat
 
 /-! ## Compiler Typeclass -/
 
@@ -127,12 +118,12 @@ structure KernelExec where
   bufferBindings : Array Nat
   deriving Repr
 
-/-- Complete execution plan -/
+/-- Complete execution plan (byte-based) -/
 structure ExecPlan where
-  /-- Buffer sizes in elements -/
+  /-- Buffer sizes in bytes -/
   bufferSizes : Array Nat
   /-- Input buffer indices and their data -/
-  inputs : Array (Nat × FloatArray)
+  inputs : Array (Nat × ByteArray)
   /-- Kernels to execute in order -/
   kernels : Array KernelExec
   /-- Output buffer index -/
@@ -140,9 +131,9 @@ structure ExecPlan where
 
 /-! ## CPU Backend (Reference Implementation) -/
 
-/-- CPU buffer is just a FloatArray -/
+/-- CPU buffer is just a ByteArray -/
 structure CPUBuffer where
-  data : FloatArray
+  data : ByteArray
 
 /-- CPU "program" is just source code (interpreted) -/
 structure CPUProgram where
@@ -151,11 +142,11 @@ structure CPUProgram where
   deriving Repr
 
 instance : Allocator CPUBuffer where
-  alloc n := pure { data := ⟨Array.replicate n 0.0⟩ }
+  allocBytes n := pure { data := ByteArray.mk (Array.replicate n 0) }
   free _ := pure ()
-  copyIn _buf _arr := pure ()  -- No-op since we're on CPU
-  copyOut buf := pure buf.data
-  size buf := buf.data.size
+  copyInBytes _buf _arr := pure ()  -- No-op since we're on CPU
+  copyOutBytes buf _ := pure buf.data
+  sizeBytes buf := buf.data.size
 
 instance : Compiler CPUProgram where
   compile name source := pure { name, source }

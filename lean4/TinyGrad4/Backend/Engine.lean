@@ -1,5 +1,8 @@
 import TinyGrad4.Backend.Device
 
+-- Disable RawBuffer linter: Engine returns FloatArray for polymorphic device execution
+set_option linter.useRawBuffer false
+
 /-!
 # Generic Execution Engine
 

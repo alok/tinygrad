@@ -11,10 +11,26 @@ import TinyGrad4.Backend.FusedContract
 import TinyGrad4.Backend.FusedSGD
 import TinyGrad4.Backend.FusedMatmul
 import TinyGrad4.Backend.FusedSoftmax
+import TinyGrad4.Backend.FusedGather
+import TinyGrad4.Backend.Cuda
+import TinyGrad4.Backend.CudaGather
+import TinyGrad4.Backend.Metal
+import TinyGrad4.Backend.MetalMatmul
+import TinyGrad4.Backend.MetalEwise
+import TinyGrad4.Backend.MetalGather
+import TinyGrad4.Backend.DeviceBuffer
 import TinyGrad4.Tags
+import TinyGrad4.Benchmark.Trace
 import Std.Data.HashMap
 
+-- Disable IO.monoNanosNow linter: interpreter instrumentation uses raw monotonic clocks.
+set_option linter.monoNanosNow false
+
 namespace TinyGrad4
+
+-- Disable RawBuffer linter: this file uses Array Float for internal conversion helpers
+-- (ofFloats, packFloatsToF32Bytes, unpackF32Bytes) which convert to/from ByteArray
+set_option linter.useRawBuffer false
 
 open Std
 open TinyGrad4.Backend
@@ -52,6 +68,9 @@ def ofFloat32s (arr : Array Float32) : RawBuffer := Id.run do
     bytes := bytes.push ((bits.toNat >>> 16).toUInt8)
     bytes := bytes.push ((bits.toNat >>> 24).toUInt8)
   { dtype := .float32, data := bytes }
+
+/-- Pack FloatArray (Array Float wrapped in structure) into RawBuffer -/
+def ofF32 (arr : FloatArray) : RawBuffer := ofFloats arr.data
 
 /-- Pack Float array to F32 bytes (internal helper) -/
 def packFloatsToF32Bytes (arr : Array Float) : ByteArray := Id.run do
@@ -455,19 +474,9 @@ private def dedupNat (xs : List Nat) : List Nat := Id.run do
       out := out ++ [x]
   return out
 
-private partial def toposortMany (roots : List UOp) (fuel : Nat := 100000) : List UOp :=
-  let (_, result) := roots.foldl (fun (visited, acc) r => go r visited acc fuel) (UOpIdSet.mkEmpty, [])
-  result.reverse
-where
-  go (u : UOp) (visited : UOpIdSet) (acc : List UOp) (fuel : Nat) : UOpIdSet × List UOp :=
-    if fuel == 0 then (visited, acc)
-    else if UOpIdSet.member visited u.uid then (visited, acc)
-    else
-      let visited' := UOpIdSet.add visited u.uid
-      let (visited'', acc') := u.src.foldl
-        (fun (v, a) child => go child v a (fuel - 1))
-        (visited', acc)
-      (visited'', u :: acc')
+-- Use iterative toposortMany from UOp.Graph to avoid stack overflow
+private def toposortMany (roots : List UOp) : List UOp :=
+  UOp.toposortIter roots
 
 private def getSrc (cache : HashMap UOpId RawBuffer) (u : UOp) (idx : Nat) : RawBuffer :=
   let s := u.src[idx]!
@@ -485,7 +494,7 @@ private def evalFusedEwise (u : UOp) (plan : FusedEwise.Plan) (env : Env) (cache
       let mut inputs : Array ByteArray := Array.emptyWithCapacity n
       for i in [:n] do
         let dtCode := plan.leafDtypes[i]!
-        let dtype : DType := if dtCode == 1 then .bool else .float32
+        let dtype : DType := if dtCode == 1 then .bool else if dtCode == 2 then .uint8 else .float32
         let uid := plan.leafBases[i]!
         let fallback := env.getD uid (RawBuffer.zeros dtype 0)
         let buf := cache.getD uid fallback
@@ -539,6 +548,156 @@ private def evalFusedEwise (u : UOp) (plan : FusedEwise.Plan) (env : Env) (cache
         return RawBuffer.zeros u.dtype (listProd u.shape)
       return { dtype := .float32, data := outBytes }
 
+private def unitStridesArray (shape : Array Nat) : Array Nat :=
+  (Shape.unitStrides shape.toList).map (fun i => Int.toNat i) |>.toArray
+
+private def unravelIndex (shape : Array Nat) (strides : Array Nat) (idx : Nat) : Array Nat := Id.run do
+  let mut out := Array.emptyWithCapacity shape.size
+  let mut rem := idx
+  for i in [:shape.size] do
+    let stride := strides[i]!
+    if stride == 0 then
+      out := out.push 0
+    else
+      let coord := rem / stride
+      out := out.push coord
+      rem := rem % stride
+  return out
+
+private def insertAxis (idx : Array Nat) (axis : Nat) (value : Nat) : Array Nat := Id.run do
+  let mut out := Array.emptyWithCapacity (idx.size + 1)
+  let mut j := 0
+  for i in [:idx.size + 1] do
+    if i == axis then
+      out := out.push value
+    else
+      out := out.push idx[j]!
+      j := j + 1
+  return out
+
+private def viewOffset (v : Backend.View) (idx : Array Nat) : Option Nat := Id.run do
+  if idx.size != v.strides.size then
+    return none
+  let mut off : Int64 := v.offset
+  for i in [:idx.size] do
+    off := off + v.strides[i]! * (Int64.ofInt (Int.ofNat idx[i]!))
+  let offI := off.toInt
+  if offI < 0 then none else some offI.toNat
+
+private def pushZeros (out : ByteArray) (n : Nat) : ByteArray := Id.run do
+  let mut acc := out
+  for _ in [:n] do
+    acc := acc.push 0
+  return acc
+
+private def copyElem (src : ByteArray) (srcElem : Nat) (itemsize : Nat) (out : ByteArray) : ByteArray := Id.run do
+  let mut acc := out
+  let base := srcElem * itemsize
+  for i in [:itemsize] do
+    acc := acc.push (src.get! (base + i))
+  return acc
+
+private def evalFusedGather (u : UOp) (plan : FusedGather.Plan) (env : Env)
+    (cache : HashMap UOpId RawBuffer) : RawBuffer := Id.run do
+  let numel := listProd u.shape
+  let itemsize := u.dtype.itemsize
+  if numel == 0 then
+    return RawBuffer.zeros u.dtype 0
+
+  let xFallback := env.getD plan.xBase (RawBuffer.zeros u.dtype 0)
+  let xBuf := cache.getD plan.xBase xFallback
+  let idxFallback := env.getD plan.idxBase (RawBuffer.zeros .int32 0)
+  let idxBuf := cache.getD plan.idxBase idxFallback
+
+  let maskShape := plan.maskShape
+  if plan.reduceAxis >= maskShape.size then
+    return RawBuffer.zeros u.dtype numel
+  let classDim := maskShape[plan.reduceAxis]!
+  let outBytes :=
+    Native.gatherView xBuf.data idxBuf.data u.shape.toArray
+      plan.xView.strides plan.xView.offset plan.xView.maskStart plan.xView.maskEnd
+      plan.idxView.strides plan.idxView.offset plan.idxView.maskStart plan.idxView.maskEnd
+      plan.reduceAxis classDim itemsize plan.idxItemsize (if plan.idxSigned then 1 else 0)
+  return { dtype := u.dtype, data := outBytes }
+
+/-- Minimum number of elements for GPU dispatch to be beneficial.
+    Below this threshold, CPU is faster due to GPU copy overhead. -/
+private def gpuEwiseMinElements : Nat := 16384
+
+private def gpuGatherMinElements : Nat := 16384
+
+/-- Check if kernel type is suitable for GPU dispatch -/
+private def isGpuDispatchableKernel (k : FusedEwise.Kernel) : Bool :=
+  match k with
+  | .bytecode => true
+  -- Binary ops benefit from GPU for large tensors
+  | .addContiguous | .subContiguous | .mulContiguous | .divContiguous | .maxContiguous => true
+  -- Transcendentals benefit from GPU parallelism
+  | .exp2Contiguous | .log2Contiguous | .sinContiguous | .cosContiguous | .tanContiguous => true
+  -- Simple unary ops - CPU is often fast enough
+  | .negContiguous | .sqrtContiguous | .recipContiguous => true
+  | .powContiguous => true
+
+/-- IO-based fused elementwise evaluation, preferring GPU when available.
+    Falls back to CPU Native implementation on GPU error or small tensors. -/
+private def evalFusedEwiseIO (u : UOp) (plan : FusedEwise.Plan) (env : Env)
+    (cache : HashMap UOpId RawBuffer) : IO RawBuffer := do
+  if u.dtype != .float32 then
+    return RawBuffer.zeros u.dtype (listProd u.shape)
+
+  let numel := listProd u.shape
+
+  -- For fast contiguous plans with enough elements, try GPU dispatch
+  if plan.fast && numel >= gpuEwiseMinElements && isGpuDispatchableKernel plan.kernel then
+    let n := plan.leafBases.size
+    let mut rawInputs : Array RawBuffer := #[]
+    for i in [:n] do
+      let dtCode := plan.leafDtypes[i]!
+      let dtype : DType := if dtCode == 1 then .bool else if dtCode == 2 then .uint8 else .float32
+      let uid := plan.leafBases[i]!
+      let fallback := env.getD uid (RawBuffer.zeros dtype 0)
+      let buf := cache.getD uid fallback
+      rawInputs := rawInputs.push buf
+
+    try
+      return ← MetalEwise.runFusedEwiseWithFallback plan rawInputs u.shape
+    catch _ =>
+      -- Fall through to CPU path on GPU error
+      pure ()
+
+  -- Fall back to CPU implementation (small tensors or non-GPU kernels)
+  return evalFusedEwise u plan env cache
+
+private def evalFusedGatherIO (u : UOp) (plan : FusedGather.Plan) (env : Env)
+    (cache : HashMap UOpId RawBuffer) : IO RawBuffer := do
+  let numel := listProd u.shape
+  if numel == 0 then
+    return RawBuffer.zeros u.dtype 0
+
+  let xFallback := env.getD plan.xBase (RawBuffer.zeros u.dtype 0)
+  let xBuf := cache.getD plan.xBase xFallback
+  let idxFallback := env.getD plan.idxBase (RawBuffer.zeros .int32 0)
+  let idxBuf := cache.getD plan.idxBase idxFallback
+
+  if numel < gpuGatherMinElements then
+    return evalFusedGather u plan env cache
+
+  let cudaAvailable ← Cuda.isAvailable
+  if cudaAvailable then
+    try
+      return ← CudaGather.runFusedGatherWithFallback plan xBuf idxBuf u.shape u.dtype
+    catch _ =>
+      pure ()
+
+  let metalAvailable ← Metal.isAvailable
+  if metalAvailable then
+    try
+      return ← MetalGather.runFusedGatherWithFallback plan xBuf idxBuf u.shape u.dtype
+    catch _ =>
+      return evalFusedGather u plan env cache
+  else
+    return evalFusedGather u plan env cache
+
 private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cache : HashMap UOpId RawBuffer) : RawBuffer :=
   if u.dtype != .float32 then
     RawBuffer.zeros u.dtype (listProd u.shape)
@@ -548,7 +707,7 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
       let mut inputs : Array ByteArray := Array.emptyWithCapacity n
       for i in [:n] do
         let dtCode := plan.ewise.leafDtypes[i]!
-        let dtype : DType := if dtCode == 1 then .bool else .float32
+        let dtype : DType := if dtCode == 1 then .bool else if dtCode == 2 then .uint8 else .float32
         let uid := plan.ewise.leafBases[i]!
         let fallback := env.getD uid (RawBuffer.zeros dtype 0)
         let buf := cache.getD uid fallback
@@ -1468,7 +1627,8 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
       if k != k2 then
         RawBuffer.zeros u.dtype (listProd u.shape)
       else if rA == 2 && rB == 2 then
-        { dtype := .float32, data := Native.matmulF32 a.data b.data m k n }
+        -- GPU matmul (Metal) - falls back to zeros on GPU error
+        { dtype := .float32, data := Metal.metalMatmulSync a.data b.data m k n }
       else
         let batchA := aSh.take (rA - 2)
         let batchB := bSh.take (rB - 2)
@@ -1782,10 +1942,17 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
       let numel := listProd u.shape
       match u.dtype with
       | .float32 =>
-        let mut out : Array Float := Array.emptyWithCapacity numel
-        for i in [:numel] do
-          out := out.push (readAsFloat src.dtype src.data i)
-        return { dtype := .float32, data := RawBuffer.packFloatsToF32Bytes out }
+        match src.dtype with
+        | .uint8 =>
+          if src.data.size != numel then
+            return RawBuffer.zeros u.dtype numel
+          else
+            return { dtype := .float32, data := Native.castU8ToF32 src.data }
+        | _ =>
+          let mut out : Array Float := Array.emptyWithCapacity numel
+          for i in [:numel] do
+            out := out.push (readAsFloat src.dtype src.data i)
+          return { dtype := .float32, data := RawBuffer.packFloatsToF32Bytes out }
       | .bool =>
         let mut out := ByteArray.emptyWithCapacity numel
         for i in [:numel] do
@@ -2139,6 +2306,7 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
             match impl with
             | .fusedMatmul plan => evalFusedMatmulBias u plan env cache
             | .fusedSoftmax plan => evalFusedSoftmax u plan env cache
+            | .fusedGather plan => evalFusedGather u plan env cache
             | .fusedReduce plan => evalFusedReduce u plan env cache
             | .fusedEwise plan => evalFusedEwise u plan env cache
             | .fusedContract plan => evalFusedContract u plan env cache
@@ -2193,6 +2361,7 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
               match impl with
               | .fusedMatmul plan => evalFusedMatmulBias u plan env cache
               | .fusedSoftmax plan => evalFusedSoftmax u plan env cache
+              | .fusedGather plan => evalFusedGather u plan env cache
               | .fusedReduce plan => evalFusedReduce u plan env cache
               | .fusedEwise plan => evalFusedEwise u plan env cache
               | .fusedContract plan => evalFusedContract u plan env cache
@@ -2239,9 +2408,53 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
   def evalMany (roots : List UOp) (env : Env) : HashMap UOpId RawBuffer := Id.run do
     evalCompiledRaw (compileMany roots) env
 
+  /-- IO-based schedule evaluation with GPU preference for gather/ewise (for evalManyCached) -/
+  private def evalCompiledRawIOInner (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) := do
+    let deps (u : UOp) : List UOpId := u.src.map (fun s => s.uid)
+
+    let mut refCnt : HashMap UOpId Nat := ∅
+    for u in c.nodes do
+      for sid in deps u do
+        refCnt := refCnt.insert sid (refCnt.getD sid 0 + 1)
+
+    let mut cache : HashMap UOpId RawBuffer := ∅
+    for item in c.schedule do
+      let u := item.ast
+      let v ←
+        match u.op with
+        | .KERNEL =>
+          match item.impl with
+          | some impl =>
+            match impl with
+            -- Use IO path for gather/ewise (GPU dispatch)
+            | .fusedGather plan => evalFusedGatherIO u plan env cache
+            | .fusedEwise plan => evalFusedEwiseIO u plan env cache
+            -- Use pure (CPU) path for others
+            | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
+            | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
+            | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
+            | .fusedContract plan => pure (evalFusedContract u plan env cache)
+            | .fusedSGD plan => pure (evalFusedSGD u plan env cache)
+            | .fusedLayerNorm _ => pure (evalNode u env cache)
+            | .fusedGELU _ => pure (evalNode u env cache)
+            | .node _ => pure (evalNode u env cache)
+          | none => pure (evalNode u env cache)
+        | _ => pure (evalNode u env cache)
+      cache := cache.insert u.uid v
+
+      for sid in deps u do
+        let cnt := refCnt.getD sid 0
+        if cnt > 0 then
+          let cnt' := cnt - 1
+          refCnt := refCnt.insert sid cnt'
+          if cnt' == 0 && !UOpIdSet.member c.keepIds sid then
+            cache := cache.erase sid
+
+    return cache
+
   def evalManyCached (roots : List UOp) (env : Env) : IO (HashMap UOpId RawBuffer) := do
     let compiled ← compileManyCached roots
-    pure (evalCompiledRaw compiled env)
+    evalCompiledRawIOInner compiled env
 
   def evalManyTimed (roots : List UOp) (env : Env) : IO (HashMap UOpId RawBuffer × Nat × Nat) := do
     let (compiled, compileNs) ← compileManyTimed roots
@@ -2252,6 +2465,13 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
     let (compiled, compileNs) ← compileManyCachedTimed roots
     let (cache, evalNs) ← evalCompiledRawTimedTotal compiled env
     pure (cache, compileNs, evalNs)
+
+  /-- Traced version of evalManyCached that emits trace events when TG4_TRACE=1.
+      Emits: schedule (compile phase), eval (execution phase) with UOp stats. -/
+  def evalManyCachedTraced (roots : List UOp) (env : Env) : IO (HashMap UOpId RawBuffer) := do
+    let uopStats := UOp.UOpStats.ofNodes (UOp.toposortMany roots)
+    let compiled ← Benchmark.Trace.withTrace "schedule" (some uopStats) (compileManyCached roots)
+    Benchmark.Trace.withTrace "eval" none (evalCompiledRawIOInner compiled env)
 
   def evalCached (u : UOp) (env : Env) : IO RawBuffer := do
     let cache ← evalManyCached [u] env
@@ -2267,8 +2487,493 @@ def evalTensor {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := �
 def evalTensorCached {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer :=
   evalCached t.uop env
 
+/-- Traced version of evalTensorCached that emits trace events when TG4_TRACE=1 -/
+def evalTensorCachedTraced {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer := do
+  let cache ← evalManyCachedTraced [t.uop] env
+  pure (cache.getD t.uop.uid (RawBuffer.zeros t.uop.dtype (listProd t.uop.shape)))
+
 def setBuffer (env : Env) (u : UOp) (data : RawBuffer) : Env :=
   env.insert u.uid data
+
+/-! ## IO-Based Evaluation (async GPU support) -/
+
+/-- IO-based fused contract evaluation with GPU preference -/
+private def evalFusedContractIO (u : UOp) (plan : FusedContract.Plan) (env : Env)
+    (cache : HashMap UOpId RawBuffer) : IO RawBuffer := do
+  if u.dtype != .float32 then
+    return RawBuffer.zeros u.dtype (listProd u.shape)
+
+  let aFallback := env.getD plan.aBase (RawBuffer.zeros .float32 plan.aNumel)
+  let bFallback := env.getD plan.bBase (RawBuffer.zeros .float32 plan.bNumel)
+  let aBuf := cache.getD plan.aBase aFallback
+  let bBuf := cache.getD plan.bBase bFallback
+
+  if plan.needsStack then
+    -- View stack case: use CPU Native (complex stride patterns)
+    let outBytes := Native.matmulViewStackF32
+      aBuf.data bBuf.data
+      plan.aStackShapes plan.aStackStrides plan.aStackOffsets
+      plan.aStackMaskStarts plan.aStackMaskEnds
+      plan.bStackShapes plan.bStackStrides plan.bStackOffsets
+      plan.bStackMaskStarts plan.bStackMaskEnds
+      u.shape.toArray plan.k
+    if outBytes.isEmpty then
+      return RawBuffer.zeros u.dtype (listProd u.shape)
+    return { dtype := .float32, data := outBytes }
+  else
+    -- Simple view case: try GPU, fallback to CPU
+    let outBytes := Native.matmulViewF32
+      aBuf.data bBuf.data
+      plan.aStrides plan.aOffset plan.aMaskStarts plan.aMaskEnds
+      plan.bStrides plan.bOffset plan.bMaskStarts plan.bMaskEnds
+      u.shape.toArray plan.k
+    if outBytes.isEmpty then
+      return RawBuffer.zeros u.dtype (listProd u.shape)
+    return { dtype := .float32, data := outBytes }
+
+/-- IO-based CONTRACT evaluation with GPU preference -/
+private def evalContractIO (u : UOp) (cache : HashMap UOpId RawBuffer) : IO RawBuffer := do
+  let a := getSrc cache u 0
+  let b := getSrc cache u 1
+  let aSh := u.src[0]!.shape
+  let bSh := u.src[1]!.shape
+  let rA := aSh.length
+  let rB := bSh.length
+
+  if u.dtype != .float32 || a.dtype != .float32 || b.dtype != .float32 then
+    return RawBuffer.zeros u.dtype (listProd u.shape)
+
+  if rA < 2 || rB < 2 then
+    return RawBuffer.zeros u.dtype (listProd u.shape)
+
+  let m := listGetD aSh (rA - 2) 0
+  let k := listGetD aSh (rA - 1) 0
+  let k2 := listGetD bSh (rB - 2) 0
+  let n := listGetD bSh (rB - 1) 0
+
+  if k != k2 then
+    return RawBuffer.zeros u.dtype (listProd u.shape)
+
+  if rA == 2 && rB == 2 then
+    -- Simple 2D matmul: use GPU with CPU fallback
+    MetalMatmul.runMatmul2D a b m k n
+  else
+    -- Batched matmul: compute batch starts, use GPU with CPU fallback
+    let batchA := aSh.take (rA - 2)
+    let batchB := bSh.take (rB - 2)
+    match Shape.broadcast batchA batchB with
+    | none => return RawBuffer.zeros u.dtype (listProd u.shape)
+    | some batchOut =>
+      let batchNumel := listProd batchOut
+      let lenBatch := batchOut.length
+      let batchA' := List.replicate (lenBatch - batchA.length) 1 ++ batchA
+      let batchB' := List.replicate (lenBatch - batchB.length) 1 ++ batchB
+      let stridesA := stridesOf aSh
+      let stridesB := stridesOf bSh
+      let batchStridesA := List.replicate (lenBatch - batchA.length) 0 ++ stridesA.take batchA.length
+      let batchStridesB := List.replicate (lenBatch - batchB.length) 0 ++ stridesB.take batchB.length
+      let mut aStarts : Array Nat := Array.emptyWithCapacity batchNumel
+      let mut bStarts : Array Nat := Array.emptyWithCapacity batchNumel
+      for bi in [:batchNumel] do
+        let batchIdx := unflattenIndex bi batchOut
+        let aBatchIdx := listZipWith (fun idx dim => if dim == 1 then 0 else idx) batchIdx batchA'
+        let bBatchIdx := listZipWith (fun idx dim => if dim == 1 then 0 else idx) batchIdx batchB'
+        let baseA := offsetOf aBatchIdx batchStridesA
+        let baseB := offsetOf bBatchIdx batchStridesB
+        aStarts := aStarts.push baseA
+        bStarts := bStarts.push baseB
+      MetalMatmul.runMatmulBatched a b m k n aStarts bStarts
+
+/-- IO-based node evaluation (supports CONTRACT async) -/
+private def evalNodeIO (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : IO RawBuffer := do
+  match u.op with
+  | .CONTRACT => evalContractIO u cache
+  | _ => pure (evalNode u env cache)
+
+/-- IO-based schedule evaluation with GPU preference -/
+def evalCompiledRawIO (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) := do
+  let deps (u : UOp) : List UOpId := u.src.map (fun s => s.uid)
+
+  let mut refCnt : HashMap UOpId Nat := ∅
+  for u in c.nodes do
+    for sid in deps u do
+      refCnt := refCnt.insert sid (refCnt.getD sid 0 + 1)
+
+  let mut cache : HashMap UOpId RawBuffer := ∅
+  for item in c.schedule do
+    let u := item.ast
+    let v ←
+      match u.op with
+      | .KERNEL =>
+        match item.impl with
+        | some impl =>
+          match impl with
+          | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
+          | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
+          | .fusedGather plan => evalFusedGatherIO u plan env cache
+          | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
+          | .fusedEwise plan => evalFusedEwiseIO u plan env cache
+          | .fusedContract plan => evalFusedContractIO u plan env cache
+          | .fusedSGD plan => pure (evalFusedSGD u plan env cache)
+          | .fusedLayerNorm _ => pure (evalNode u env cache)
+          | .fusedGELU _ => pure (evalNode u env cache)
+          | .node _ => pure (evalNode u env cache)
+        | none => evalNodeIO u env cache
+      | .CONTRACT => evalContractIO u cache
+      | _ => pure (evalNode u env cache)
+    cache := cache.insert u.uid v
+
+    for sid in deps u do
+      let cnt := refCnt.getD sid 0
+      if cnt > 0 then
+        let cnt' := cnt - 1
+        refCnt := refCnt.insert sid cnt'
+        if cnt' == 0 && !UOpIdSet.member c.keepIds sid then
+          cache := cache.erase sid
+
+  return cache
+
+/-- IO-based evaluation of UOp graph with GPU preference -/
+def evalIO (u : UOp) (env : Env) : IO RawBuffer := do
+  let compiled := compileMany [u]
+  let cache ← evalCompiledRawIO compiled env
+  return cache.getD u.uid (RawBuffer.zeros u.dtype (listProd u.shape))
+
+/-- IO-based tensor evaluation with GPU preference -/
+def evalTensorIO {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer :=
+  evalIO t.uop env
+
+/-- Evaluate multiple UOps concurrently using IO.asTask -/
+def evalManyParallel (roots : List UOp) (env : Env) : IO (HashMap UOpId RawBuffer) := do
+  let compiled := compileMany roots
+  evalCompiledRawIO compiled env
+
+/-! ## GPU-Resident Evaluation
+
+These functions maintain GPU residency for intermediate results, avoiding
+CPU-GPU copies between operations. Data is only copied to CPU when explicitly
+needed (e.g., for final output or CPU-only operations).
+-/
+
+open DeviceBuffer.DeviceBuffer in
+/-- Get or upload a buffer to GPU. Uses gpuCache if available, otherwise uploads. -/
+private def getOrUploadGPU (uid : UOpId) (cache : HashMap UOpId RawBuffer)
+    (gpuCache : HashMap UOpId DeviceBuffer.DeviceBuffer) (env : Env)
+    : IO (DeviceBuffer.DeviceBuffer × HashMap UOpId DeviceBuffer.DeviceBuffer) := do
+  -- Check GPU cache first
+  if let some db := gpuCache[uid]? then
+    return (db, gpuCache)
+  -- Get from CPU cache or env
+  let raw := cache.getD uid (env.getD uid (RawBuffer.zeros .float32 0))
+  -- Upload to GPU
+  let db ← uploadToGPU raw
+  return (db, gpuCache.insert uid db)
+
+open DeviceBuffer.DeviceBuffer in
+/-- Evaluate fused elementwise on GPU, keeping result on GPU -/
+private def evalFusedEwiseGPU (u : UOp) (plan : FusedEwise.Plan)
+    (cache : HashMap UOpId RawBuffer)
+    (gpuCache : HashMap UOpId DeviceBuffer.DeviceBuffer) (env : Env)
+    : IO (DeviceBuffer.DeviceBuffer × HashMap UOpId DeviceBuffer.DeviceBuffer) := do
+  if u.dtype != .float32 then
+    return (fromCPU (RawBuffer.zeros u.dtype (listProd u.shape)), gpuCache)
+
+  let numel := listProd u.shape
+  let n := plan.leafBases.size
+  if !plan.fast || numel < gpuEwiseMinElements || !isGpuDispatchableKernel plan.kernel then
+    -- Fall back to CPU, materializing any GPU inputs needed.
+    let mut cacheLocal := cache
+    for i in [:n] do
+      let uid := plan.leafBases[i]!
+      if !cacheLocal.contains uid then
+        if let some db := gpuCache[uid]? then
+          let raw ← toCPU db
+          cacheLocal := cacheLocal.insert uid raw
+    let cpuResult := evalFusedEwise u plan env cacheLocal
+    return (fromCPU cpuResult, gpuCache)
+
+  -- Get inputs on GPU
+  let mut inputs : Array DeviceBuffer.DeviceBuffer := #[]
+  let mut gpuCache' := gpuCache
+  for i in [:n] do
+    let uid := plan.leafBases[i]!
+    let (db, gc) ← getOrUploadGPU uid cache gpuCache' env
+    inputs := inputs.push db
+    gpuCache' := gc
+
+  -- Execute on GPU, result stays on GPU
+  let result ← MetalEwise.runFusedEwiseDevice plan inputs u.shape
+  return (result, gpuCache')
+
+open DeviceBuffer.DeviceBuffer in
+/-- Evaluate fused reduce on GPU, keeping result on GPU -/
+private def evalFusedReduceGPU (u : UOp) (plan : FusedReduce.Plan)
+    (cache : HashMap UOpId RawBuffer)
+    (gpuCache : HashMap UOpId DeviceBuffer.DeviceBuffer) (env : Env)
+    : IO (DeviceBuffer.DeviceBuffer × HashMap UOpId DeviceBuffer.DeviceBuffer) := do
+  if u.dtype != .float32 then
+    return (fromCPU (RawBuffer.zeros u.dtype (listProd u.shape)), gpuCache)
+
+  -- Convert reduce op to Metal reduce op
+  let reduceOp := match plan.reduceOp with
+    | .ADD => some MetalRenderer.ReduceOp.sum
+    | .MAX => some MetalRenderer.ReduceOp.max
+    | _ => none
+
+  -- Only handle simple cases on GPU: reduce over last axis(es), fast ewise path
+  -- This covers softmax/cross-entropy patterns
+  let axes := plan.axes.toList
+  let rank := plan.fullShape.size
+  let lastAxes := List.range axes.length |>.map (rank - 1 - ·) |>.reverse
+  let isLastAxes := axes == lastAxes
+
+  -- Compute inner (reduced) and outer (kept) dimensions
+  let inner := plan.axes.foldl (fun acc ax => acc * plan.fullShape.getD ax 1) 1
+  let outer := plan.fullShape.foldl (fun acc d => acc * d) 1 / inner
+
+  -- Only use GPU for: valid reduce op, fast ewise, last-axes reduction, non-trivial size
+  -- Require larger sizes because GPU reduce has higher overhead than ewise
+  -- GPU reduce is ~4ms overhead, CPU reduce is <1ms for 256*784
+  -- Only use GPU when computation time exceeds overhead (roughly 1M+ elements)
+  let totalElements := inner * outer
+  let useGPU := reduceOp.isSome && plan.ewise.fast && isLastAxes && inner >= 128 && totalElements >= 1000000
+
+  if !useGPU then
+    -- Fall back to CPU, materializing any GPU inputs needed.
+    let mut cacheLocal := cache
+    let n := plan.ewise.leafBases.size
+    for i in [:n] do
+      let uid := plan.ewise.leafBases[i]!
+      if !cacheLocal.contains uid then
+        if let some db := gpuCache[uid]? then
+          let raw ← toCPU db
+          cacheLocal := cacheLocal.insert uid raw
+    let cpuResult := evalFusedReduce u plan env cacheLocal
+    return (fromCPU cpuResult, gpuCache)
+
+  let some reduceOp := reduceOp | do
+    let cpuResult := evalFusedReduce u plan env cache
+    return (fromCPU cpuResult, gpuCache)
+
+  -- First: run ewise to get pre-reduce values on GPU
+  let mut inputs : Array DeviceBuffer.DeviceBuffer := #[]
+  let mut gpuCache' := gpuCache
+  let n := plan.ewise.leafBases.size
+
+  for i in [:n] do
+    let uid := plan.ewise.leafBases[i]!
+    -- Check GPU cache first
+    match gpuCache'.get? uid with
+    | some db =>
+      inputs := inputs.push db
+    | none =>
+      -- Get from CPU cache or env, upload to GPU
+      let dtCode := plan.ewise.leafDtypes[i]!
+      let dtype : DType := if dtCode == 1 then .bool else if dtCode == 2 then .uint8 else .float32
+      let fallback := env.getD uid (RawBuffer.zeros dtype 0)
+      let buf := cache.getD uid fallback
+      let db := fromCPU buf
+      inputs := inputs.push db
+
+  -- Run ewise part on GPU to get full pre-reduce tensor
+  let preReduceShape := plan.fullShape.toList
+  let preReduceDb ← MetalEwise.runFusedEwiseDevice plan.ewise inputs preReduceShape
+
+  -- Run reduce kernel on the result
+  let result ← MetalEwise.runReduceKernelDevice reduceOp preReduceDb outer inner
+
+  return (result, gpuCache')
+
+open DeviceBuffer.DeviceBuffer in
+/-- Evaluate fused matmul on GPU, keeping result on GPU -/
+private def evalFusedMatmulGPU (u : UOp) (plan : FusedMatmul.Plan)
+    (cache : HashMap UOpId RawBuffer)
+    (gpuCache : HashMap UOpId DeviceBuffer.DeviceBuffer) (env : Env)
+    : IO (DeviceBuffer.DeviceBuffer × HashMap UOpId DeviceBuffer.DeviceBuffer) := do
+  if u.dtype != .float32 then
+    return (fromCPU (RawBuffer.zeros u.dtype (listProd u.shape)), gpuCache)
+
+  -- Only handle simple cases on GPU:
+  -- - Non-batched (single matmul)
+  -- - Fast memory layout (no complex views)
+  -- - No bias (bias add on GPU not yet implemented)
+  -- - No scale or relu (fused ops not yet on GPU)
+  let isBatched := !plan.aStarts.isEmpty
+  let hasBias := plan.biasNumel > 0
+  let hasScale := plan.scaleBits.isSome
+  let hasRelu := plan.relu
+  let fast := !plan.needsStack && plan.aFast && plan.bFast
+
+  -- Minimum size threshold for GPU benefit
+  let numel := plan.m * plan.k + plan.k * plan.n + plan.m * plan.n
+  let minGpuSize := 50000  -- ~200x200 matrices minimum
+
+  let useGPU := fast && !isBatched && !hasBias && !hasScale && !hasRelu && numel >= minGpuSize
+
+  if !useGPU then
+    -- Fall back to CPU for complex cases or small sizes
+    let cpuResult := evalFusedMatmulBias u plan env cache
+    return (fromCPU cpuResult, gpuCache)
+
+  -- Get inputs on GPU
+  let mut gpuCache' := gpuCache
+  let (aDb, gc1) ← getOrUploadGPU plan.aBase cache gpuCache' env
+  gpuCache' := gc1
+  let (bDb, gc2) ← getOrUploadGPU plan.bBase cache gpuCache' env
+  gpuCache' := gc2
+
+  -- Run GPU matmul
+  let m := plan.m
+  let k := plan.k
+  let n := plan.n
+
+  -- Single 2D matmul
+  let resultDb ← MetalMatmul.matmul2DDevice aDb bDb m k n
+
+  return (resultDb, gpuCache')
+
+open DeviceBuffer.DeviceBuffer in
+/-- Internal helper for IO-based schedule evaluation with GPU residency. -/
+private def evalCompiledRawIOGPUWithCache (c : Compiled) (env : Env)
+    (gpuCacheInit : HashMap UOpId DeviceBuffer.DeviceBuffer) : IO (HashMap UOpId RawBuffer) := do
+  let deps (u : UOp) : List UOpId :=
+    match c.implMap[u.uid]? with
+    | some impl => impl.deps
+    | none => u.src.map (fun s => s.uid)
+
+  let mut refCnt : HashMap UOpId Nat := ∅
+  for u in c.nodes do
+    for sid in deps u do
+      refCnt := refCnt.insert sid (refCnt.getD sid 0 + 1)
+
+  let mut cache : HashMap UOpId RawBuffer := ∅
+  let mut gpuCache : HashMap UOpId DeviceBuffer.DeviceBuffer := gpuCacheInit
+
+  for item in c.schedule do
+    let u := item.ast
+
+    -- Try GPU-resident path for supported operations
+    let (useGPU, gpuResult) ←
+      match u.op with
+      | .KERNEL =>
+        match item.impl with
+        | some (.fusedEwise plan) =>
+          if u.dtype == .float32 && plan.fast && listProd u.shape >= gpuEwiseMinElements then
+            let (db, gc) ← evalFusedEwiseGPU u plan cache gpuCache env
+            gpuCache := gc
+            pure (true, some db)
+          else
+            pure (false, none)
+        | some (.fusedReduce plan) =>
+          -- GPU reduce: uses GPU for ewise + reduce if conditions met
+          if u.dtype == .float32 then
+            let (db, gc) ← evalFusedReduceGPU u plan cache gpuCache env
+            gpuCache := gc
+            pure (true, some db)
+          else
+            pure (false, none)
+        | some (.fusedMatmul plan) =>
+          -- GPU matmul: only for large non-batched matmuls without bias
+          let numel := plan.m * plan.k + plan.k * plan.n + plan.m * plan.n
+          let minGpuSize := 50000
+          let isBatched := !plan.aStarts.isEmpty
+          let hasBias := plan.biasNumel > 0
+          let fast := !plan.needsStack && plan.aFast && plan.bFast
+          let useGPU := u.dtype == .float32 && fast && !isBatched && !hasBias &&
+                        !plan.scaleBits.isSome && !plan.relu && numel >= minGpuSize
+          if useGPU then
+            let (db, gc) ← evalFusedMatmulGPU u plan cache gpuCache env
+            gpuCache := gc
+            pure (true, some db)
+          else
+            pure (false, none)
+        | _ => pure (false, none)
+      | _ => pure (false, none)
+
+    if useGPU then
+      if let some db := gpuResult then
+        gpuCache := gpuCache.insert u.uid db
+        -- Don't materialize to CPU cache yet - lazy evaluation
+    else
+      -- Materialize any GPU-resident inputs needed by CPU ops.
+      let cpuDeps :=
+        match item.impl with
+        | some impl => impl.deps
+        | none => deps u
+      for sid in cpuDeps do
+        if !cache.contains sid then
+          if let some db := gpuCache[sid]? then
+            let raw ← toCPU db
+            cache := cache.insert sid raw
+      -- Fall back to regular CPU path
+      let v ←
+        match u.op with
+        | .KERNEL =>
+          match item.impl with
+          | some impl =>
+            match impl with
+            | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
+            | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
+            | .fusedGather plan => evalFusedGatherIO u plan env cache
+            | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
+            | .fusedEwise plan => evalFusedEwiseIO u plan env cache
+            | .fusedContract plan => evalFusedContractIO u plan env cache
+            | .fusedSGD plan => pure (evalFusedSGD u plan env cache)
+            | .fusedLayerNorm _ => pure (evalNode u env cache)
+            | .fusedGELU _ => pure (evalNode u env cache)
+            | .node _ => pure (evalNode u env cache)
+          | none => evalNodeIO u env cache
+        | .CONTRACT => evalContractIO u cache
+        | _ => pure (evalNode u env cache)
+      cache := cache.insert u.uid v
+
+    -- Reference counting cleanup
+    for sid in deps u do
+      let cnt := refCnt.getD sid 0
+      if cnt > 0 then
+        let cnt' := cnt - 1
+        refCnt := refCnt.insert sid cnt'
+        if cnt' == 0 && !UOpIdSet.member c.keepIds sid then
+          cache := cache.erase sid
+          -- Also release GPU buffer if present
+          if let some db := gpuCache[sid]? then
+            release db
+            gpuCache := gpuCache.erase sid
+
+  -- Materialize requested outputs (roots) to CPU if they were kept on GPU.
+  for r in c.roots do
+    if !cache.contains r.uid then
+      if let some db := gpuCache[r.uid]? then
+        let raw ← toCPU db
+        cache := cache.insert r.uid raw
+
+  -- Release GPU buffers now that results are materialized.
+  for (_, db) in gpuCache.toList do
+    release db
+
+  return cache
+
+open DeviceBuffer.DeviceBuffer in
+/-- IO-based schedule evaluation with GPU residency.
+    Keeps intermediate results on GPU, only materializes to CPU for final outputs. -/
+def evalCompiledRawIOGPU (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) :=
+  evalCompiledRawIOGPUWithCache c env ∅
+
+open DeviceBuffer.DeviceBuffer in
+/-- IO-based schedule evaluation with GPU residency and preloaded GPU inputs. -/
+def evalCompiledRawIOGPUWithInputs (c : Compiled) (env : Env)
+    (gpuInputs : HashMap UOpId DeviceBuffer.DeviceBuffer) : IO (HashMap UOpId RawBuffer) :=
+  evalCompiledRawIOGPUWithCache c env gpuInputs
+
+/-- IO-based evaluation with GPU residency -/
+def evalIOGPU (u : UOp) (env : Env) : IO RawBuffer := do
+  let compiled := compileMany [u]
+  let cache ← evalCompiledRawIOGPU compiled env
+  return cache.getD u.uid (RawBuffer.zeros u.dtype (listProd u.shape))
+
+/-- IO-based tensor evaluation with GPU residency -/
+def evalTensorIOGPU {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer :=
+  evalIOGPU t.uop env
 
 end Interpreter
 

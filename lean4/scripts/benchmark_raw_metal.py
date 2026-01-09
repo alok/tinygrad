@@ -29,7 +29,7 @@ def benchmark_raw_metal():
     print("=== Raw Metal Kernel Benchmark ===")
 
     dev = MetalDevice("METAL")
-    print(f"Device: METAL")
+    print("Device: METAL")
 
     size = 1_000_000
     byte_size = size * 4
@@ -72,7 +72,7 @@ def benchmark_raw_metal():
     gflops = (size / avg_us) * 1e6 / 1e9
     bandwidth = (3.0 * size * 4.0 / avg_us) * 1e6 / 1e9
 
-    print(f"\n=== Raw kernel timing (async, sync at end) ===")
+    print("\n=== Raw kernel timing (async, sync at end) ===")
     print(f"Time: {avg_us:.6f} μs")
     print(f"Throughput: {gflops:.6f} GFLOP/s")
     print(f"Bandwidth: {bandwidth:.6f} GB/s")

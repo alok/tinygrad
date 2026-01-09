@@ -10,8 +10,6 @@ import os
 os.environ["METAL"] = "1"
 
 from tinygrad import Tensor, Device
-from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.schedule import create_schedule
 
 def benchmark_raw_kernel():
     """Benchmark just the kernel execution, matching Lean's approach."""
@@ -31,9 +29,6 @@ def benchmark_raw_kernel():
     # Pre-compile by running once
     out = (a + b).realize()
 
-    # Get the schedule for a+b (this is the "compiled kernel")
-    out_lazy = a + b
-
     # Warmup
     for _ in range(3):
         out = (a + b).realize()
@@ -52,7 +47,7 @@ def benchmark_raw_kernel():
     gflops = (size / avg_us) * 1e6 / 1e9
     bandwidth = (3.0 * size * 4.0 / avg_us) * 1e6 / 1e9
 
-    print(f"\n=== Full realize() timing ===")
+    print("\n=== Full realize() timing ===")
     print(f"Time: {avg_us:.6f} μs")
     print(f"Throughput: {gflops:.6f} GFLOP/s")
     print(f"Bandwidth: {bandwidth:.6f} GB/s")

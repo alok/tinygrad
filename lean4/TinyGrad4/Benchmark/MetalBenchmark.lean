@@ -2,6 +2,9 @@ import TinyGrad4.Benchmark.Framework
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.Vectorization
 
+-- Disable RawBuffer linter for benchmark files that need FloatArray for data generation
+set_option linter.useRawBuffer false
+
 /-!
 # Metal Benchmark Kernels
 

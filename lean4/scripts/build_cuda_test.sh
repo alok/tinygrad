@@ -5,8 +5,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LEAN4_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$LEAN4_DIR/.lake/build"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LEAN4_DIR="$ROOT_DIR/lean4"
+BUILD_DIR="$ROOT_DIR/.lake/build"
 C_DIR="$LEAN4_DIR/c"
 OUTPUT_DIR="$LEAN4_DIR/build"
 
@@ -33,7 +34,7 @@ mkdir -p "$OUTPUT_DIR"
 
 # Step 1: Build Lean project (compiles .lean files)
 echo "Step 1: Building Lean project..."
-cd "$LEAN4_DIR"
+cd "$ROOT_DIR"
 lake build TinyGrad4 || echo "Lake build may fail due to missing FFI - continuing..."
 
 # Step 2: Compile CUDA FFI

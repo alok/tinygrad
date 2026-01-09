@@ -2,6 +2,9 @@ import TinyGrad4.Backend.Device
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.Engine
 
+-- Disable RawBuffer linter for test files that need Array Float literals
+set_option linter.useRawBuffer false
+
 /-!
 # Metal Backend Test
 

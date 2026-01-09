@@ -227,6 +227,9 @@ def create_pod(gpu_type: str = "NVIDIA RTX A4000") -> str:
         image_name="runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
         gpu_type_id=gpu_type,
         cloud_type="COMMUNITY",  # or "SECURE" for dedicated
+        support_public_ip=True,
+        start_ssh=True,
+        ports="22/tcp",
         volume_in_gb=10,
         container_disk_in_gb=10,
         min_vcpu_count=4,
@@ -241,7 +244,7 @@ def create_pod(gpu_type: str = "NVIDIA RTX A4000") -> str:
     while True:
         status = runpod.get_pod(pod_id)
         if status.get("desiredStatus") == "RUNNING":
-            runtime = status.get("runtime", {})
+            runtime = status.get("runtime") or {}
             if runtime.get("uptimeInSeconds", 0) > 0:
                 break
         time.sleep(5)
@@ -258,19 +261,35 @@ def run_on_pod(pod_id: str) -> dict:
 
     # Get pod info
     pod = runpod.get_pod(pod_id)
-    runtime = pod.get("runtime", {})
+    runtime = pod.get("runtime") or {}
     ssh_command = runtime.get("sshCommand", "")
 
     if not ssh_command:
-        print("ERROR: No SSH access. Using RunPod execute...")
+        print("Waiting for SSH access...")
+        start = time.time()
+        while time.time() - start < 600:
+            pod = runpod.get_pod(pod_id)
+            runtime = pod.get("runtime") or {}
+            ssh_command = runtime.get("sshCommand", "")
+            if not ssh_command:
+                ports = runtime.get("ports", [])
+                ssh_port = next((p for p in ports if p.get("privatePort") == 22), None)
+                if ssh_port and ssh_port.get("isIpPublic"):
+                    ssh_command = f"ssh -i ~/.ssh/id_rsa -p {ssh_port['publicPort']} root@{ssh_port['ip']}"
+            if ssh_command:
+                break
+            time.sleep(5)
+            print(".", end="", flush=True)
+        print("")
 
-        # Use RunPod's run_pod API instead
-        result = runpod.run_pod(
-            pod_id,
-            {
-                "input": {
-                    "command": "bash",
-                    "args": ["-c", f"""
+    if not ssh_command:
+        raise RuntimeError("No SSH access available; cannot run benchmark automatically.")
+
+    print(f"SSH: {ssh_command}")
+    remote_script = f"""
+export CUDA_HOME=/usr/local/cuda
+export PATH="$CUDA_HOME/bin:$PATH"
+
 cat > /tmp/benchmark.cu << 'CUDA_EOF'
 {STANDALONE_CUDA_BENCHMARK}
 CUDA_EOF
@@ -279,20 +298,22 @@ cd /tmp
 nvcc -O3 benchmark.cu -o cuda_bench -lcuda -lnvrtc 2>&1
 ./cuda_bench
 
-# Run with nsys if available
 if command -v nsys &> /dev/null; then
     echo ""
     echo "=== Running with nsys profiling ==="
     nsys profile --stats=true -o /tmp/profile ./cuda_bench 2>&1 | head -100
 fi
-"""]
-                }
-            }
-        )
-        return result
+"""
 
-    print(f"SSH: {ssh_command}")
-    return {"status": "manual", "ssh": ssh_command}
+    import shlex
+    ssh_parts = shlex.split(ssh_command)
+    ssh_parts[1:1] = [
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null"
+    ]
+    ssh_parts.append("bash -lc " + shlex.quote(remote_script))
+    result = subprocess.run(ssh_parts, check=True, capture_output=True, text=True)
+    return {"status": "ok", "output": result.stdout, "stderr": result.stderr}
 
 
 def run_standalone_benchmark():

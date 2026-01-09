@@ -281,20 +281,20 @@ Both Metal and CUDA benchmarks now include float4 variants:
 ### Metal (Local Mac)
 
 ```bash
-cd lean4
-./scripts/build_metal_test.sh
-./build/metal_test
+cd tinygrad
+./lean4/scripts/build_metal_test.sh
+./.lake/build/bin/metal_test
 ```
 
 ### CUDA (RunPod)
 
 ```bash
-cd lean4
-python scripts/runpod_benchmark.py --generate-only
+cd tinygrad
+python lean4/scripts/runpod_benchmark.py --generate-only
 
 # Copy files to RunPod and run
-scp build/standalone_cuda_benchmark.cu runpod:/tmp/
-scp build/tinygrad_cuda_benchmark.py runpod:/tmp/
+scp lean4/build/standalone_cuda_benchmark.cu runpod:/tmp/
+scp lean4/build/tinygrad_cuda_benchmark.py runpod:/tmp/
 
 ssh runpod 'cd /tmp && nvcc -O3 standalone_cuda_benchmark.cu -o cuda_bench -lcuda -lnvrtc && ./cuda_bench'
 ssh runpod 'python tinygrad_cuda_benchmark.py'

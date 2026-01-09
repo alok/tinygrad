@@ -54,7 +54,7 @@ def benchmark():
     gflops = (size / avg_us) * 1e6 / 1e9
     bandwidth = (3.0 * size * 4.0 / avg_us) * 1e6 / 1e9
 
-    print(f"\n=== TinyJit results (async, sync at end) ===")
+    print("\n=== TinyJit results (async, sync at end) ===")
     print(f"Time: {avg_us:.6f} μs")
     print(f"Throughput: {gflops:.6f} GFLOP/s")
     print(f"Bandwidth: {bandwidth:.6f} GB/s")

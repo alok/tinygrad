@@ -14,8 +14,8 @@ open Std
 Matches the CONTRACT operation which performs tensor contraction:
   C = A @ B  (matrix multiplication)
 
-For 2D matmul: A[m,k] @ B[k,n] = C[m,n]
-For batched: A[...,m,k] @ B[...,k,n] = C[...,m,n]
+For 2D matmul: {lit}`A[m,k] @ B[k,n] = C[m,n]`
+For batched: {lit}`A[...,m,k] @ B[...,k,n] = C[...,m,n]`
 
 The contraction happens along the last dimension of A and second-to-last of B.
 -/

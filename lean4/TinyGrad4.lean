@@ -1,12 +1,12 @@
 import TinyGrad4.Basic
 import TinyGrad4.Linter.FloatLinter
 import TinyGrad4.Linter.RawBufferLinter
+import TinyGrad4.SimpSets
 import TinyGrad4.DType
 import TinyGrad4.Shape
-import TinyGrad4.Data.ArrayN
-import TinyGrad4.Data.Loader
 import TinyGrad4.Ops
 import TinyGrad4.UOp.UOp
+import TinyGrad4.UOp.Typed
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Notation
@@ -23,6 +23,7 @@ import TinyGrad4.Backend.FusedEwiseExpr
 import TinyGrad4.Backend.FusedReduceExpr
 import TinyGrad4.Backend.FusedSoftmaxExpr
 import TinyGrad4.Backend.FusedMatmulExpr
+import TinyGrad4.Backend.Cost
 import TinyGrad4.Kernel.Spec
 import TinyGrad4.Kernel.Trusted
 import TinyGrad4.Gradient.Rules
@@ -34,3 +35,7 @@ import TinyGrad4.Optim.UOpOpt
 
 -- Tests are not imported here to avoid circular dependencies
 -- Run tests with: lake build TinyGrad4.Test.GradientCheck TinyGrad4.Test.MLP
+
+-- Experimental dependent type test (disabled due to type class issues)
+-- abbrev outType (keepdim:Bool) :Type:= if keepdim then  Int else String
+-- def prod (keepdim:Bool): outType keepdim :=if h: keepdim then (0 : outType keepdim) else "0"

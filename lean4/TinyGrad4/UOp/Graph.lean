@@ -1,4 +1,5 @@
 import TinyGrad4.UOp.UOp
+import Lean.Data.Json
 import Std.Data.HashMap
 import Std.Data.HashSet
 
@@ -22,23 +23,83 @@ end UOpIdSet
 
 namespace UOp
 
-/-- Topological sort of UOp graph -/
-partial def toposort (root : UOp) (fuel : Nat := 100000) : List UOp :=
-  let (_, result) := go root UOpIdSet.mkEmpty [] fuel
-  result.reverse
-where
-  go (u : UOp) (visited : UOpIdSet) (acc : List UOp) (fuel : Nat) : UOpIdSet × List UOp :=
-    if fuel == 0 then (visited, acc)
-    else if UOpIdSet.member visited u.uid then (visited, acc)
+/-- Iterative topological sort using explicit stack (avoids stack overflow on deep graphs). -/
+def toposortIter (roots : List UOp) : List UOp := Id.run do
+  -- Stack entries: (node, done)
+  -- done=false: first visit, need to process children
+  -- done=true: all children processed, add to result
+  let mut stack : Array (UOp × Bool) := #[]
+  let mut visited : UOpIdSet := UOpIdSet.mkEmpty
+  let mut result : Array UOp := #[]
+
+  -- Initialize stack with roots
+  for r in roots.reverse do
+    if !UOpIdSet.member visited r.uid then
+      stack := stack.push (r, false)
+
+  while h : stack.size > 0 do
+    let (u, done) := stack[stack.size - 1]'(by omega)
+    stack := stack.pop
+
+    if done then
+      -- All children processed, add node to result
+      result := result.push u
+    else if UOpIdSet.member visited u.uid then
+      -- Already visited, skip
+      continue
     else
-      let visited' := UOpIdSet.add visited u.uid
-      let (visited'', acc') := u.src.foldl
-        (fun (v, a) child => go child v a (fuel - 1))
-        (visited', acc)
-      (visited'', u :: acc')
+      -- Mark as visited
+      visited := UOpIdSet.add visited u.uid
+      -- Push self back with done=true (to be added after children)
+      stack := stack.push (u, true)
+      -- Push unvisited children (reverse order so first child is processed first)
+      for i in [:u.src.length] do
+        let child := u.src[u.src.length - 1 - i]!
+        if !UOpIdSet.member visited child.uid then
+          stack := stack.push (child, false)
+
+  return result.toList
+
+/-- Topological sort of UOp graph (iterative to avoid stack overflow) -/
+def toposort (root : UOp) (_fuel : Nat := 100000) : List UOp :=
+  toposortIter [root]
+
+/-- Collect a topological order from multiple roots (deduplicated).
+    Uses iterative algorithm to avoid stack overflow on deep graphs. -/
+def toposortMany (roots : List UOp) (_fuel : Nat := 100000) : List UOp :=
+  toposortIter roots
 
 def allNodes (root : UOp) : List UOp := toposort root
 def nodeCount (root : UOp) : Nat := (allNodes root).length
+
+structure UOpStats where
+  total : Nat
+  byOp : HashMap Ops Nat
+  deriving Repr
+
+namespace UOpStats
+
+def ofNodes (nodes : List UOp) : UOpStats := Id.run do
+  let mut counts : HashMap Ops Nat := ∅
+  for u in nodes do
+    let prev := counts.getD u.op 0
+    counts := counts.insert u.op (prev + 1)
+  return { total := nodes.length, byOp := counts }
+
+end UOpStats
+
+def stats (root : UOp) : UOpStats :=
+  UOpStats.ofNodes (toposort root)
+
+open Lean Json in
+instance : ToJson UOpStats where
+  toJson s :=
+    let opPairs :=
+      s.byOp.toList.map (fun (op, cnt) => (toString (repr op), toJson cnt))
+    Json.mkObj [
+      ("total", toJson s.total),
+      ("by_op", Json.mkObj opPairs)
+    ]
 
 def buildConsumerMap (root : UOp) : ConsumerMap :=
   let nodes := toposort root
@@ -49,15 +110,20 @@ def buildConsumerMap (root : UOp) : ConsumerMap :=
     ) m
   ) ∅
 
-partial def ancestors (u : UOp) (fuel : Nat := 100000) : UOpIdSet :=
-  go u UOpIdSet.mkEmpty fuel
-where
-  go (u : UOp) (visited : UOpIdSet) (fuel : Nat) : UOpIdSet :=
-    if fuel == 0 then visited
-    else if UOpIdSet.member visited u.uid then visited
-    else
-      let visited' := UOpIdSet.add visited u.uid
-      u.src.foldl (fun v s => go s v (fuel - 1)) visited'
+/-- Iterative ancestor computation (avoids stack overflow on deep graphs). -/
+def ancestors (u : UOp) (_fuel : Nat := 100000) : UOpIdSet := Id.run do
+  let mut stack : Array UOp := #[u]
+  let mut visited : UOpIdSet := UOpIdSet.mkEmpty
+  while h : stack.size > 0 do
+    let curr := stack[stack.size - 1]'(by omega)
+    stack := stack.pop
+    if UOpIdSet.member visited curr.uid then
+      continue
+    visited := UOpIdSet.add visited curr.uid
+    for s in curr.src do
+      if !UOpIdSet.member visited s.uid then
+        stack := stack.push s
+  return visited
 
 def dependsOn (u1 u2 : UOp) : Bool := UOpIdSet.member (ancestors u1) u2.uid
 
@@ -71,21 +137,6 @@ def findLeaves (root : UOp) : List UOp := filterNodes root (·.src.isEmpty)
 def pretty (u : UOp) : String :=
   let srcIds := u.src.map (·.uid.id) |>.map toString |> String.intercalate ", "
   s!"{u.uid}: {repr u.op} [{srcIds}] -> {u.shape}"
-
-/-- Collect a topological order from multiple roots (deduplicated). -/
-partial def toposortMany (roots : List UOp) (fuel : Nat := 100000) : List UOp :=
-  let (_, result) := roots.foldl (fun (visited, acc) r => go r visited acc fuel) (UOpIdSet.mkEmpty, [])  -- type: (UOpIdSet × List UOp)
-  result.reverse
-where
-  go (u : UOp) (visited : UOpIdSet) (acc : List UOp) (fuel : Nat) : UOpIdSet × List UOp :=
-    if fuel == 0 then (visited, acc)
-    else if UOpIdSet.member visited u.uid then (visited, acc)
-    else
-      let visited' := UOpIdSet.add visited u.uid
-      let (visited'', acc') := u.src.foldl
-        (fun (v, a) child => go child v a (fuel - 1))
-        (visited', acc)
-      (visited'', u :: acc')
 
 structure ValidationError where
   uid : UOpId

@@ -1,137 +1,161 @@
 import TinyGrad4.Tensor.Tensor
+import TinyGrad4.UOp.Typed
 import TinyGrad4.Tensor.Movement
+
+set_option maxHeartbeats 800000
 
 namespace TinyGrad4
 
 namespace StaticTensor
 
+private def ofTU {op : Ops} {s : Shape} {r : Nat} {d : DType} (t : TUOp op s r d) (reqGrad : Bool) :
+    StaticTensor s d :=
+  StaticTensor.ofTUOp t reqGrad
+
+private def ofTUCast {op : Ops} {s : Shape} {r : Nat} {d : DType} (t : TUOp op s r d) (s' : Shape)
+    (reqGrad : Bool) : StaticTensor s' d :=
+  StaticTensor.ofTUOp (TUOp.castShape t s') reqGrad
+
+private def ofTUCastDType {op : Ops} {s : Shape} {r : Nat} {d : DType} (t : TUOp op s r d) (d' : DType)
+    (reqGrad : Bool) : StaticTensor s d' :=
+  StaticTensor.ofTUOp (TUOp.castDType t d') reqGrad
+
+private def ofTUCastShapeDType {op : Ops} {s : Shape} {r : Nat} {d : DType} (t : TUOp op s r d)
+    (s' : Shape) (d' : DType) (reqGrad : Bool) : StaticTensor s' d' :=
+  StaticTensor.ofTUOp (TUOp.castDType (TUOp.castShape t s') d') reqGrad
+
 def add {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.add t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.add t1.tuop t2.tuop
+  pure (ofTUCastShapeDType result s d (t1.requiresGrad || t2.requiresGrad))
 
 def addB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.add t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.add t1.tuop t2.tuop
+  let result := TUOp.castDType result d
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def mul {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.mul t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.mul t1.tuop t2.tuop
+  pure (ofTUCastShapeDType result s d (t1.requiresGrad || t2.requiresGrad))
 
 def mulB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.mul t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.mul t1.tuop t2.tuop
+  let result := TUOp.castDType result d
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def sub {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.sub t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.sub t1.tuop t2.tuop
+  pure (ofTUCastShapeDType result s d (t1.requiresGrad || t2.requiresGrad))
 
 def subB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.sub t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.sub t1.tuop t2.tuop
+  let result := TUOp.castDType result d
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def div {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.div t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.div t1.tuop t2.tuop
+  pure (ofTUCastShapeDType result s d (t1.requiresGrad || t2.requiresGrad))
 
 def divB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.div t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.div t1.tuop t2.tuop
+  let result := TUOp.castDType result d
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def pow {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.pow t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .POW t1.tuop t2.tuop
+  pure (ofTUCastShapeDType result s d (t1.requiresGrad || t2.requiresGrad))
 
 def powB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d) := do
-  let result ← UOp.pow t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .POW t1.tuop t2.tuop
+  let result := TUOp.castDType result d
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cmplt {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.cmplt t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmplt t1.tuop t2.tuop
+  pure (ofTUCast result s (t1.requiresGrad || t2.requiresGrad))
 
 def cmpltB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.cmplt t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmplt t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cmpgt {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s .bool) := do
   cmplt t2 t1
 
 def cmpgtB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.cmplt t2.uop t1.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmplt t2.tuop t1.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cmpeq {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.cmpeq t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmpeq t1.tuop t2.tuop
+  pure (ofTUCast result s (t1.requiresGrad || t2.requiresGrad))
 
 def cmpeqB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.cmpeq t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmpeq t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cmpne {s : List Nat} {d : DType} (t1 t2 : StaticTensor s d) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.cmpne t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmpne t1.tuop t2.tuop
+  pure (ofTUCast result s (t1.requiresGrad || t2.requiresGrad))
 
 def cmpneB {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.cmpne t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cmpne t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cat {s1 s2 : List Nat} {d : DType} (t1 : StaticTensor s1 d) (t2 : StaticTensor s2 d)
     (axis : Nat) : TensorM (StaticTensor (Shape.concatOut s1 s2 axis) d) := do
-  let out ← UOp.cat [t1.uop, t2.uop] axis
-  pure { uop := out, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let out ← TUOp.cat (axis := axis) t1.tuop t2.tuop
+  pure (ofTU out (t1.requiresGrad || t2.requiresGrad))
 
 def catList {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
     : TensorM (StaticTensor (Shape.concatOutList shapes axis) d) := do
-  let out ← UOp.cat (TensorList.toUOps ts) axis
+  let out ← TUOp.catList (d := d) (TensorList.toTUOpList ts) (axis := axis)
   let reqGrad := TensorList.anyRequiresGrad ts
-  pure { uop := out, requiresGrad := reqGrad, h_shape := sorry_proof }
+  pure (ofTU out reqGrad)
 
 def bitand {s : List Nat} (t1 t2 : StaticTensor s .bool) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.bitand t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .AND t1.tuop t2.tuop
+  pure (ofTUCast result s (t1.requiresGrad || t2.requiresGrad))
 
 def bitandB {s1 s2 : List Nat} (t1 : StaticTensor s1 .bool) (t2 : StaticTensor s2 .bool)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.bitand t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .AND t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def bitor {s : List Nat} (t1 t2 : StaticTensor s .bool) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.bitor t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .OR t1.tuop t2.tuop
+  pure (ofTUCast result s (t1.requiresGrad || t2.requiresGrad))
 
 def bitorB {s1 s2 : List Nat} (t1 : StaticTensor s1 .bool) (t2 : StaticTensor s2 .bool)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.bitor t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .OR t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def bitxor {s : List Nat} (t1 t2 : StaticTensor s .bool) : TensorM (StaticTensor s .bool) := do
-  let result ← UOp.bitxor t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .XOR t1.tuop t2.tuop
+  pure (ofTUCast result s (t1.requiresGrad || t2.requiresGrad))
 
 def bitxorB {s1 s2 : List Nat} (t1 : StaticTensor s1 .bool) (t2 : StaticTensor s2 .bool)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool) := do
-  let result ← UOp.bitxor t1.uop t2.uop
-  pure { uop := result, requiresGrad := t1.requiresGrad || t2.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.binaryOp .XOR t1.tuop t2.tuop
+  pure (ofTUCast result (Shape.broadcastOut s1 s2) (t1.requiresGrad || t2.requiresGrad))
 
 def cast {s : List Nat} {d : DType} (t : StaticTensor s d) (dtype : DType)
     : TensorM (StaticTensor s dtype) := do
-  let result ← UOp.cast t.uop dtype
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.cast t.tuop dtype
+  pure (ofTU result t.requiresGrad)
 
 def bitcast {s : List Nat} {d : DType} (t : StaticTensor s d) (dtype : DType)
     : TensorM (StaticTensor s dtype) := do
-  let result ← UOp.bitcast t.uop dtype
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.bitcast t.tuop dtype
+  pure (ofTU result t.requiresGrad)
 
 def to {s : List Nat} {d : DType} (t : StaticTensor s d) (dtype : DType)
     : TensorM (StaticTensor s dtype) :=
@@ -144,8 +168,8 @@ def to_ {s : List Nat} {d : DType} (t : StaticTensor s d) (dtype : DType)
 def where_ {s1 s2 s3 : List Nat} {d : DType}
     (cond : StaticTensor s1 .bool) (x : StaticTensor s2 d) (y : StaticTensor s3 d)
     : TensorM (StaticTensor (Shape.broadcastOut s1 (Shape.broadcastOut s2 s3)) d) := do
-  let out ← UOp.where_ cond.uop x.uop y.uop
-  pure { uop := out, requiresGrad := x.requiresGrad || y.requiresGrad, h_shape := sorry_proof }
+  let out ← TUOp.where_ cond.tuop x.tuop y.tuop
+  pure (ofTUCast out (Shape.broadcastOut s1 (Shape.broadcastOut s2 s3)) (x.requiresGrad || y.requiresGrad))
 
 infixl:65 " +. " => addB
 infixl:65 " -. " => subB
@@ -153,75 +177,77 @@ infixl:70 " *. " => mulB
 infixl:70 " /. " => divB
 
 def neg {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.neg t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.neg t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def trunc {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.trunc t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .TRUNC t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def floor {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let truncT ← trunc t
-  let isNeg ← UOp.cmplt t.uop truncT.uop
-  let one ← UOp.const d 1.0
-  let truncMinusOne ← UOp.sub truncT.uop one
-  let out ← UOp.where_ isNeg truncMinusOne truncT.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let isNeg ← TUOp.cmplt t.tuop truncT.tuop
+  let one ← TUOp.const d 1.0
+  let truncMinusOne ← TUOp.sub truncT.tuop one
+  let truncMinusOne := TUOp.castDType truncMinusOne d
+  let out ← TUOp.where_ isNeg truncMinusOne truncT.tuop
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
 def ceil {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let truncT ← trunc t
-  let isPos ← UOp.cmplt truncT.uop t.uop
-  let one ← UOp.const d 1.0
-  let truncPlusOne ← UOp.add truncT.uop one
-  let out ← UOp.where_ isPos truncPlusOne truncT.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let isPos ← TUOp.cmplt truncT.tuop t.tuop
+  let one ← TUOp.const d 1.0
+  let truncPlusOne ← TUOp.add truncT.tuop one
+  let truncPlusOne := TUOp.castDType truncPlusOne d
+  let out ← TUOp.where_ isPos truncPlusOne truncT.tuop
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
 def sqrt {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.sqrt t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .SQRT t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def rsqrt {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let sqrtT ← sqrt t
-  let result ← UOp.recip sqrtT.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .RECIPROCAL sqrtT.tuop
+  pure (ofTU result t.requiresGrad)
 
 def exp2 {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.exp2 t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .EXP2 t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def log2 {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.log2 t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .LOG2 t.tuop
+  pure (ofTU result t.requiresGrad)
 
 /-- Sine function -/
 def sin {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.sin t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .SIN t.tuop
+  pure (ofTU result t.requiresGrad)
 
 /-- Cosine function -/
 def cos {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.cos t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .COS t.tuop
+  pure (ofTU result t.requiresGrad)
 
 /-- Tangent function -/
 def tan {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.tan t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .TAN t.tuop
+  pure (ofTU result t.requiresGrad)
 
 /-- Reciprocal (1/x) -/
 def recip {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let result ← UOp.recip t.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.unaryOp .RECIPROCAL t.tuop
+  pure (ofTU result t.requiresGrad)
 
 def sum {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (Scalar d) := do
   let axes := listRange s.length
-  let result ← UOp.sum t.uop axes false
-  pure { uop := result, h_shape := sorry_proof }
+  let result ← TUOp.sum t.tuop axes false
+  pure (ofTUCast result [] false)
 
 def max {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (Scalar d) := do
   let axes := listRange s.length
-  let result ← UOp.max_ t.uop axes false
-  pure { uop := result, h_shape := sorry_proof }
+  let result ← TUOp.max_ t.tuop axes false
+  pure (ofTUCast result [] false)
 
 def min {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (Scalar d) := do
   let negT ← neg t
@@ -231,9 +257,9 @@ def min {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (Scalar d) :
 def mean {shape : List Nat} {d : DType} (t : StaticTensor shape d) : TensorM (Scalar d) := do
   let sumT ← sum t
   let n := listProd shape
-  let nConst ← UOp.const d n.toFloat32
-  let result ← UOp.div sumT.uop nConst
-  pure { uop := result, h_shape := sorry_proof }
+  let nConst ← TUOp.const d n.toFloat32
+  let result ← TUOp.div sumT.tuop nConst
+  pure (ofTUCastDType result d false)
 
 -- Constants for exp/log conversion
 -- ln(2) ≈ 0.693147
@@ -245,110 +271,110 @@ def log2e : Float := 1.4426950408889634
 def ln2f32 : Float32 := 0.6931471805599453
 def log2ef32 : Float32 := 1.4426950408889634
 
-/-- Natural exponential: e^x = 2^(x * log2(e)) -/
+/-- Natural exponential: {lit}`e^x = 2^(x * log2(e))`. -/
 def exp {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let log2eConst ← UOp.const d log2ef32
-  let scaled ← UOp.mul t.uop log2eConst
-  let result ← UOp.exp2 scaled
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let log2eConst ← TUOp.const d log2ef32
+  let scaled ← TUOp.mul t.tuop log2eConst
+  let result ← TUOp.unaryOp .EXP2 scaled
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
-/-- Natural logarithm: ln(x) = log2(x) * ln(2) -/
+/-- Natural logarithm: {lit}`ln(x) = log2(x) * ln(2)`. -/
 def log {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let log2Result ← UOp.log2 t.uop
-  let ln2Const ← UOp.const d ln2f32
-  let result ← UOp.mul log2Result ln2Const
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let log2Result ← TUOp.unaryOp .LOG2 t.tuop
+  let ln2Const ← TUOp.const d ln2f32
+  let result ← TUOp.mul log2Result ln2Const
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- ReLU: max(0, x) -/
 def relu {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let zero ← UOp.const d 0.0
-  let result ← UOp.maxBinary t.uop zero
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let zero ← TUOp.const d 0.0
+  let result ← TUOp.binaryOp .MAX t.tuop zero
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- ReLU6: min(max(x, 0), 6). -/
 def relu6 {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let reluT ← relu t
-  let six ← UOp.const d 6.0
-  let minus ← UOp.sub t.uop six
-  let minusT : StaticTensor s d := { uop := minus, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let six ← TUOp.const d 6.0
+  let minus ← TUOp.sub t.tuop six
+  let minusT : StaticTensor s d := ofTUCastShapeDType minus s d t.requiresGrad
   let reluMinus ← relu minusT
-  let out ← UOp.sub reluT.uop reluMinus.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let out ← TUOp.sub reluT.tuop reluMinus.tuop
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
 /-- Hardsigmoid: relu(alpha*x + beta) - relu(alpha*x + beta - 1). -/
 def hardsigmoid {s : List Nat} {d : DType} (t : StaticTensor s d) (alpha : Float32 := 0.16666667)
     (beta : Float32 := 0.5) : TensorM (StaticTensor s d) := do
-  let alphaConst ← UOp.const d alpha
-  let betaConst ← UOp.const d beta
-  let scaled ← UOp.mul t.uop alphaConst
-  let shifted ← UOp.add scaled betaConst
-  let shiftedT : StaticTensor s d := { uop := shifted, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let alphaConst ← TUOp.const d alpha
+  let betaConst ← TUOp.const d beta
+  let scaled ← TUOp.mul t.tuop alphaConst
+  let shifted ← TUOp.add scaled betaConst
+  let shiftedT : StaticTensor s d := ofTUCastShapeDType shifted s d t.requiresGrad
   let reluShifted ← relu shiftedT
-  let one ← UOp.const d 1.0
-  let shiftedMinusOne ← UOp.sub shifted one
-  let shiftedMinusOneT : StaticTensor s d := { uop := shiftedMinusOne, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let one ← TUOp.const d 1.0
+  let shiftedMinusOne ← TUOp.sub shifted one
+  let shiftedMinusOneT : StaticTensor s d := ofTUCastShapeDType shiftedMinusOne s d t.requiresGrad
   let reluShiftedMinusOne ← relu shiftedMinusOneT
-  let out ← UOp.sub reluShifted.uop reluShiftedMinusOne.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let out ← TUOp.sub reluShifted.tuop reluShiftedMinusOne.tuop
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
 /-- Sigmoid: 1 / (1 + exp(-x)) -/
 def sigmoid {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let negT ← neg t
   let expNeg ← exp negT
-  let one ← UOp.const d 1.0
-  let denom ← UOp.add expNeg.uop one
-  let result ← UOp.div one denom
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let one ← TUOp.const d 1.0
+  let denom ← TUOp.add expNeg.tuop one
+  let result ← TUOp.div one denom
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- Tanh via exp: (e^x - e^-x) / (e^x + e^-x) -/
 def tanh {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let negT ← neg t
   let expPos ← exp t
   let expNeg ← exp negT
-  let num ← UOp.sub expPos.uop expNeg.uop
-  let denom ← UOp.add expPos.uop expNeg.uop
-  let result ← UOp.div num denom
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let num ← TUOp.sub expPos.tuop expNeg.tuop
+  let denom ← TUOp.add expPos.tuop expNeg.tuop
+  let result ← TUOp.div num denom
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- Softplus: log(1 + exp(x)) -/
 def softplus {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let expT ← exp t
-  let one ← UOp.const d 1.0
-  let onePlus ← UOp.add expT.uop one
-  let onePlusT : StaticTensor s d := { uop := onePlus, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let one ← TUOp.const d 1.0
+  let onePlus ← TUOp.add expT.tuop one
+  let onePlusT : StaticTensor s d := ofTUCastShapeDType onePlus s d t.requiresGrad
   log onePlusT
 
 /-- GELU (tanh approximation). -/
 def gelu {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let x2 ← UOp.mul t.uop t.uop
-  let x3 ← UOp.mul x2 t.uop
-  let c0 ← UOp.const d 0.044715
-  let x3Scaled ← UOp.mul x3 c0
-  let inner ← UOp.add t.uop x3Scaled
-  let c1 ← UOp.const d 0.7978845608
-  let scaled ← UOp.mul inner c1
-  let scaledT : StaticTensor s d := { uop := scaled, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let x2 ← TUOp.mul t.tuop t.tuop
+  let x3 ← TUOp.mul x2 t.tuop
+  let c0 ← TUOp.const d 0.044715
+  let x3Scaled ← TUOp.mul x3 c0
+  let inner ← TUOp.add t.tuop x3Scaled
+  let c1 ← TUOp.const d 0.7978845608
+  let scaled ← TUOp.mul inner c1
+  let scaledT : StaticTensor s d := ofTUCastShapeDType scaled s d t.requiresGrad
   let tanhScaled ← tanh scaledT
-  let one ← UOp.const d 1.0
-  let onePlus ← UOp.add tanhScaled.uop one
-  let half ← UOp.const d 0.5
-  let halfOnePlus ← UOp.mul onePlus half
-  let result ← UOp.mul t.uop halfOnePlus
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let one ← TUOp.const d 1.0
+  let onePlus ← TUOp.add tanhScaled.tuop one
+  let half ← TUOp.const d 0.5
+  let halfOnePlus ← TUOp.mul onePlus half
+  let result ← TUOp.mul t.tuop halfOnePlus
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- Abs: |x| -/
 def abs {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let zero ← UOp.const d 0.0
-  let negT ← UOp.neg t.uop
-  let isNeg ← UOp.cmplt t.uop zero
-  let out ← UOp.where_ isNeg negT t.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let zero ← TUOp.const d 0.0
+  let negT ← TUOp.neg t.tuop
+  let isNeg ← TUOp.cmplt t.tuop zero
+  let out ← TUOp.where_ isNeg negT t.tuop
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
-/-- Square: x * x. -/
+/-- Square: {lit}`x * x`. -/
 def square {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   mul t t
 
-/-- SiLU / Swish: x * sigmoid(x) -/
+/-- SiLU / Swish: {lit}`x * sigmoid(x)`. -/
 def silu {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let sig ← sigmoid t
   mul t sig
@@ -357,60 +383,62 @@ def silu {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTens
 def swish {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) :=
   silu t
 
-/-- Hardswish: x * relu6(x+3) / 6. -/
+/-- Hardswish: {lit}`x * relu6(x+3) / 6`. -/
 def hardswish {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
-  let three ← UOp.const d 3.0
-  let tPlusThree ← UOp.add t.uop three
-  let tPlusThreeT : StaticTensor s d := { uop := tPlusThree, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let three ← TUOp.const d 3.0
+  let tPlusThree ← TUOp.add t.tuop three
+  let tPlusThreeT : StaticTensor s d := ofTUCastShapeDType tPlusThree s d t.requiresGrad
   let relu6T ← relu6 tPlusThreeT
-  let mul1 ← UOp.mul t.uop relu6T.uop
-  let oneSixth ← UOp.const d 0.16666667
-  let out ← UOp.mul mul1 oneSixth
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let mul1 ← TUOp.mul t.tuop relu6T.tuop
+  let oneSixth ← TUOp.const d 0.16666667
+  let out ← TUOp.mul mul1 oneSixth
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
-/-- Leaky ReLU: x if x >= 0, alpha * x otherwise. -/
+/-- Leaky ReLU: {lit}`x` if {lit}`x >= 0`, {lit}`alpha * x` otherwise. -/
 def leakyRelu {s : List Nat} {d : DType} (t : StaticTensor s d) (alpha : Float32 := 0.01)
     : TensorM (StaticTensor s d) := do
-  let zero ← UOp.const d 0.0
-  let alphaUop ← UOp.const d alpha
-  let isNeg ← UOp.cmplt t.uop zero
-  let negOut ← UOp.mul t.uop alphaUop
-  let out ← UOp.where_ isNeg negOut t.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let zero ← TUOp.const d 0.0
+  let alphaUop ← TUOp.const d alpha
+  let isNeg ← TUOp.cmplt t.tuop zero
+  let negOut ← TUOp.mul t.tuop alphaUop
+  let negOut := TUOp.castDType negOut d
+  let out ← TUOp.where_ isNeg negOut t.tuop
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
-/-- ELU: x if x >= 0, alpha * (exp(x) - 1) otherwise. -/
+/-- ELU: {lit}`x` if {lit}`x >= 0`, {lit}`alpha * (exp(x) - 1)` otherwise. -/
 def elu {s : List Nat} {d : DType} (t : StaticTensor s d) (alpha : Float32 := 1.0)
     : TensorM (StaticTensor s d) := do
-  let zero ← UOp.const d 0.0
-  let alphaUop ← UOp.const d alpha
-  let isNeg ← UOp.cmplt t.uop zero
+  let zero ← TUOp.const d 0.0
+  let alphaUop ← TUOp.const d alpha
+  let isNeg ← TUOp.cmplt t.tuop zero
   let expT ← exp t
-  let one ← UOp.const d 1.0
-  let expm1 ← UOp.sub expT.uop one
-  let negOut ← UOp.mul expm1 alphaUop
-  let out ← UOp.where_ isNeg negOut t.uop
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let one ← TUOp.const d 1.0
+  let expm1 ← TUOp.sub expT.tuop one
+  let negOut ← TUOp.mul expm1 alphaUop
+  let negOut := TUOp.castDType negOut d
+  let out ← TUOp.where_ isNeg negOut t.tuop
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
 /-- Log-sigmoid: log(sigmoid(x)) -/
 def logSigmoid {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
   let sig ← sigmoid t
   log sig
 
-/-- Clamp values to [lo, hi]. -/
+/-- Clamp values to {lit}`[lo, hi]`. -/
 def clamp {s : List Nat} {d : DType} (t : StaticTensor s d) (lo hi : Float32) : TensorM (StaticTensor s d) := do
-  let loConst ← UOp.const d lo
-  let hiConst ← UOp.const d hi
-  let below ← UOp.cmplt t.uop loConst
-  let above ← UOp.cmplt hiConst t.uop
-  let clippedLo ← UOp.where_ below loConst t.uop
-  let clipped ← UOp.where_ above hiConst clippedLo
-  pure { uop := clipped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let loConst ← TUOp.const d lo
+  let hiConst ← TUOp.const d hi
+  let below ← TUOp.cmplt t.tuop loConst
+  let above ← TUOp.cmplt hiConst t.tuop
+  let clippedLo ← TUOp.where_ below loConst t.tuop
+  let clipped ← TUOp.where_ above hiConst clippedLo
+  pure (ofTUCastShapeDType clipped s d t.requiresGrad)
 
-/-- Clip values to [lo, hi]. Alias for clamp. -/
+/-- Clip values to {lit}`[lo, hi]`. Alias for clamp. -/
 def clip {s : List Nat} {d : DType} (t : StaticTensor s d) (lo hi : Float32) : TensorM (StaticTensor s d) :=
   clamp t lo hi
 
-/-- Hardtanh clamps values to [minVal, maxVal]. -/
+/-- Hardtanh clamps values to {lit}`[minVal, maxVal]`. -/
 def hardtanh {s : List Nat} {d : DType} (t : StaticTensor s d) (minVal : Float32 := -1.0) (maxVal : Float32 := 1.0)
     : TensorM (StaticTensor s d) := do
   clamp t minVal maxVal
@@ -418,8 +446,8 @@ def hardtanh {s : List Nat} {d : DType} (t : StaticTensor s d) (minVal : Float32
 /-- Max along axis with keepdim -/
 def maxAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d) := do
-  let result ← UOp.max_ t.uop [axis] keepdim
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.max_ t.tuop [axis] keepdim
+  pure (ofTU result t.requiresGrad)
 
 def minAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d) := do
@@ -430,8 +458,8 @@ def minAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keep
 /-- Max along axis with keepdim (statically checked axis). -/
 def maxAxisF {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Fin s.length) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis.val] keepdim) d) := do
-  let result ← UOp.max_ t.uop [axis.val] keepdim
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.max_ t.tuop [axis.val] keepdim
+  pure (ofTU result t.requiresGrad)
 
 def minAxisF {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Fin s.length) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis.val] keepdim) d) := do
@@ -442,30 +470,30 @@ def minAxisF {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Fin s.len
 /-- Sum along axis with keepdim -/
 def sumAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d) := do
-  let result ← UOp.sum t.uop [axis] keepdim
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.sum t.tuop [axis] keepdim
+  pure (ofTU result t.requiresGrad)
 
 /-- Sum along axis with keepdim (statically checked axis). -/
 def sumAxisF {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Fin s.length) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis.val] keepdim) d) := do
-  let result ← UOp.sum t.uop [axis.val] keepdim
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.sum t.tuop [axis.val] keepdim
+  pure (ofTU result t.requiresGrad)
 
 /-- Mean along axis with keepdim -/
 def meanAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d) := do
   let sumT ← sumAxis t axis keepdim
   let n := listGetD s axis 1
-  let nConst ← UOp.const d (Float.ofNat n).toFloat32
-  let result ← UOp.div sumT.uop nConst
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let nConst ← TUOp.const d (Float.ofNat n).toFloat32
+  let result ← TUOp.div sumT.tuop nConst
+  pure (ofTUCastShapeDType result (Shape.reduce s [axis] keepdim) d t.requiresGrad)
 
 /-- Variance along axis with keepdim -/
 def varAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d) := do
   let meanT ← meanAxis t axis true
-  let centered ← UOp.sub t.uop meanT.uop
-  let centeredT : StaticTensor s d := { uop := centered, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let centered ← TUOp.sub t.tuop meanT.tuop
+  let centeredT : StaticTensor s d := ofTUCastShapeDType centered s d t.requiresGrad
   let sq ← mul centeredT centeredT
   meanAxis sq axis keepdim
 
@@ -473,28 +501,28 @@ def varAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keep
 def layerNorm {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat := s.length - 1)
     (eps : Float32 := 1.0e-5) : TensorM (StaticTensor s d) := do
   let meanT ← meanAxis t axis true
-  let centered ← UOp.sub t.uop meanT.uop
-  let centeredT : StaticTensor s d := { uop := centered, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let centered ← TUOp.sub t.tuop meanT.tuop
+  let centeredT : StaticTensor s d := ofTUCastShapeDType centered s d t.requiresGrad
   let sq ← mul centeredT centeredT
   let varT ← meanAxis sq axis true
-  let epsConst ← UOp.const d eps
-  let varEps ← UOp.add varT.uop epsConst
-  let std ← UOp.sqrt varEps
-  let invStd ← UOp.recip std
-  let out ← UOp.mul centered invStd
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let epsConst ← TUOp.const d eps
+  let varEps ← TUOp.add varT.tuop epsConst
+  let std ← TUOp.unaryOp .SQRT varEps
+  let invStd ← TUOp.unaryOp .RECIPROCAL std
+  let out ← TUOp.mul centered invStd
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
 /-- RMS norm over an axis (last axis by default). -/
 def rmsNorm {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat := s.length - 1)
     (eps : Float32 := 1.0e-5) : TensorM (StaticTensor s d) := do
   let sq ← mul t t
   let meanSq ← meanAxis sq axis true
-  let epsConst ← UOp.const d eps
-  let varEps ← UOp.add meanSq.uop epsConst
-  let rms ← UOp.sqrt varEps
-  let invRms ← UOp.recip rms
-  let out ← UOp.mul t.uop invRms
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let epsConst ← TUOp.const d eps
+  let varEps ← TUOp.add meanSq.tuop epsConst
+  let rms ← TUOp.unaryOp .SQRT varEps
+  let invRms ← TUOp.unaryOp .RECIPROCAL rms
+  let out ← TUOp.mul t.tuop invRms
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
 private def classRangeF32 (n : Nat) : Array Float32 := Id.run do
   let mut out := Array.emptyWithCapacity n
@@ -506,15 +534,45 @@ private def classRangeF32 (n : Nat) : Array Float32 := Id.run do
 def oneHotF32 {batch numClasses : Nat}
     (targets : StaticTensor [batch] .float32)
     : TensorM (StaticTensor [batch, numClasses] .float32) := do
-  let classUop ← UOp.vconstF32 (classRangeF32 numClasses)
-  let classes : StaticTensor [numClasses] .float32 := { uop := classUop, h_shape := sorry_proof }
+  let classUop ← TUOp.vconstF32 (classRangeF32 numClasses)
+  let classesTU := TUOp.castShape classUop [numClasses]
+  let classes : StaticTensor [numClasses] .float32 := ofTU classesTU false
   let targets2 ← reshape targets [batch, 1]
   let classes2 ← reshape classes [1, numClasses]
-  let cmp ← UOp.cmpeq targets2.uop classes2.uop
-  let one ← UOp.const .float32 1.0
-  let zero ← UOp.const .float32 0.0
-  let out ← UOp.where_ cmp one zero
-  pure { uop := out, h_shape := sorry_proof }
+  let cmp ← TUOp.cmpeq targets2.tuop classes2.tuop
+  let one ← TUOp.const .float32 1.0
+  let zero ← TUOp.const .float32 0.0
+  let out ← TUOp.where_ cmp one zero
+  pure (ofTUCast out [batch, numClasses] false)
+
+private def classShape (numClasses offset : Nat) : Shape :=
+  [numClasses] ++ List.replicate offset 1
+
+private def indexSelectOut (s idx : Shape) (dim : Nat) : Shape :=
+  s.take dim ++ idx ++ s.drop (dim + 1)
+
+private def zeroScalar (d : DType) : TensorM (StaticTensor [] d) := do
+  let v ← TUOp.const d 0.0
+  pure (ofTU v false)
+
+/-- One-hot encoding along a dimension for int32 indices (boolean mask). -/
+def oneHotAlongDim {s : Shape}
+    (indices : StaticTensor s .int32)
+    (numClasses : Nat)
+    (dim : Nat := s.length - 1)
+    : TensorM (StaticTensor (Shape.broadcastOut s (classShape numClasses (s.length - dim - 1))) .bool) := do
+  let actualShape := indices.uop.shape
+  let rank := actualShape.length
+  if dim >= rank then
+    panic! s!"oneHotAlongDim: dim {dim} out of bounds for rank {rank}"
+  else
+    pure ()
+  let offset := rank - dim - 1
+  let classes ← Tensor.arange numClasses (dtype := .int32)
+  let classesR ← reshape classes (classShape numClasses offset)
+  let cmp ← TUOp.cmpeq indices.tuop classesR.tuop
+  let outShape := Shape.broadcastOut s (classShape numClasses (s.length - dim - 1))
+  pure (ofTUCast cmp outShape false)
 
 /-- Gather along the last axis using class indices (float32). -/
 def gatherLastF32 {batch numClasses : Nat}
@@ -532,6 +590,39 @@ def gatherLast {batch numClasses : Nat}
     : TensorM (StaticTensor [batch] .float32) := do
   let targetsF ← cast targets .float32
   gatherLastF32 x targetsF
+
+/-- Index select along an axis using one-hot + where + sum (tinygrad-style). -/
+def indexSelect {s idxShape : Shape} {d : DType}
+    (x : StaticTensor s d)
+    (dim : Nat)
+    (indices : StaticTensor idxShape .int32)
+    : TensorM (StaticTensor (indexSelectOut s idxShape dim) d) := do
+  let xShape := x.uop.shape
+  let idxShape0 := indices.uop.shape
+  let rank := xShape.length
+  if dim >= rank then
+    panic! s!"indexSelect: dim {dim} out of bounds for rank {rank}"
+  else
+    pure ()
+  let preShape := xShape.take dim
+  let suffix := xShape.drop dim
+  match suffix with
+  | [] => panic! "indexSelect: empty suffix"
+  | classDim :: suffixTail => do
+    let idxRank := idxShape0.length
+    let preReduceShape := preShape ++ idxShape0 ++ (classDim :: suffixTail)
+    let iReshapeShape := idxShape0 ++ List.replicate (rank - dim) 1
+    let indicesR ← reshape indices iReshapeShape
+    let indicesE ← expand indicesR preReduceShape
+    let axis := dim + idxRank
+    let mask ← oneHotAlongDim indicesE classDim axis
+    let xReshapeShape := preShape ++ List.replicate idxRank 1 ++ (classDim :: suffixTail)
+    let xReshaped ← reshape x xReshapeShape
+    let zero ← zeroScalar d
+    let masked ← where_ mask xReshaped zero
+    let out ← sumAxis masked axis false
+    let outShape := indexSelectOut s idxShape dim
+    pure (ofTUCast out.tuop outShape x.requiresGrad)
 
 def scatterLastF32 {batch numClasses : Nat}
     (values : StaticTensor [batch] .float32)
@@ -553,36 +644,38 @@ def scatterLast {batch numClasses : Nat}
 /-- Log-sum-exp along axis (numerically stable). -/
 def logsumexpAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d) := do
-  let maxVal ← UOp.max_ t.uop [axis] true
-  let shifted ← UOp.sub t.uop maxVal
-  let shiftedT : StaticTensor s d := { uop := shifted, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let maxVal ← TUOp.max_ t.tuop [axis] true
+  let shifted ← TUOp.sub t.tuop maxVal
+  let shiftedT : StaticTensor s d := ofTUCastShapeDType shifted s d t.requiresGrad
   let expShifted ← exp shiftedT
-  let sumExp ← UOp.sum expShifted.uop [axis] true
-  let sumExpT : StaticTensor (Shape.reduce s [axis] true) d := { uop := sumExp, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let sumExp ← TUOp.sum expShifted.tuop [axis] true
+  let sumExpT : StaticTensor (Shape.reduce s [axis] true) d :=
+    ofTUCastShapeDType sumExp (Shape.reduce s [axis] true) d t.requiresGrad
   let logSum ← log sumExpT
-  let outKeep ← UOp.add logSum.uop maxVal
+  let outKeep ← TUOp.add logSum.tuop maxVal
   match keepdim with
   | true =>
-    pure { uop := outKeep, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+    pure (ofTUCastShapeDType outKeep (Shape.reduce s [axis] true) d t.requiresGrad)
   | false =>
-    let outKeepT : StaticTensor (Shape.reduce s [axis] true) d := { uop := outKeep, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+    let outKeepT : StaticTensor (Shape.reduce s [axis] true) d :=
+      ofTUCastShapeDType outKeep (Shape.reduce s [axis] true) d t.requiresGrad
     reshape outKeepT (Shape.reduce s [axis] false)
 
 /-- Log-softmax along an axis (stable). -/
 def logSoftmaxAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) : TensorM (StaticTensor s d) := do
   let logSum ← logsumexpAxis t axis true
-  let result ← UOp.sub t.uop logSum.uop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let result ← TUOp.sub t.tuop logSum.tuop
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- Softmax along an axis (stable). -/
 def softmaxAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) : TensorM (StaticTensor s d) := do
-  let maxVal ← UOp.max_ t.uop [axis] true
-  let shifted ← UOp.sub t.uop maxVal
-  let shiftedT : StaticTensor s d := { uop := shifted, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let maxVal ← TUOp.max_ t.tuop [axis] true
+  let shifted ← TUOp.sub t.tuop maxVal
+  let shiftedT : StaticTensor s d := ofTUCastShapeDType shifted s d t.requiresGrad
   let expShifted ← exp shiftedT
-  let sumExp ← UOp.sum expShifted.uop [axis] true
-  let out ← UOp.div expShifted.uop sumExp
-  pure { uop := out, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let sumExp ← TUOp.sum expShifted.tuop [axis] true
+  let out ← TUOp.div expShifted.tuop sumExp
+  pure (ofTUCastShapeDType out s d t.requiresGrad)
 
 /-- Softmax along last axis: exp(x - max(x)) / sum(exp(x - max(x))) -/
 def softmax {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (StaticTensor s d) := do
@@ -594,12 +687,13 @@ def logSoftmax {s : List Nat} {d : DType} (t : StaticTensor s d) : TensorM (Stat
 
 private def argmaxF32 {batch n : Nat} (t : StaticTensor [batch, n] .float32)
     : TensorM (StaticTensor [batch] .int32) := do
-  let maxVal ← UOp.max_ t.uop [1] true
-  let eq ← UOp.cmpeq t.uop maxVal
-  let eqT : StaticTensor [batch, n] .bool := { uop := eq, h_shape := sorry_proof }
+  let maxVal ← TUOp.max_ t.tuop [1] true
+  let eq ← TUOp.cmpeq t.tuop maxVal
+  let eqT : StaticTensor [batch, n] .bool := ofTUCast eq [batch, n] false
   let eqF ← cast eqT .float32
-  let classesUop ← UOp.vconstF32 (classRangeF32 n)
-  let classes : StaticTensor [n] .float32 := { uop := classesUop, h_shape := sorry_proof }
+  let classesUop ← TUOp.vconstF32 (classRangeF32 n)
+  let classesTU := TUOp.castShape classesUop [n]
+  let classes : StaticTensor [n] .float32 := ofTU classesTU false
   let classes2 ← reshape classes [1, n]
   let classesB ← expand classes2 [batch, n]
   let prod ← mul eqF classesB
@@ -619,22 +713,22 @@ def argmin {batch n : Nat} {d : DType} (t : StaticTensor [batch, n] d)
   let negT ← neg tF
   argmaxF32 negT
 
-/-- Scalar multiplication: t * scalar -/
+/-- Scalar multiplication: {lit}`t * scalar`. -/
 def scale {s : List Nat} {d : DType} (t : StaticTensor s d) (scalar : Float32)
     : TensorM (StaticTensor s d) := do
-  let scalarUop ← UOp.const d scalar
-  let result ← UOp.mul t.uop scalarUop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let scalarUop ← TUOp.const d scalar
+  let result ← TUOp.mul t.tuop scalarUop
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- Add scalar: t + scalar -/
 def addScalar {s : List Nat} {d : DType} (t : StaticTensor s d) (scalar : Float32)
     : TensorM (StaticTensor s d) := do
-  let scalarUop ← UOp.const d scalar
-  let result ← UOp.add t.uop scalarUop
-  pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  let scalarUop ← TUOp.const d scalar
+  let result ← TUOp.add t.tuop scalarUop
+  pure (ofTUCastShapeDType result s d t.requiresGrad)
 
 /-- Cross-entropy loss with log-softmax
-    logits: [batch, numClasses], targets: [batch] (class indices as floats)
+    logits: {lit}`[batch, numClasses]`, targets: {lit}`[batch]` (class indices as floats)
     Returns scalar loss -/
 def crossEntropyLoss {batch numClasses : Nat}
     (logits : StaticTensor [batch, numClasses] .float32)
@@ -646,8 +740,8 @@ def crossEntropyLoss {batch numClasses : Nat}
   mean negPicked
 
 /-- Cross-entropy loss with one-hot targets.
-    logits: [batch, numClasses], targets: [batch, numClasses] (one-hot)
-    Returns scalar loss: mean over batch of -sum(target * log_softmax(logits)) -/
+    logits: {lit}`[batch, numClasses]`, targets: {lit}`[batch, numClasses]` (one-hot)
+    Returns scalar loss: mean over batch of {lit}`-sum(target * log_softmax(logits))` -/
 def crossEntropyOneHot {batch numClasses : Nat} {d : DType}
     (logits : StaticTensor [batch, numClasses] d)
     (targets : StaticTensor [batch, numClasses] d)
@@ -659,9 +753,9 @@ def crossEntropyOneHot {batch numClasses : Nat} {d : DType}
   let negSum ← neg sumC
   mean negSum
 
-/-- Negative log likelihood loss (assumes log_softmax input)
-    log_probs: [batch, numClasses], already log-softmax'd
-    target_indices: [batch] containing class indices
+/-- Negative log likelihood loss (assumes {lit}`log_softmax` input)
+    {lit}`log_probs`: {lit}`[batch, numClasses]`, already log-softmax'd
+    {lit}`target_indices`: {lit}`[batch]` containing class indices
     For MVP: averages all log probs (placeholder until gather/index support) -/
 def nllLoss {batch numClasses : Nat}
     (logProbs : StaticTensor [batch, numClasses] .float32)
@@ -676,30 +770,30 @@ def smoothL1Loss {s : List Nat} (pred target : StaticTensor s .float32) (beta : 
     : TensorM (Scalar .float32) := do
   let diff ← sub pred target
   let absDiff ← abs diff
-  let betaConst ← UOp.const .float32 beta
-  let half ← UOp.const .float32 0.5
-  let isSmall ← UOp.cmplt absDiff.uop betaConst
+  let betaConst ← TUOp.const .float32 beta
+  let half ← TUOp.const .float32 0.5
+  let isSmall ← TUOp.cmplt absDiff.tuop betaConst
   let sq ← mul diff diff
-  let sqHalf ← UOp.mul sq.uop half
-  let sqScaled ← UOp.div sqHalf betaConst
-  let betaHalf ← UOp.mul betaConst half
-  let linTerm ← UOp.sub absDiff.uop betaHalf
-  let out ← UOp.where_ isSmall sqScaled linTerm
-  let outT : StaticTensor s .float32 := { uop := out, requiresGrad := pred.requiresGrad || target.requiresGrad, h_shape := sorry_proof }
+  let sqHalf ← TUOp.mul sq.tuop half
+  let sqScaled ← TUOp.div sqHalf betaConst
+  let betaHalf ← TUOp.mul betaConst half
+  let linTerm ← TUOp.sub absDiff.tuop betaHalf
+  let out ← TUOp.where_ isSmall sqScaled linTerm
+  let outT : StaticTensor s .float32 := ofTUCastShapeDType out s .float32 (pred.requiresGrad || target.requiresGrad)
   mean outT
 
-/-- Binary cross-entropy loss (expects probabilities in [0, 1]). -/
+/-- Binary cross-entropy loss (expects probabilities in {lit}`[0, 1]`). -/
 def binaryCrossEntropy {s : List Nat}
     (pred target : StaticTensor s .float32) (eps : Float32 := 1.0e-7)
     : TensorM (Scalar .float32) := do
   let predClamped ← clamp pred eps (1.0 - eps)
   let logPred ← log predClamped
-  let one ← UOp.const .float32 1.0
-  let oneMinusPred ← UOp.sub one predClamped.uop
-  let oneMinusPredT : StaticTensor s .float32 := { uop := oneMinusPred, requiresGrad := pred.requiresGrad, h_shape := sorry_proof }
+  let one ← TUOp.const .float32 1.0
+  let oneMinusPred ← TUOp.sub one predClamped.tuop
+  let oneMinusPredT : StaticTensor s .float32 := ofTUCastShapeDType oneMinusPred s .float32 pred.requiresGrad
   let logOneMinusPred ← log oneMinusPredT
-  let oneMinusTarget ← UOp.sub one target.uop
-  let oneMinusTargetT : StaticTensor s .float32 := { uop := oneMinusTarget, requiresGrad := target.requiresGrad, h_shape := sorry_proof }
+  let oneMinusTarget ← TUOp.sub one target.tuop
+  let oneMinusTargetT : StaticTensor s .float32 := ofTUCastShapeDType oneMinusTarget s .float32 target.requiresGrad
   let term1 ← mul target logPred
   let term2 ← mul oneMinusTargetT logOneMinusPred
   let sumTerms ← add term1 term2
@@ -709,19 +803,19 @@ def binaryCrossEntropy {s : List Nat}
 /-- Binary cross-entropy with logits (numerically stable). -/
 def binaryCrossEntropyWithLogits {s : List Nat}
     (logits target : StaticTensor s .float32) : TensorM (Scalar .float32) := do
-  let zero ← UOp.const .float32 0.0
-  let maxZero ← UOp.maxBinary logits.uop zero
+  let zero ← TUOp.const .float32 0.0
+  let maxZero ← TUOp.binaryOp .MAX logits.tuop zero
   let absLogits ← abs logits
   let negAbs ← neg absLogits
   let expNegAbs ← exp negAbs
-  let one ← UOp.const .float32 1.0
-  let onePlus ← UOp.add expNegAbs.uop one
-  let onePlusT : StaticTensor s .float32 := { uop := onePlus, requiresGrad := logits.requiresGrad, h_shape := sorry_proof }
+  let one ← TUOp.const .float32 1.0
+  let onePlus ← TUOp.add expNegAbs.tuop one
+  let onePlusT : StaticTensor s .float32 := ofTUCastShapeDType onePlus s .float32 logits.requiresGrad
   let logOnePlus ← log onePlusT
-  let prod ← UOp.mul logits.uop target.uop
-  let tmp ← UOp.sub maxZero prod
-  let lossUop ← UOp.add tmp logOnePlus.uop
-  let lossT : StaticTensor s .float32 := { uop := lossUop, requiresGrad := logits.requiresGrad, h_shape := sorry_proof }
+  let prod ← TUOp.mul logits.tuop target.tuop
+  let tmp ← TUOp.sub maxZero prod
+  let lossUop ← TUOp.add tmp logOnePlus.tuop
+  let lossT : StaticTensor s .float32 := ofTUCastShapeDType lossUop s .float32 logits.requiresGrad
   mean lossT
 
 /-- Mean squared error loss. -/
@@ -731,24 +825,21 @@ def mseLoss {s : List Nat} {d : DType}
   let sq ← mul diff diff
   mean sq
 
-/-- Matrix multiplication: [m, k] @ [k, n] -> [m, n] -/
+/-- Matrix multiplication: {lit}`[m, k] @ [k, n] -> [m, n]`. -/
 def matmul {m k n : Nat} {d : DType}
     (a : Matrix m k d) (b : Matrix k n d)
     : TensorM (Matrix m n d) := do
-  let outUop ← UOp.contract2D a.uop b.uop
-  pure {
-    uop := outUop
-    h_shape := sorry_proof
-    requiresGrad := a.requiresGrad || b.requiresGrad
-  }
+  let outUop ← TUOp.contract2DB (out := Shape.matmulOut [m, k] [k, n]) a.tuop b.tuop
+  let outUop := TUOp.castDType outUop d
+  pure (ofTUCast outUop [m, n] (a.requiresGrad || b.requiresGrad))
 
-/-- Fully-connected (linear) layer: X @ W -> [batch, out]. -/
+/-- Fully-connected (linear) layer: {lit}`X @ W -> [batch, out]`. -/
 def linear {batch inDim outDim : Nat} {d : DType}
     (x : Matrix batch inDim d) (w : Matrix inDim outDim d)
     : TensorM (Matrix batch outDim d) := do
   matmul x w
 
-/-- Fully-connected layer with bias: X @ W + b (broadcasted over batch). -/
+/-- Fully-connected layer with bias: {lit}`X @ W + b` (broadcasted over batch). -/
 def linearBias {batch inDim outDim : Nat} {d : DType}
     (x : Matrix batch inDim d) (w : Matrix inDim outDim d) (b : Vector outDim d)
     : TensorM (Matrix batch outDim d) := do
@@ -757,16 +848,376 @@ def linearBias {batch inDim outDim : Nat} {d : DType}
   pure { uop := yb.uop, h_shape := sorry_proof, requiresGrad := yb.requiresGrad }
 
 /-- Batched matrix multiplication with broadcast on the batch dim:
-    [b1, m, k] @ [b2, k, n] -> [max b1 b2, m, n]. -/
+    {lit}`[b1, m, k] @ [b2, k, n] -> [max b1 b2, m, n]`. -/
 def bmatmul {b1 b2 m k n : Nat} {d : DType}
     (a : BMatrix b1 m k d) (b : BMatrix b2 k n d)
     : TensorM (BMatrix (Nat.max b1 b2) m n d) := do
-  let outUop ← UOp.contract2D a.uop b.uop
-  pure {
-    uop := outUop
-    h_shape := sorry_proof
-    requiresGrad := a.requiresGrad || b.requiresGrad
-  }
+  let outUop ← TUOp.contract2DB (out := Shape.matmulOut [b1, m, k] [b2, k, n]) a.tuop b.tuop
+  let outUop := TUOp.castDType outUop d
+  pure (ofTUCast outUop [Nat.max b1 b2, m, n] (a.requiresGrad || b.requiresGrad))
+
+-- ============================================================================
+-- Initialization
+-- ============================================================================
+
+/-- Generate uniform random tensor in {lit}`[low, high)` range.
+    Uses: {lit}`rand * (high - low) + low` -/
+def uniformInit (shape : Shape) (dt : DType) (low high : Float32) (seed : Nat)
+    : TensorM (StaticTensor shape dt) := do
+  -- rand produces [0, 1)
+  let r ← Tensor.rand shape dt seed
+  -- Scale to [low, high): r * (high - low) + low
+  let range := high - low
+  let rangeT ← Tensor.full shape dt range
+  let lowT ← Tensor.full shape dt low
+  let scaled ← mul r rangeT
+  add scaled lowT
+
+-- ============================================================================
+-- Convolution Operations (pool/im2col + matmul)
+-- ============================================================================
+
+/-- Placeholder conv2d - returns correctly shaped output tensor.
+    Full implementation requires UOp-level pool operation. -/
+def conv2dPlaceholder {batch cin cout h w kH kW hOut wOut : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, h, w] d)
+    (weight : StaticTensor [cout, cin, kH, kW] d)
+    (bias : Option (StaticTensor [cout] d) := none)
+    (_padding : Nat := 0)
+    (_stride : Nat := 1)
+    (_dilation : Nat := 1)
+    : TensorM (StaticTensor [batch, cout, hOut, wOut] d) := do
+  -- Create output buffer with correct shape
+  let outShape := [batch, cout, hOut, wOut]
+  let out ← TUOp.buffer d outShape
+  let biasGrad := match bias with | none => false | some b => b.requiresGrad
+  let reqGrad := x.requiresGrad || weight.requiresGrad || biasGrad
+  pure (ofTU out reqGrad)
+
+/-- Placeholder maxPool2d - returns correctly shaped output tensor. -/
+def maxPool2dPlaceholder {batch cin h w hOut wOut : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, h, w] d)
+    (_kernelSize : Nat)
+    (_stride : Nat := 0)
+    : TensorM (StaticTensor [batch, cin, hOut, wOut] d) := do
+  let outShape := [batch, cin, hOut, wOut]
+  let out ← TUOp.buffer d outShape
+  pure (ofTU out x.requiresGrad)
+
+/-- Placeholder avgPool2d - returns correctly shaped output tensor. -/
+def avgPool2dPlaceholder {batch cin h w hOut wOut : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, h, w] d)
+    (_kernelSize : Nat)
+    (_stride : Nat := 0)
+    : TensorM (StaticTensor [batch, cin, hOut, wOut] d) := do
+  let outShape := [batch, cin, hOut, wOut]
+  let out ← TUOp.buffer d outShape
+  pure (ofTU out x.requiresGrad)
+
+/-- Pad 1D tensor with symmetric padding on W dimension.
+    Input:  {lit}`[batch, channels, width]`
+    Output: {lit}`[batch, channels, width + 2*pad]` -/
+def pad1d {batch cin w : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, w] d)
+    (padW : Nat)
+    : TensorM (StaticTensor [batch, cin, w + 2*padW] d) := do
+  let padding := [(0, 0), (0, 0), (padW, padW)]
+  let result ← pad x padding
+  pure { uop := result.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
+
+/-- Pad 2D tensor with symmetric padding on H and W dimensions.
+    Input:  {lit}`[batch, channels, height, width]`
+    Output: {lit}`[batch, channels, height + 2*pad, width + 2*pad]` -/
+def pad2d {batch cin h w : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, h, w] d)
+    (padH padW : Nat)
+    : TensorM (StaticTensor [batch, cin, h + 2*padH, w + 2*padW] d) := do
+  let padding := [(0, 0), (0, 0), (padH, padH), (padW, padW)]
+  let result ← pad x padding
+  pure { uop := result.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
+
+/-- Max pooling 2D operation using pool/im2col + reduce.
+    Input:  {lit}`[batch, channels, height, width]`
+    Output: {lit}`[batch, channels, outHeight, outWidth]` -/
+def maxPool2d {batch cin h w : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, h, w] d)
+    (kernelSize : Nat)
+    (stride : Nat)
+    (padding : Nat := 0)
+    : TensorM (StaticTensor (Shape.pool2dShape [batch, cin, h, w] kernelSize padding stride) d) := do
+  -- Step 1: Pad if needed
+  let xPadded ← if padding > 0 then
+    let padded ← pad2d x padding padding
+    pure { uop := padded.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
+  else
+    pure x
+
+  -- Step 2: Apply pool/im2col to get patches
+  -- Result shape: [batch, cin, hOut, wOut, kH, kW]
+  let patches ← pool xPadded [kernelSize, kernelSize] [stride, stride] [1, 1]
+
+  -- Step 3: Take max over the kernel dimensions (last 2 dims)
+  -- Reduce over axis -1 (kW) then axis -1 (kH)
+  let patchShape := patches.uop.shape
+  let axis1 := patchShape.length - 1  -- kW axis
+  let reduced1 ← TUOp.max_ patches.tuop [axis1] false
+  let axis2 := patchShape.length - 2  -- kH axis (now shifted)
+  let reduced2 ← TUOp.max_ reduced1 [axis2] false
+
+  pure (ofTUCast reduced2 (Shape.pool2dShape [batch, cin, h, w] kernelSize padding stride) x.requiresGrad)
+
+/-- Average pooling 2D operation using pool/im2col + reduce.
+    Input:  {lit}`[batch, channels, height, width]`
+    Output: {lit}`[batch, channels, outHeight, outWidth]` -/
+def avgPool2d {batch cin h w : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, h, w] d)
+    (kernelSize : Nat)
+    (stride : Nat)
+    (padding : Nat := 0)
+    : TensorM (StaticTensor (Shape.pool2dShape [batch, cin, h, w] kernelSize padding stride) d) := do
+  -- Step 1: Pad if needed
+  let xPadded ← if padding > 0 then
+    let padded ← pad2d x padding padding
+    pure { uop := padded.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
+  else
+    pure x
+
+  -- Step 2: Apply pool/im2col to get patches
+  -- Result shape: [batch, cin, hOut, wOut, kH, kW]
+  let patches ← pool xPadded [kernelSize, kernelSize] [stride, stride] [1, 1]
+
+  -- Step 3: Take mean over the kernel dimensions (last 2 dims)
+  let patchShape := patches.uop.shape
+  let axis1 := patchShape.length - 1  -- kW axis
+  let sum1 ← TUOp.sum patches.tuop [axis1] false
+  let axis2 := patchShape.length - 2  -- kH axis (now shifted)
+  let sum2 ← TUOp.sum sum1 [axis2] false
+
+  -- Divide by kernel area for mean
+  let kernelArea := (kernelSize * kernelSize : Nat)
+  let divisor ← TUOp.const d (Float.ofNat kernelArea).toFloat32
+  let result ← TUOp.div sum2 divisor
+  let result := TUOp.castDType result d
+
+  pure (ofTUCast result (Shape.pool2dShape [batch, cin, h, w] kernelSize padding stride) x.requiresGrad)
+
+/-- Conv1d operation using pool/im2col + matmul.
+    Input:  {lit}`[batch, inChannels, width]`
+    Weight: {lit}`[outChannels, inChannels, kernelW]`
+    Output: {lit}`[batch, outChannels, outWidth]` -/
+def conv1d {batch cin cout w kW : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, w] d)
+    (weight : StaticTensor [cout, cin, kW] d)
+    (bias : Option (StaticTensor [cout] d) := none)
+    (padding : Nat := 0)
+    (stride : Nat := 1)
+    (dilation : Nat := 1)
+    : TensorM (StaticTensor (Shape.conv1dOut [batch, cin, w]
+                                              [cout, cin, kW]
+                                              padding stride dilation) d) := do
+  let wOut := Shape.convOutDim w padding dilation kW stride
+  let outShape := Shape.conv1dOut [batch, cin, w] [cout, cin, kW] padding stride dilation
+
+  -- Step 1: Pad input if needed
+  let xPadded ← if padding > 0 then
+    let padded ← pad1d x padding
+    pure { uop := padded.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
+  else
+    pure x
+
+  -- Step 2: Apply pool/im2col to get patches
+  -- Input: [batch, cin, wPadded]
+  -- Output: [batch, cin, wOut, kW]
+  let patches ← pool xPadded [kW] [stride] [dilation]
+
+  -- Step 3: Reshape patches for matmul
+  -- [batch, cin, wOut, kW] -> [batch * wOut, cin * kW]
+  let patchFlat := batch * wOut
+  let kernelFlat := cin * kW
+  let patchesReshaped ← reshape patches [patchFlat, kernelFlat]
+
+  -- Step 4: Reshape weight
+  -- [cout, cin, kW] -> [cout, cin * kW]
+  let weightReshaped ← reshape weight [cout, kernelFlat]
+
+  -- Step 5: Transpose weight for matmul: [cout, kernelFlat] -> [kernelFlat, cout]
+  let weightT ← T weightReshaped
+
+  -- Step 6: Matmul: [patchFlat, kernelFlat] @ [kernelFlat, cout] = [patchFlat, cout]
+  let mm ← matmul patchesReshaped weightT
+
+  -- Step 7: Reshape to [batch, wOut, cout]
+  let mmReshaped ← reshape mm [batch, wOut, cout]
+
+  -- Step 8: Permute to [batch, cout, wOut]
+  let result ← permute mmReshaped [0, 2, 1]
+
+  -- Step 9: Add bias if present
+  let final ← match bias with
+  | none => pure result
+  | some b =>
+    let biasReshaped ← reshape b [1, cout, 1]
+    let biased ← addB result biasReshaped
+    pure (ofTUCast biased.tuop (Shape.permute [batch, wOut, cout] [0, 2, 1]) biased.requiresGrad)
+  let finalCast : StaticTensor outShape d := ofTUCast final.tuop outShape final.requiresGrad
+
+  let biasGrad := match bias with | none => false | some b => b.requiresGrad
+  let reqGrad := x.requiresGrad || weight.requiresGrad || biasGrad
+  pure { uop := finalCast.uop, requiresGrad := reqGrad, h_shape := sorry_proof }
+
+/-- Conv2d operation using pool/im2col + matmul.
+    Input:  {lit}`[batch, inChannels, height, width]`
+    Weight: {lit}`[outChannels, inChannels, kernelH, kernelW]`
+    Output: {lit}`[batch, outChannels, outHeight, outWidth]`
+
+    Algorithm:
+    1. Pad input if needed
+    2. Apply pool/im2col to get patches: {lit}`[batch, cin, hOut, wOut, kH, kW]`
+    3. Reshape for matmul: patches -> {lit}`[batch*hOut*wOut, cin*kH*kW]`
+    4. Reshape weight: {lit}`[cout, cin*kH*kW]`
+    5. Matmul: {lit}`[batch*hOut*wOut, cin*kH*kW] @ [cin*kH*kW, cout]^T = [batch*hOut*wOut, cout]`
+    6. Reshape to {lit}`[batch, hOut, wOut, cout]`
+    7. Permute to {lit}`[batch, cout, hOut, wOut]`
+    8. Add bias if present -/
+def conv2d {batch cin cout h w kH kW : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, h, w] d)
+    (weight : StaticTensor [cout, cin, kH, kW] d)
+    (bias : Option (StaticTensor [cout] d) := none)
+    (padding : Nat := 0)
+    (stride : Nat := 1)
+    (dilation : Nat := 1)
+    : TensorM (StaticTensor (Shape.conv2dOut [batch, cin, h, w]
+                                              [cout, cin, kH, kW]
+                                              padding stride dilation) d) := do
+  -- Compute output dimensions
+  let hOut := Shape.convOutDim h padding dilation kH stride
+  let wOut := Shape.convOutDim w padding dilation kW stride
+  let outShape := Shape.conv2dOut [batch, cin, h, w] [cout, cin, kH, kW] padding stride dilation
+
+  -- Step 1: Pad input if needed
+  let xPadded ← if padding > 0 then
+    let padded ← pad2d x padding padding
+    pure { uop := padded.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
+  else
+    pure x
+
+  -- Step 2: Apply pool/im2col to get patches
+  -- Input to pool: [batch, cin, hPadded, wPadded]
+  -- Output: [batch, cin, hOut, wOut, kH, kW]
+  let patches ← pool xPadded [kH, kW] [stride, stride] [dilation, dilation]
+
+  -- Step 3: Reshape patches for matmul
+  -- [batch, cin, hOut, wOut, kH, kW] -> [batch * hOut * wOut, cin * kH * kW]
+  let patchFlat := batch * hOut * wOut
+  let kernelFlat := cin * kH * kW
+  let patchesReshaped ← reshape patches [patchFlat, kernelFlat]
+
+  -- Step 4: Reshape weight
+  -- [cout, cin, kH, kW] -> [cout, cin * kH * kW]
+  let weightReshaped ← reshape weight [cout, kernelFlat]
+
+  -- Step 5: Transpose weight for matmul: [cout, kernelFlat] -> [kernelFlat, cout]
+  let weightT ← T weightReshaped
+
+  -- Step 6: Matmul: [patchFlat, kernelFlat] @ [kernelFlat, cout] = [patchFlat, cout]
+  let mm ← matmul patchesReshaped weightT
+
+  -- Step 7: Reshape to [batch, hOut, wOut, cout]
+  let mmReshaped ← reshape mm [batch, hOut, wOut, cout]
+
+  -- Step 8: Permute to [batch, cout, hOut, wOut]
+  let result ← permute mmReshaped [0, 3, 1, 2]
+
+  -- Step 9: Add bias if present
+  let final ← match bias with
+  | none => pure result
+  | some b =>
+    -- Reshape bias [cout] -> [1, cout, 1, 1] for broadcasting
+    let biasReshaped ← reshape b [1, cout, 1, 1]
+    let biased ← addB result biasReshaped
+    pure (ofTUCast biased.tuop (Shape.permute [batch, hOut, wOut, cout] [0, 3, 1, 2]) biased.requiresGrad)
+  let finalCast : StaticTensor outShape d := ofTUCast final.tuop outShape final.requiresGrad
+
+  let biasGrad := match bias with | none => false | some b => b.requiresGrad
+  let reqGrad := x.requiresGrad || weight.requiresGrad || biasGrad
+  pure { uop := finalCast.uop, requiresGrad := reqGrad, h_shape := sorry_proof }
+
+/-- Depthwise 2D convolution: each input channel is convolved with its own filter.
+    This is a specialized case of grouped convolution where groups = cin = cout.
+
+    Weight shape: {lit}`[cin, 1, kH, kW]` (each channel has one {lit}`1×kH×kW` filter)
+
+    Implementation using batched matmul (fast, like Python tinygrad):
+    1. Pool to get patches: {lit}`[batch, cin, hOut, wOut, kH, kW]`
+    2. Reshape patches: {lit}`[batch, cin, hOut*wOut, kH*kW]`
+    3. Reshape weight: {lit}`[cin, 1, kH, kW] -> [1, cin, kH*kW, 1]`
+    4. Batched matmul: {lit}`[batch, cin, hOut*wOut, kH*kW] @ [1, cin, kH*kW, 1]`
+       -> broadcasts batch dims, performs matmul for each (batch, cin)
+       -> result: {lit}`[batch, cin, hOut*wOut, 1]`
+    5. Squeeze and reshape to {lit}`[batch, cin, hOut, wOut]`
+
+    This uses a single batched CONTRACT operation instead of expand+multiply+sum.
+-/
+def depthwiseConv2d {batch cin h w kH kW : Nat} {d : DType}
+    (x : StaticTensor [batch, cin, h, w] d)
+    (weight : StaticTensor [cin, 1, kH, kW] d)
+    (bias : Option (StaticTensor [cin] d) := none)
+    (padding : Nat := 0)
+    (stride : Nat := 1)
+    (dilation : Nat := 1)
+    : TensorM (StaticTensor (Shape.conv2dOut [batch, cin, h, w]
+                                              [cin, 1, kH, kW]
+                                              padding stride dilation) d) := do
+  let hOut := Shape.convOutDim h padding dilation kH stride
+  let wOut := Shape.convOutDim w padding dilation kW stride
+  let spatialOut := hOut * wOut
+  let kernelFlat := kH * kW
+  let outShape := Shape.conv2dOut [batch, cin, h, w] [cin, 1, kH, kW] padding stride dilation
+
+  -- Step 1: Pad if needed
+  let xPadded ← if padding > 0 then
+    let padded ← pad2d x padding padding
+    pure { uop := padded.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
+  else
+    pure x
+
+  -- Step 2: Pool to get patches: [batch, cin, hOut, wOut, kH, kW]
+  let patches ← pool xPadded [kH, kW] [stride, stride] [dilation, dilation]
+
+  -- Step 3: Reshape patches for batched matmul: [batch, cin, hOut*wOut, kH*kW]
+  let patchesReshaped ← reshape patches [batch, cin, spatialOut, kernelFlat]
+
+  -- Step 4: Reshape weight for batched matmul: [cin, 1, kH, kW] -> [1, cin, kH*kW, 1]
+  -- This allows broadcasting with batch dimension
+  let weightReshaped ← reshape weight [1, cin, kernelFlat, 1]
+
+  -- Step 5: Batched matmul using TUOp.contract2DB
+  -- [batch, cin, hOut*wOut, kH*kW] @ [1, cin, kH*kW, 1]
+  -- Batch dims [batch, cin] and [1, cin] broadcast to [batch, cin]
+  -- Result: [batch, cin, hOut*wOut, 1]
+  let mmResult ← TUOp.contract2DB
+    (out := Shape.matmulOut [batch, cin, spatialOut, kernelFlat] [1, cin, kernelFlat, 1])
+    patchesReshaped.tuop
+    weightReshaped.tuop
+  let mmResult := TUOp.castDType mmResult d
+  let mmResultT : StaticTensor [batch, cin, spatialOut, 1] d :=
+    ofTUCast mmResult [batch, cin, spatialOut, 1] (x.requiresGrad || weight.requiresGrad)
+
+  -- Step 6: Squeeze and reshape to [batch, cin, hOut, wOut]
+  let result ← reshape mmResultT [batch, cin, hOut, wOut]
+
+  -- Step 7: Add bias if present
+  let final ← match bias with
+  | none => pure result
+  | some b =>
+    let biasReshaped ← reshape b [1, cin, 1, 1]
+    let biased ← addB result biasReshaped
+    pure (ofTUCast biased.tuop [batch, cin, hOut, wOut] biased.requiresGrad)
+  let finalCast : StaticTensor outShape d := ofTUCast final.tuop outShape final.requiresGrad
+
+  let biasGrad := match bias with | none => false | some b => b.requiresGrad
+  let reqGrad := x.requiresGrad || weight.requiresGrad || biasGrad
+  pure { uop := finalCast.uop, requiresGrad := reqGrad, h_shape := sorry_proof }
 
 end StaticTensor
 

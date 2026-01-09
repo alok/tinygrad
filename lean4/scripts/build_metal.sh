@@ -4,18 +4,19 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-C_DIR="$PROJECT_DIR/c"
-BUILD_DIR="$PROJECT_DIR/.lake/build/metal"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LEAN4_DIR="$ROOT_DIR/lean4"
+C_DIR="$LEAN4_DIR/c"
+BUILD_DIR="$ROOT_DIR/.lake/build/metal"
 
 # Find Lean toolchain include directory
 # Convert leanprover/lean4:v4.27.0-rc1 to leanprover--lean4---v4.27.0-rc1
-LEAN_TOOLCHAIN_RAW=$(cat "$PROJECT_DIR/lean-toolchain" | tr -d '\n')
+LEAN_TOOLCHAIN_RAW=$(cat "$ROOT_DIR/lean-toolchain" | tr -d '\n')
 LEAN_TOOLCHAIN=$(echo "$LEAN_TOOLCHAIN_RAW" | sed 's|/|--|g' | sed 's|:|---|g')
 LEAN_INCLUDE="$HOME/.elan/toolchains/$LEAN_TOOLCHAIN/include"
 
 echo "=== Building Metal FFI ==="
-echo "Project: $PROJECT_DIR"
+echo "Project: $LEAN4_DIR"
 echo "Lean include: $LEAN_INCLUDE"
 
 mkdir -p "$BUILD_DIR"

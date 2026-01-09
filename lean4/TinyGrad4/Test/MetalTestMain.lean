@@ -4,6 +4,11 @@ import TinyGrad4.Backend.Engine
 import TinyGrad4.Backend.MetalRenderer
 import TinyGrad4.UOp.UOp
 
+-- Disable RawBuffer linter for test files that need Array Float literals
+set_option linter.useRawBuffer false
+-- Disable IO.monoNanosNow linter: benchmark timing uses raw monotonic clocks.
+set_option linter.monoNanosNow false
+
 /-!
 # Metal Backend End-to-End Test
 

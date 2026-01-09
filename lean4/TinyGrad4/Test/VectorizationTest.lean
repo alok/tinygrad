@@ -39,21 +39,10 @@ def autoConfig := optimalConfig .Metal .float32 1_000_000
 
 /-! ## Bounded element access -/
 
--- These compile - indices are provably in bounds
-#eval renderVectorElementT .w4 "vec" ⟨0, by native_decide⟩  -- "vec.x"
-#eval renderVectorElementT .w4 "vec" ⟨1, by native_decide⟩  -- "vec.y"
-#eval renderVectorElementT .w4 "vec" ⟨2, by native_decide⟩  -- "vec.z"
-#eval renderVectorElementT .w4 "vec" ⟨3, by native_decide⟩  -- "vec.w"
-
 -- This would FAIL to compile (index 4 is out of bounds for w4):
--- #eval renderVectorElementT .w4 "vec" ⟨4, by native_decide⟩
+-- example : renderVectorElementT .w4 "vec" ⟨4, by native_decide⟩ = "vec.w" := by rfl
 
 /-! ## Component names are correct -/
-
-#eval VectorWidth.component .w1 ⟨0, by native_decide⟩  -- ""
-#eval VectorWidth.component .w2 ⟨0, by native_decide⟩  -- "x"
-#eval VectorWidth.component .w2 ⟨1, by native_decide⟩  -- "y"
-#eval VectorWidth.component .w8 ⟨7, by native_decide⟩  -- "s7"
 
 /-! ## Runtime test -/
 
@@ -72,7 +61,14 @@ def testVectorization : IO Unit := do
 
   -- Test renderVectorElementT
   IO.println s!"renderVectorElementT .w4 'v' 0 = {renderVectorElementT .w4 "v" ⟨0, by native_decide⟩}"
+  IO.println s!"renderVectorElementT .w4 'v' 1 = {renderVectorElementT .w4 "v" ⟨1, by native_decide⟩}"
+  IO.println s!"renderVectorElementT .w4 'v' 2 = {renderVectorElementT .w4 "v" ⟨2, by native_decide⟩}"
   IO.println s!"renderVectorElementT .w4 'v' 3 = {renderVectorElementT .w4 "v" ⟨3, by native_decide⟩}"
+
+  IO.println s!"VectorWidth.component .w1 0 = {VectorWidth.component .w1 ⟨0, by native_decide⟩}"
+  IO.println s!"VectorWidth.component .w2 0 = {VectorWidth.component .w2 ⟨0, by native_decide⟩}"
+  IO.println s!"VectorWidth.component .w2 1 = {VectorWidth.component .w2 ⟨1, by native_decide⟩}"
+  IO.println s!"VectorWidth.component .w8 7 = {VectorWidth.component .w8 ⟨7, by native_decide⟩}"
 
   -- Test code generation
   let legacyConfig := config.toLegacy

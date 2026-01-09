@@ -1,3 +1,14 @@
+import TinyGrad4.Benchmark.Framework
+import TinyGrad4.Benchmark.Kernels
+-- Backend-specific imports are conditional on availability
+-- import TinyGrad4.Benchmark.MetalBenchmark
+-- import TinyGrad4.Benchmark.CudaBenchmark
+import TinyGrad4.Benchmark.Runner
+-- Direct FFI benchmark (requires manual Metal framework linking)
+import TinyGrad4.Benchmark.MetalDirect
+-- Fine-grained timing instrumentation
+import TinyGrad4.Benchmark.Instrumentation
+
 /-!
 # TinyGrad4 Benchmark Library
 
@@ -29,46 +40,9 @@ Runner.lean         -- Multi-backend orchestration and reporting
 ```
 -/
 
-import TinyGrad4.Benchmark.Framework
--- Backend-specific imports are conditional on availability
--- import TinyGrad4.Benchmark.MetalBenchmark
--- import TinyGrad4.Benchmark.CudaBenchmark
-import TinyGrad4.Benchmark.Runner
-
 namespace TinyGrad4.Benchmark
 
--- Re-export main types
-export Framework (
-  Timing
-  TimingStats
-  BenchmarkSpec
-  BenchmarkResult
-  BenchmarkKernel
-  runBenchmarkKernel
-  vectorAdd1M
-  vectorAdd10M
-  vectorAddSmall
-  formatResult
-  formatResultJson
-  formatComparison
-)
-
-export Runner (
-  BackendRunner
-  BenchmarkSuite
-  BenchmarkComparison
-  BenchmarkReport
-  RunConfig
-  defaultConfig
-  parseArgs
-  printUsage
-  printBackendStatus
-  detectBackends
-  getMachineInfo
-  getGitCommit
-  formatReportMarkdown
-  writeJsonReport
-  writeMarkdownReport
-)
+-- Re-exports are handled by the imports - all types are available via
+-- TinyGrad4.Benchmark.Timing, TinyGrad4.Benchmark.Runner, etc.
 
 end TinyGrad4.Benchmark

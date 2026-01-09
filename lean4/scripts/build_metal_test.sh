@@ -5,13 +5,15 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$PROJECT_DIR/.lake/build"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LEAN4_DIR="$ROOT_DIR/lean4"
+PROJECT_DIR="$LEAN4_DIR"
+BUILD_DIR="$ROOT_DIR/.lake/build"
 
 echo "=== Building Metal Test Executable ==="
 
 # Get Lean toolchain
-LEAN_TOOLCHAIN_RAW=$(cat "$PROJECT_DIR/lean-toolchain" | tr -d '\n')
+LEAN_TOOLCHAIN_RAW=$(cat "$ROOT_DIR/lean-toolchain" | tr -d '\n')
 LEAN_TOOLCHAIN=$(echo "$LEAN_TOOLCHAIN_RAW" | sed 's|/|--|g' | sed 's|:|---|g')
 LEAN_ROOT="$HOME/.elan/toolchains/$LEAN_TOOLCHAIN"
 CACHE_DIR="$LEAN_ROOT/lake/cache/artifacts"
@@ -26,7 +28,7 @@ echo "Step 1: Building Metal FFI..."
 # Step 2: Try to build with Lake (will fail at link but compiles .o files)
 echo ""
 echo "Step 2: Building Lean components (link will fail, that's expected)..."
-cd "$PROJECT_DIR"
+cd "$ROOT_DIR"
 lake build metal_test 2>&1 | tee /tmp/lake_build.log || true
 
 # Step 3: Extract the .o files Lake would use from the error message

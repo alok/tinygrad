@@ -1,5 +1,8 @@
 import TinyGrad4
 
+-- Disable RawBuffer linter for test files that need Array Float literals
+set_option linter.useRawBuffer false
+
 /-!
 # Numerical Gradient Verification
 

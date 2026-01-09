@@ -5,50 +5,13 @@ import TinyGrad4.Backend.ShapeTracker
 import Std.Data.HashMap
 
 /-!
-# Fused Elementwise Kernel Compiler
+Fused elementwise kernel compiler.
 
-Compiles elementwise UOp expressions into execution plans with specialized kernel dispatch.
+Compiles elementwise UOp expressions into execution plans and selects a native kernel.
+Pattern detection happens in Lean via {lit}`detectKernel`, and {lit}`Interpreter.evalFusedEwise`
+dispatches to a native kernel based on {lit}`plan.kernel`.
 
-## Architecture: Lean-Driven Dispatch
-
-Pattern detection happens entirely in Lean via `detectKernel`, not in C. The `Kernel` inductive
-classifies bytecode patterns at compile time, and `Interpreter.evalFusedEwise` dispatches to
-the appropriate native kernel based on `plan.kernel`.
-
-### Why Lean-side detection?
-
-1. **Extensibility**: Adding new kernel patterns requires only Lean changes (add to `Kernel`
-   inductive + `detectKernel` match). No C code growth.
-2. **Type safety**: Pattern classification is checked by Lean's type system.
-3. **Maintainability**: All fusion logic lives in one place (this module).
-
-### Performance Trade-offs (measured 2024-12-25)
-
-Moving pattern detection from C to Lean adds ~8μs overhead per kernel call due to Lean match
-dispatch + FFI boundary crossing. Benchmark on 10K f32 elements:
-
-| Kernel | C-side detection | Lean-side detection | Delta |
-|--------|------------------|---------------------|-------|
-| neg    | 14.2μs           | 22.6μs              | +59%  |
-| add    | 18.7μs           | 24.7μs              | +32%  |
-
-For small tensors (<50K elements), this overhead is noticeable. For larger tensors, it becomes
-negligible relative to compute time. The trade-off favors maintainability over micro-optimization.
-
-### Future optimizations
-
-1. **Bundled dispatch**: Pass kernel enum to single C dispatch function (fewer FFI crossings)
-2. **Dependent kernel types**: `Kernel.unary` / `Kernel.binary` carrying input refs as fields
-3. **Pre-allocated outputs**: Avoid allocation in hot path
-
-## Bytecode Format
-
-Instructions are 64-bit: `(imm << 8) | opcode`. Stack-based evaluation.
-
-- `PUSH imm`: Push leaf[imm] value onto stack
-- Unary ops (NEG, SQRT, etc.): Pop 1, push result
-- Binary ops (ADD, MUL, etc.): Pop 2, push result
-- Ternary ops (WHERE, MULACC): Pop 3, push result
+Bytecode instructions are 64-bit: {lit}`(imm << 8) | opcode`, evaluated with a stack machine.
 -/
 
 namespace TinyGrad4.Backend.FusedEwise
@@ -105,6 +68,32 @@ def mapIds (p : Plan) (f : UOpId → UOpId) : Plan :=
     leafBases := p.leafBases.map f }
 
 end Plan
+
+/-! ## Public instruction builders for tests -/
+
+/-- Create LOAD instruction: push {lit}`leaf[idx]` onto stack. -/
+def instLoad (idx : Nat) : UInt64 := UInt64.ofNat idx <<< 8
+
+/-- Create binary op instruction (ADD=0, SUB=1, MUL=2, DIV=3, MAX=4) -/
+def instBinary (op : Nat) : UInt64 :=
+  match op with
+  | 0 => 7   -- ADD
+  | 1 => 8   -- SUB
+  | 2 => 9   -- MUL
+  | 3 => 10  -- DIV
+  | 4 => 11  -- MAX
+  | _ => 7   -- default to ADD
+
+/-- Create WHERE instruction (ternary: cond, x, y → result) -/
+def instWhere : UInt64 := 12
+
+/-- Create CONST f32 instruction with bits -/
+def instConstF32Bits (bits : UInt32) : UInt64 :=
+  -- Encoding: const opcode doesn't exist in standard opcodes
+  -- We'll use push + special marker for constant embedding
+  -- Actually the program format expects leaves to be buffers, not inline consts
+  -- This is a placeholder - real constants should be passed as input buffers
+  0
 
 private def opCodePush : UInt64 := 0
 private def opCodeNeg : UInt64 := 1
@@ -203,6 +192,8 @@ private def addLeaf (u : UOp) (outShape : Shape) : BuildM (Option Nat) := do
         some 1
       else if u.dtype == .float32 then
         some 0
+      else if u.dtype == .uint8 then
+        some 2
       else
         none
     match dtCode with
@@ -264,6 +255,8 @@ private def canFuseNode (u : UOp) : Bool :=
     false
   else
     match u.op with
+    | .CAST =>
+        u.src.length == 1 && u.src[0]!.dtype == .uint8
     | .NEG | .SQRT | .RECIPROCAL | .EXP2 | .LOG2 | .SIN | .COS | .TAN =>
         u.src.length == 1 && allFloat32 u.src
     | .ADD | .SUB | .MUL | .FDIV | .MAX =>
@@ -279,6 +272,18 @@ private def canFuseNode (u : UOp) : Bool :=
 
 private partial def emitExpr (rootId : UOpId) (u : UOp) (outShape : Shape) (keep : UOpIdSet)
     (refCnt : HashMap UOpId Nat) (allowRootShared : Bool) : BuildM Bool := do
+  if u.op == .CAST then
+    match u.src with
+    | [s] =>
+        if u.dtype == .float32 && s.dtype == .uint8 then
+          if (← emitExpr rootId s outShape keep refCnt allowRootShared) then
+            addCover u.uid
+            return true
+          else
+            return false
+        else
+          return false
+    | _ => return false
   let fusable := canFuseNode u
   let shouldFuse :=
     if !fusable then
@@ -305,9 +310,18 @@ private partial def emitExpr (rootId : UOpId) (u : UOp) (outShape : Shape) (keep
       return true
     | none => return false
 
+/-- Check if all leaf shapes are equal (required for contiguous fast paths). -/
+private def allShapesEqual (shapes : Array (Array Nat)) : Bool :=
+  if shapes.size ≤ 1 then true
+  else
+    let first := shapes[0]!
+    shapes.all (· == first)
+
 /-- Detect specialized kernel from bytecode pattern.
-    Pattern matching happens here in Lean, not in C. -/
-private def detectKernel (prog : Array UInt64) (fast : Bool) (nLeaves : Nat) : Kernel :=
+    Pattern matching happens here in Lean, not in C.
+    Contiguous kernels require all leaf shapes to be identical. -/
+private def detectKernel (prog : Array UInt64) (fast : Bool) (nLeaves : Nat)
+    (leafShapes : Array (Array Nat)) : Kernel :=
   if !fast then .bytecode  -- Need contiguous tensors for fast paths
   else
     let getOp (instr : UInt64) : UInt64 := instr &&& 0xFF
@@ -329,7 +343,9 @@ private def detectKernel (prog : Array UInt64) (fast : Bool) (nLeaves : Nat) : K
         | _ => .bytecode
       else .bytecode
     -- Binary pattern: [PUSH 0, PUSH 1, OP]
-    else if prog.size == 3 && nLeaves == 2 then
+    -- IMPORTANT: Contiguous binary ops require both inputs to have the SAME shape.
+    -- If shapes differ (e.g., tensor / scalar), we must use bytecode with broadcasting.
+    else if prog.size == 3 && nLeaves == 2 && allShapesEqual leafShapes then
       let instr0 := prog[0]!
       let instr1 := prog[1]!
       let instr2 := prog[2]!
@@ -356,7 +372,11 @@ private def compileWith (u : UOp) (keep : UOpIdSet) (refCnt : HashMap UOpId Nat)
     return none
   if st.prog.isEmpty then
     return none
-  let kernel := detectKernel st.prog st.fast st.leafBases.size
+  let kernel :=
+    if st.leafDtypes.all (· == 0) then
+      detectKernel st.prog st.fast st.leafBases.size st.leafShapes
+    else
+      .bytecode
   return some
     { root := u.uid
       cover := st.cover

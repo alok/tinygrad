@@ -1,4 +1,5 @@
 import TinyGrad4.Benchmark.Framework
+import TinyGrad4.Benchmark.Kernels
 import Lean.Data.Json
 
 /-!
@@ -23,6 +24,142 @@ Unified multi-backend benchmark orchestration with comparison reporting.
 namespace TinyGrad4.Benchmark.Runner
 
 open TinyGrad4.Benchmark
+open TinyGrad4.Benchmark.Kernels
+
+/-! ## Metal Runner Integration -/
+
+/-- Generate Metal shader for a benchmark kernel using MetalRenderer -/
+def generateBenchShader (kernel : BenchKernel) (size : Nat) : IO String := do
+  match generateShader kernel size with
+  | some shader => pure shader
+  | none =>
+    -- Fallback to hardcoded shader if generation fails
+    IO.eprintln s!"Warning: Using fallback shader for {repr kernel}"
+    pure "#include <metal_stdlib>
+using namespace metal;
+
+kernel void add(device const float* buf0 [[buffer(0)]],
+                device const float* buf1 [[buffer(1)]],
+                device float* buf2 [[buffer(2)]],
+                uint gid [[thread_position_in_grid]]) {
+    buf2[gid] = buf0[gid] + buf1[gid];
+}"
+
+/-- Parse metal_runner output via shell awk to extract float values -/
+def parseMetalOutput (output : String) : IO (Float × Float × Float × String) := do
+  -- Use awk to extract values from metal_runner output
+  -- Device: Apple M4 Max
+  -- Time: 123.45 μs
+  -- Throughput: 9.06 GFLOP/s
+  -- Bandwidth: 108.77 GB/s
+  -- Use string concat to avoid interpolation issues with awk $2
+  let awkPrint := "'{print $2}'"
+  let deviceLine ← IO.Process.run {
+    cmd := "sh"
+    args := #["-c", "echo " ++ output.quote ++ " | grep 'Device:' | cut -d: -f2 | xargs"]
+  }
+  let timeLine ← IO.Process.run {
+    cmd := "sh"
+    args := #["-c", "echo " ++ output.quote ++ " | grep 'Time:' | awk " ++ awkPrint]
+  }
+  let tputLine ← IO.Process.run {
+    cmd := "sh"
+    args := #["-c", "echo " ++ output.quote ++ " | grep 'Throughput:' | awk " ++ awkPrint]
+  }
+  let bwLine ← IO.Process.run {
+    cmd := "sh"
+    args := #["-c", "echo " ++ output.quote ++ " | grep 'Bandwidth:' | awk " ++ awkPrint]
+  }
+
+  -- Parse Float from the decimal string (Lean 4 Float.ofScientific trick)
+  let parseF (s : String) : Float := Id.run do
+    let s' := s.trimAscii.toString
+    -- Manual decimal parsing
+    let parts := s'.splitOn "."
+    let intPart := (parts.getD 0 "0").toNat!
+    if parts.length > 1 then
+      let fracStr := parts.getD 1 "0"
+      let fracPart := fracStr.toNat!
+      let denom := (10 : Float) ^ fracStr.length.toFloat
+      intPart.toFloat + fracPart.toFloat / denom
+    else
+      intPart.toFloat
+
+  return (parseF timeLine, parseF tputLine, parseF bwLine, deviceLine.trimAscii.toString)
+
+/-- Get Unix epoch timestamp in seconds. -/
+def getUnixTimestamp : IO Nat := do
+  try
+    let ts ← IO.Process.run { cmd := "date", args := #["+%s"] }
+    match ts.trimAscii.toString.toNat? with
+    | some n => return n
+    | none => return 0
+  catch _ =>
+    return 0
+
+/-- Locate metal_runner from the current working directory. -/
+def findMetalRunner? : IO (Option String) := do
+  let candidates := #[
+    ".lake/build/metal/metal_runner",
+    "lean4/.lake/build/metal/metal_runner"
+  ]
+  for path in candidates do
+    if (← System.FilePath.pathExists path) then
+      return some path
+  return none
+
+/-- Get metal_runner path or raise with a setup hint. -/
+def findMetalRunner : IO String := do
+  match ← findMetalRunner? with
+  | some path => pure path
+  | none =>
+    throw (IO.Error.userError "metal_runner not found; run lean4/scripts/build_metal_ffi.sh")
+
+/-- Run Metal benchmark for a spec using standalone runner -/
+def runMetalSpec (spec : BenchmarkSpec) : IO BenchmarkResult := do
+  let runner ← findMetalRunner
+
+  -- Generate shader via MetalRenderer (uses actual codegen path!)
+  let shader ← generateBenchShader .add spec.size
+  let shaderPath := "/tmp/tg4_bench_add.metal"
+  IO.FS.writeFile shaderPath shader
+
+  -- Run metal_runner
+  let output ← IO.Process.run {
+    cmd := runner
+    args := #[shaderPath, "add", toString spec.size]
+  }
+
+  -- Parse output
+  let (timeUs, gflops, gbps, device) ← parseMetalOutput output
+  let timestamp ← getUnixTimestamp
+  return {
+    spec := spec
+    backend := "METAL"
+    device := device
+    stats := {
+      min := ⟨(timeUs * 1000).toUInt64.toNat⟩  -- μs to ns
+      max := ⟨(timeUs * 1000).toUInt64.toNat⟩
+      mean := ⟨(timeUs * 1000).toUInt64.toNat⟩
+      median := ⟨(timeUs * 1000).toUInt64.toNat⟩
+      stddev := 0.0
+      samples := spec.iterations
+    }
+    bandwidth_gb_s := gbps
+    throughput_gflops := gflops
+    verified := true  -- metal_runner verifies output
+    timestamp := timestamp
+    gitCommit := none
+  }
+
+/-- Run all standard Metal benchmarks -/
+def runMetalAll : IO (Array BenchmarkResult) := do
+  let specs := #[vectorAddSmall, vectorAdd1M, vectorAdd10M]
+  let mut results := #[]
+  for spec in specs do
+    let result ← runMetalSpec spec
+    results := results.push result
+  return results
 
 /-! ## Backend Registry -/
 
@@ -42,18 +179,19 @@ def backendRegistry : IO (Array BackendRunner) := do
   -- We return stubs here; actual implementations link at compile time
   -- based on what backends are compiled in
   return #[
-    -- Metal backend (macOS only)
+    -- Metal backend (macOS only) - uses standalone metal_runner process
     {
       name := "METAL"
       isAvailable := do
-        -- Check if we're on macOS by trying to import Metal
+        -- Check if metal_runner exists and we're on macOS
         try
           let _ ← IO.Process.run { cmd := "sw_vers", args := #["-productName"] }
-          return true
+          let runner? ← findMetalRunner?
+          return runner?.isSome
         catch _ =>
           return false
-      runSpec := fun _spec => throw (IO.Error.userError "Metal runner not linked")
-      runAll := throw (IO.Error.userError "Metal runner not linked")
+      runSpec := fun spec => runMetalSpec spec
+      runAll := runMetalAll
     },
     -- CUDA backend (NVIDIA GPU required)
     {
@@ -119,6 +257,22 @@ def fromResults (spec : BenchmarkSpec) (results : Array BenchmarkResult) : Bench
 
 end BenchmarkComparison
 
+/-- Configuration for benchmark run. -/
+structure RunConfig where
+  /-- Backends to run (empty = all available). -/
+  backends : Array String := #[]
+  /-- Suites to run (empty = all). -/
+  suites : Array String := #[]
+  /-- Quick run (fewer iterations). -/
+  quick : Bool := false
+  /-- JSON output path. -/
+  jsonOutput : Option String := none
+  /-- Markdown output path. -/
+  markdownOutput : Option String := none
+  /-- Verbose output. -/
+  verbose : Bool := true
+  deriving Repr, Inhabited
+
 /-- Full benchmark report -/
 structure BenchmarkReport where
   /-- Report timestamp -/
@@ -127,6 +281,14 @@ structure BenchmarkReport where
   gitCommit : Option String
   /-- Machine info -/
   machineInfo : String
+  /-- Benchmark tool version -/
+  toolVersion : String
+  /-- Run configuration as requested by the user -/
+  runConfig : RunConfig
+  /-- Backends actually executed -/
+  selectedBackends : Array String
+  /-- Suites actually executed -/
+  selectedSuites : Array String
   /-- All results by backend -/
   resultsByBackend : List (String × Array BenchmarkResult)
   /-- Comparisons -/
@@ -143,11 +305,26 @@ instance : ToJson BenchmarkComparison where
   ]
 
 open Lean Json in
+instance : ToJson RunConfig where
+  toJson c := Json.mkObj [
+    ("backends", Json.arr (c.backends.map Json.str)),
+    ("suites", Json.arr (c.suites.map Json.str)),
+    ("quick", toJson c.quick),
+    ("json_output", match c.jsonOutput with | some p => Json.str p | none => Json.null),
+    ("markdown_output", match c.markdownOutput with | some p => Json.str p | none => Json.null),
+    ("verbose", toJson c.verbose)
+  ]
+
+open Lean Json in
 instance : ToJson BenchmarkReport where
   toJson r := Json.mkObj [
     ("timestamp", toJson r.timestamp),
     ("git_commit", match r.gitCommit with | some c => Json.str c | none => Json.null),
     ("machine_info", toJson r.machineInfo),
+    ("tool_version", toJson r.toolVersion),
+    ("run_config", toJson r.runConfig),
+    ("selected_backends", Json.arr (r.selectedBackends.map Json.str)),
+    ("selected_suites", Json.arr (r.selectedSuites.map Json.str)),
     ("results_by_backend", Json.mkObj (r.resultsByBackend.map fun (name, results) =>
       (name, Json.arr (results.map toJson)))),
     ("comparisons", Json.arr (r.comparisons.map toJson))
@@ -206,9 +383,23 @@ def formatComparisonMarkdown (c : BenchmarkComparison) : String :=
 /-- Format full report as markdown -/
 def formatReportMarkdown (r : BenchmarkReport) : String :=
   let header := "# TinyGrad4 Benchmark Report\n\n"
+  let requestedBackends :=
+    if r.runConfig.backends.isEmpty then "all" else String.intercalate ", " r.runConfig.backends.toList
+  let requestedSuites :=
+    if r.runConfig.suites.isEmpty then "all" else String.intercalate ", " r.runConfig.suites.toList
+  let selectedBackends :=
+    if r.selectedBackends.isEmpty then "none" else String.intercalate ", " r.selectedBackends.toList
+  let selectedSuites :=
+    if r.selectedSuites.isEmpty then "none" else String.intercalate ", " r.selectedSuites.toList
   let metadata := s!"- **Machine**: {r.machineInfo}\n" ++
                   s!"- **Git Commit**: {r.gitCommit.getD "unknown"}\n" ++
-                  s!"- **Timestamp**: {r.timestamp}\n\n"
+                  s!"- **Tool Version**: {r.toolVersion}\n" ++
+                  s!"- **Timestamp**: {r.timestamp}\n" ++
+                  s!"- **Requested Backends**: {requestedBackends}\n" ++
+                  s!"- **Requested Suites**: {requestedSuites}\n" ++
+                  s!"- **Selected Backends**: {selectedBackends}\n" ++
+                  s!"- **Selected Suites**: {selectedSuites}\n" ++
+                  s!"- **Quick Mode**: {r.runConfig.quick}\n\n"
   let comparisons := r.comparisons.map formatComparisonMarkdown
   header ++ metadata ++ "## Results\n\n" ++ String.intercalate "\n\n" comparisons.toList
 
@@ -223,20 +414,6 @@ def writeMarkdownReport (path : String) (report : BenchmarkReport) : IO Unit := 
   IO.FS.writeFile path md
 
 /-! ## Main Entry Points -/
-
-/-- Configuration for benchmark run -/
-structure RunConfig where
-  /-- Backends to run (empty = all available) -/
-  backends : Array String := #[]
-  /-- Suites to run (empty = all) -/
-  suites : Array String := #[]
-  /-- JSON output path -/
-  jsonOutput : Option String := none
-  /-- Markdown output path -/
-  markdownOutput : Option String := none
-  /-- Verbose output -/
-  verbose : Bool := true
-  deriving Repr, Inhabited
 
 /-- Default configuration -/
 def defaultConfig : RunConfig := {}
@@ -257,6 +434,12 @@ def parseArgs (args : List String) : RunConfig := Id.run do
     else if arg == "--backend" && i + 1 < argArray.size then
       config := { config with backends := config.backends.push argArray[i + 1]! }
       i := i + 2
+    else if arg == "--suite" && i + 1 < argArray.size then
+      config := { config with suites := config.suites.push argArray[i + 1]! }
+      i := i + 2
+    else if arg == "--quick" then
+      config := { config with quick := true }
+      i := i + 1
     else if arg == "--quiet" then
       config := { config with verbose := false }
       i := i + 1

@@ -113,49 +113,105 @@ def runBenchmarks (p : Parsed) : IO UInt32 := do
     out.success s!"{backend} available"
   IO.println ""
 
+  let requestedBackends := p.flag? "backend" |>.map (·.as! (Array String)) |>.getD #[]
+  let requestedSuites := p.flag? "suite" |>.map (·.as! (Array String)) |>.getD #[]
+  let quick := p.hasFlag "quick"
+
+  if !requestedBackends.isEmpty then
+    let missing := requestedBackends.filter (fun b => !available.contains b)
+    if !missing.isEmpty then
+      IO.println s!"{out.yellow "!"} Requested backends not available: {String.intercalate ", " missing.toList}"
+
+  let suitesToRun :=
+    if requestedSuites.isEmpty then
+      Runner.allSuites
+    else
+      Runner.allSuites.filter (fun s => requestedSuites.contains s.name)
+
+  if suitesToRun.isEmpty then
+    out.failure "No benchmark suites selected"
+    return 1
+
+  let applyQuick (spec : BenchmarkSpec) : BenchmarkSpec :=
+    if quick then
+      { spec with
+        iterations := Nat.max 1 (spec.iterations / 10),
+        warmupRuns := Nat.max 1 (spec.warmupRuns / 3) }
+    else
+      spec
+
   -- Run benchmarks
   out.info "Running benchmarks..."
   IO.println ""
 
   let mut allResults : Array BenchmarkResult := #[]
+  let mut resultsByBackend : Array (String × Array BenchmarkResult) := #[]
+  let mut selectedBackends : Array String := #[]
 
-  -- For now, just show what would be run
-  -- Actual execution requires linking backend implementations
-  for suite in Runner.allSuites do
-    IO.println s!"Suite: {out.bold suite.name}"
-    IO.println s!"  {out.dim suite.description}"
-    let specs := suite.specs
-    for h : idx in [:specs.size] do
-      let spec := specs[idx]
-      out.progress (idx + 1) specs.size spec.name
-      -- Results would be collected here when backends are linked
-    IO.println ""
+  -- Get backend runners
+  let backends ← Runner.backendRegistry
+  for backend in backends do
+    if (requestedBackends.isEmpty || requestedBackends.contains backend.name) && (← backend.isAvailable) then
+      IO.println s!"{out.bold backend.name}:"
+      selectedBackends := selectedBackends.push backend.name
+      let mut backendResults : Array BenchmarkResult := #[]
+
+      for suite in suitesToRun do
+        IO.println s!"  Suite: {suite.name}"
+        let specs := suite.specs.map applyQuick
+        for h : idx in [:specs.size] do
+          let spec := specs[idx]
+          out.progress (idx + 1) specs.size s!"  {spec.name}"
+          try
+            let result ← backend.runSpec spec
+            let result := match gitCommit with
+              | some commit => { result with gitCommit := some commit }
+              | none => result
+            allResults := allResults.push result
+            backendResults := backendResults.push result
+            IO.println s!"    {out.green "OK"} {result.stats.mean.toMicros} μs | {result.bandwidth_gb_s} GB/s | {result.throughput_gflops} GFLOP/s"
+          catch e =>
+            IO.println s!"    {out.red "ERR"} {e.toString}"
+      IO.println ""
+      resultsByBackend := resultsByBackend.push (backend.name, backendResults)
 
   -- Output results
   let jsonPath := p.flag? "json" |>.map (·.as! String)
   let mdPath := p.flag? "markdown" |>.map (·.as! String)
 
-  if let some path := jsonPath then
-    out.info s!"Writing JSON report to {path}"
+  if jsonPath.isSome || mdPath.isSome then
+    let timestamp ← Runner.getUnixTimestamp
+    let allSpecs := suitesToRun.foldl (fun acc suite => acc ++ suite.specs.map applyQuick) #[]
+    let comparisons := allSpecs.map fun spec =>
+      let results := allResults.filter (fun r => r.spec.name == spec.name)
+      Runner.BenchmarkComparison.fromResults spec results
+    let runConfig : Runner.RunConfig := {
+      backends := requestedBackends
+      suites := requestedSuites
+      quick := quick
+      jsonOutput := jsonPath
+      markdownOutput := mdPath
+      verbose := out.verbose
+    }
     let report : Runner.BenchmarkReport := {
-      timestamp := 0  -- Would be actual timestamp
+      timestamp := timestamp
       gitCommit := gitCommit
       machineInfo := machineInfo
-      resultsByBackend := []
-      comparisons := #[]
+      toolVersion := version
+      runConfig := runConfig
+      selectedBackends := selectedBackends
+      selectedSuites := suitesToRun.map (·.name)
+      resultsByBackend := resultsByBackend.toList
+      comparisons := comparisons
     }
-    Runner.writeJsonReport path report
 
-  if let some path := mdPath then
-    out.info s!"Writing Markdown report to {path}"
-    let report : Runner.BenchmarkReport := {
-      timestamp := 0
-      gitCommit := gitCommit
-      machineInfo := machineInfo
-      resultsByBackend := []
-      comparisons := #[]
-    }
-    Runner.writeMarkdownReport path report
+    if let some path := jsonPath then
+      out.info s!"Writing JSON report to {path}"
+      Runner.writeJsonReport path report
+
+    if let some path := mdPath then
+      out.info s!"Writing Markdown report to {path}"
+      Runner.writeMarkdownReport path report
 
   out.success "Benchmarks complete"
   return 0

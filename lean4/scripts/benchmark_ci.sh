@@ -16,9 +16,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$PROJECT_DIR/.lake/build"
-RESULTS_DIR="$PROJECT_DIR/benchmark_results"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LEAN4_DIR="$ROOT_DIR/lean4"
+BUILD_DIR="$ROOT_DIR/.lake/build"
+RESULTS_DIR="$LEAN4_DIR/benchmark_results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 # Colors (disabled in CI environments without TTY)
@@ -80,7 +81,7 @@ mkdir -p "$RESULTS_DIR"
 
 # Build
 log_step "Building tg4_bench..."
-cd "$PROJECT_DIR"
+cd "$ROOT_DIR"
 
 if ! lake build tg4_bench 2>&1; then
     log_error "Build failed"

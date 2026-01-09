@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +38,7 @@ class BenchmarkResult:
 
 def run_python_benchmark(size: int, iterations: int = 100) -> BenchmarkResult:
     """Run Python tinygrad vector add benchmark."""
-    from tinygrad import Tensor, Device
+    from tinygrad import Tensor
 
     print(f"  Python tinygrad (size={size:,})")
 
@@ -84,18 +83,19 @@ def run_python_benchmark(size: int, iterations: int = 100) -> BenchmarkResult:
 
 def run_lean_benchmark(size: int) -> Optional[BenchmarkResult]:
     """Run Lean TinyGrad4 benchmark via executable or JSON output."""
-    # Determine script directory to find lean4 project
+    # Determine script directory to find repo root and lean4 project
     script_dir = Path(__file__).parent
-    lean4_dir = script_dir.parent  # lean4/scripts -> lean4
+    root_dir = script_dir.parent.parent  # lean4/scripts -> repo root
+    lean4_dir = root_dir / "lean4"
 
     # Check if benchmark executable exists
-    exe_path = lean4_dir / ".lake/build/bin/tg4_bench"
+    exe_path = root_dir / ".lake/build/bin/tg4_bench"
     if not exe_path.exists():
         # Try building
         print("  Building Lean benchmark...")
         result = subprocess.run(
             ["lake", "build", "tg4_bench"],
-            cwd=lean4_dir,
+            cwd=root_dir,
             capture_output=True,
             text=True,
         )

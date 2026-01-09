@@ -1,4 +1,8 @@
-import TinyGrad4
+import TinyGrad4.Basic
+import TinyGrad4.Data.Loader
+
+-- Disable RawBuffer linter: MNIST data loader uses Array Float for parsed image/label data
+set_option linter.useRawBuffer false
 
 /-!
 # MNIST Data Loader

@@ -228,8 +228,3 @@ def chainedMatmulGradW1Only : IO Unit := do
 
 end TinyGrad4.Test.MLP
 
-#eval! TinyGrad4.Test.MLP.simpleMatmulGrad
-#eval! TinyGrad4.Test.MLP.chainedMatmulForward
-#eval! TinyGrad4.Test.MLP.secondMatmulGrad
-#eval! TinyGrad4.Test.MLP.chainedMatmulGradW1Only
-#eval! TinyGrad4.Test.MLP.trainingStep

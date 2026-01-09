@@ -3149,23 +3149,46 @@ static int view_offset(const view_info* v, const size_t* idx, int64_t* out) {
   return 1;
 }
 
-static int64_t read_index_value(const uint8_t* data, size_t elem, size_t elem_size) {
+static int64_t read_index_value(const uint8_t* data, size_t elem, size_t elem_size, int idx_signed) {
   const uint8_t* p = data + elem * elem_size;
   if (elem_size == 4) {
-    int32_t v;
-    memcpy(&v, p, 4);
-    return (int64_t)v;
+    if (idx_signed) {
+      int32_t v;
+      memcpy(&v, p, 4);
+      return (int64_t)v;
+    } else {
+      uint32_t v;
+      memcpy(&v, p, 4);
+      return (int64_t)v;
+    }
   } else if (elem_size == 8) {
-    int64_t v;
-    memcpy(&v, p, 8);
-    return v;
+    if (idx_signed) {
+      int64_t v;
+      memcpy(&v, p, 8);
+      return v;
+    } else {
+      uint64_t v;
+      memcpy(&v, p, 8);
+      return (int64_t)v;
+    }
   } else if (elem_size == 2) {
-    int16_t v;
-    memcpy(&v, p, 2);
-    return (int64_t)v;
+    if (idx_signed) {
+      int16_t v;
+      memcpy(&v, p, 2);
+      return (int64_t)v;
+    } else {
+      uint16_t v;
+      memcpy(&v, p, 2);
+      return (int64_t)v;
+    }
   } else if (elem_size == 1) {
-    int8_t v = (int8_t)p[0];
-    return (int64_t)v;
+    if (idx_signed) {
+      int8_t v = (int8_t)p[0];
+      return (int64_t)v;
+    } else {
+      uint8_t v = p[0];
+      return (int64_t)v;
+    }
   }
   return 0;
 }
@@ -3173,12 +3196,14 @@ static int64_t read_index_value(const uint8_t* data, size_t elem, size_t elem_si
 LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b_lean_obj_arg outShape,
     b_lean_obj_arg xStrides, int64_t xOffset, b_lean_obj_arg xMaskStarts, b_lean_obj_arg xMaskEnds,
     b_lean_obj_arg idxStrides, int64_t idxOffset, b_lean_obj_arg idxMaskStarts, b_lean_obj_arg idxMaskEnds,
-    b_lean_obj_arg axis, b_lean_obj_arg classDim, b_lean_obj_arg elemSize, b_lean_obj_arg idxElemSize) {
+    b_lean_obj_arg axis, b_lean_obj_arg classDim, b_lean_obj_arg elemSize, b_lean_obj_arg idxElemSize,
+    b_lean_obj_arg idxSigned) {
   size_t out_rank = array_size(outShape);
   size_t axis_n = nat_to_size(axis);
   size_t class_n = nat_to_size(classDim);
   size_t elem = nat_to_size(elemSize);
   size_t idx_elem = nat_to_size(idxElemSize);
+  int idx_signed = nat_to_size(idxSigned) != 0;
   size_t out_numel = shape_numel(outShape);
   size_t x_bytes = byte_array_size(x);
   size_t idx_bytes = byte_array_size(idx);
@@ -3275,7 +3300,7 @@ LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b
         memset(o + pre * block_bytes, 0, block_bytes);
         continue;
       }
-      int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem);
+      int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem, idx_signed);
       if (idx_val < 0 || (size_t)idx_val >= class_n) {
         memset(o + pre * block_bytes, 0, block_bytes);
         continue;
@@ -3319,7 +3344,7 @@ LEAN_EXPORT lean_obj_res tg4_gather_view(b_lean_obj_arg x, b_lean_obj_arg idx, b
       memset(o + i * elem, 0, elem);
       continue;
     }
-    int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem);
+    int64_t idx_val = read_index_value(idx_data, (size_t)idx_off, idx_elem, idx_signed);
     if (idx_val < 0 || (size_t)idx_val >= class_n) {
       memset(o + i * elem, 0, elem);
       continue;

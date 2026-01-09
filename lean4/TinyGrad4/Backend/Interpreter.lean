@@ -617,7 +617,7 @@ private def evalFusedGather (u : UOp) (plan : FusedGather.Plan) (env : Env)
     Native.gatherView xBuf.data idxBuf.data u.shape.toArray
       plan.xView.strides plan.xView.offset plan.xView.maskStart plan.xView.maskEnd
       plan.idxView.strides plan.idxView.offset plan.idxView.maskStart plan.idxView.maskEnd
-      plan.reduceAxis classDim itemsize plan.idxItemsize
+      plan.reduceAxis classDim itemsize plan.idxItemsize (if plan.idxSigned then 1 else 0)
   return { dtype := u.dtype, data := outBytes }
 
 /-- Minimum number of elements for GPU dispatch to be beneficial.

@@ -316,7 +316,7 @@ opaque castU8ToF32 (a : @& ByteArray) : ByteArray
 opaque gatherView (x idx : @& ByteArray) (outShape : @& Array Nat)
     (xStrides : @& Array Int64) (xOffset : Int64) (xMaskStarts xMaskEnds : @& Array Nat)
     (idxStrides : @& Array Int64) (idxOffset : Int64) (idxMaskStarts idxMaskEnds : @& Array Nat)
-    (axis classDim elemSize idxElemSize : @& Nat) : ByteArray
+    (axis classDim elemSize idxElemSize idxSigned : @& Nat) : ByteArray
 
 @[extern "tg4_matmul_f32"]
 opaque matmulF32 (a b : @& ByteArray) (m k n : @& Nat) : ByteArray

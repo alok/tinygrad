@@ -20,6 +20,7 @@ structure Plan where
   idxBase : UOpId
   idxView : View
   idxItemsize : Nat
+  idxSigned : Bool
   maskShape : Array Nat
   reduceAxis : Nat
   deriving Repr
@@ -100,11 +101,11 @@ def compile (u : UOp) (_keep : UOpIdSet) (_refCnt : HashMap UOpId Nat) : Option 
   let aStride := aView.strides.getD axis 0
   let bStride := bView.strides.getD axis 0
 
-  let (idxBase, idxView, idxItemsize, classBase) ←
+  let (idxBase, idxView, idxItemsize, idxSigned, classBase) ←
     if aStride == 0 && bStride != 0 then
-      some (aBase, aView, a.dtype.itemsize, baseUOp b)
+      some (aBase, aView, a.dtype.itemsize, a.dtype.isSigned, baseUOp b)
     else if bStride == 0 && aStride != 0 then
-      some (bBase, bView, b.dtype.itemsize, baseUOp a)
+      some (bBase, bView, b.dtype.itemsize, b.dtype.isSigned, baseUOp a)
     else
       none
 
@@ -129,6 +130,7 @@ def compile (u : UOp) (_keep : UOpIdSet) (_refCnt : HashMap UOpId Nat) : Option 
       idxBase
       idxView
       idxItemsize
+      idxSigned
       maskShape := maskShape.toArray
       reduceAxis := axis }
 

@@ -132,10 +132,10 @@ def runFusedGather (plan : FusedGather.Plan) (x idx : RawBuffer)
   let progHash := hash
     (plan.xView.strides, plan.xView.offset, plan.xView.maskStart, plan.xView.maskEnd,
      plan.idxView.strides, plan.idxView.offset, plan.idxView.maskStart, plan.idxView.maskEnd,
-     outShape.toArray, plan.maskShape, plan.reduceAxis, elemSize, idxElemSize, xNumel, idxNumel)
+     outShape.toArray, plan.maskShape, plan.reduceAxis, elemSize, idxElemSize, plan.idxSigned, xNumel, idxNumel)
   let name := s!"fused_gather_{progHash}"
 
-  let shader := renderGatherKernel .cuda name plan outShape xNumel idxNumel elemSize idxElemSize
+  let shader := renderGatherKernel .cuda name plan outShape xNumel idxNumel elemSize idxElemSize plan.idxSigned
   runGatherKernel name shader x idx outShape dtype
 
 private def runGatherCPU (plan : FusedGather.Plan) (x idx : RawBuffer)
@@ -145,7 +145,7 @@ private def runGatherCPU (plan : FusedGather.Plan) (x idx : RawBuffer)
     Native.gatherView x.data idx.data outShape.toArray
       plan.xView.strides plan.xView.offset plan.xView.maskStart plan.xView.maskEnd
       plan.idxView.strides plan.idxView.offset plan.idxView.maskStart plan.idxView.maskEnd
-      plan.reduceAxis classDim dtype.itemsize plan.idxItemsize
+      plan.reduceAxis classDim dtype.itemsize plan.idxItemsize (if plan.idxSigned then 1 else 0)
   { dtype := dtype, data := outBytes }
 
 def runFusedGatherWithFallback (plan : FusedGather.Plan) (x idx : RawBuffer)

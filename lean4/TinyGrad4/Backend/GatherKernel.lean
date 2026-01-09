@@ -29,6 +29,11 @@ private def renderU32Type (target : Target) : String :=
   | .metal => "uint"
   | .cuda => "unsigned int"
 
+private def renderU64Type (target : Target) : String :=
+  match target with
+  | .metal => "ulong"
+  | .cuda => "unsigned long long"
+
 private def renderZeroStore (elemSize : Nat) (indent : String) : String := Id.run do
   let mut out := ""
   if elemSize == 1 then
@@ -48,17 +53,25 @@ private def renderCopyStore (elemSize : Nat) (indent u32Type : String) : String 
       out := out ++ s!"{indent}out[out_byte + {renderNat i}] = x[x_byte + {renderNat i}];\n"
   out
 
-private def renderIdxType (target : Target) (idxElemSize : Nat) : String :=
-  match target, idxElemSize with
-  | .metal, 1 => "char"
-  | .metal, 2 => "short"
-  | .metal, 4 => "int"
-  | .metal, 8 => "long"
-  | .cuda, 1 => "char"
-  | .cuda, 2 => "short"
-  | .cuda, 4 => "int"
-  | .cuda, 8 => "long long"
-  | _, _ => "int"
+private def renderIdxType (target : Target) (idxElemSize : Nat) (idxSigned : Bool) : String :=
+  match target, idxElemSize, idxSigned with
+  | .metal, 1, true => "char"
+  | .metal, 1, false => "uchar"
+  | .metal, 2, true => "short"
+  | .metal, 2, false => "ushort"
+  | .metal, 4, true => "int"
+  | .metal, 4, false => "uint"
+  | .metal, 8, true => "long"
+  | .metal, 8, false => "ulong"
+  | .cuda, 1, true => "char"
+  | .cuda, 1, false => "unsigned char"
+  | .cuda, 2, true => "short"
+  | .cuda, 2, false => "unsigned short"
+  | .cuda, 4, true => "int"
+  | .cuda, 4, false => "unsigned int"
+  | .cuda, 8, true => "long long"
+  | .cuda, 8, false => "unsigned long long"
+  | _, _, _ => if idxSigned then "int" else "unsigned int"
 
 private def renderHeader (target : Target) (name idxType : String) : String :=
   let u32Type := renderU32Type target
@@ -82,7 +95,7 @@ private def renderFooter : String :=
   "}\n"
 
 def renderGatherKernel (target : Target) (name : String) (plan : FusedGather.Plan)
-    (outShape : Shape) (xNumel idxNumel : Nat) (elemSize idxElemSize : Nat) : String := Id.run do
+    (outShape : Shape) (xNumel idxNumel : Nat) (elemSize idxElemSize : Nat) (idxSigned : Bool) : String := Id.run do
   let outRank := outShape.length
   let maskRank := plan.maskShape.size
   let numel := listProd outShape
@@ -92,8 +105,9 @@ def renderGatherKernel (target : Target) (name : String) (plan : FusedGather.Pla
   let xNumel64 := Int64.ofNat xNumel
   let outStrides :=
     (Shape.unitStrides outShape).map (fun i => Int.toNat i) |>.toArray
-  let idxType := renderIdxType target idxElemSize
+  let idxType := renderIdxType target idxElemSize idxSigned
   let u32Type := renderU32Type target
+  let u64Type := renderU64Type target
 
   let mut lines := ""
   lines := lines ++ s!"  if (gid >= {renderNat numel}) return;\n"
@@ -129,9 +143,15 @@ def renderGatherKernel (target : Target) (name : String) (plan : FusedGather.Pla
   let zeroBlock := renderZeroStore elemSize "    "
   lines := lines ++ s!"  if (!valid || idx_off < 0 || idx_off >= {renderInt64 idxNumel64}) " ++ "{\n" ++
     zeroBlock ++ "    return;\n  }\n"
-  lines := lines ++ s!"  long idx_val = (long)idx[({u32Type})idx_off];\n"
-  lines := lines ++ s!"  if (idx_val < 0 || idx_val >= {renderInt64 (Int64.ofNat classDim)}) " ++ "{\n" ++
-    zeroBlock ++ "    return;\n  }\n"
+  if idxSigned then
+    lines := lines ++ s!"  long idx_val = (long)idx[({u32Type})idx_off];\n"
+    lines := lines ++ s!"  if (idx_val < 0 || idx_val >= {renderInt64 (Int64.ofNat classDim)}) " ++ "{\n" ++
+      zeroBlock ++ "    return;\n  }\n"
+  else
+    lines := lines ++ s!"  {u64Type} idx_val_u = ({u64Type})idx[({u32Type})idx_off];\n"
+    lines := lines ++ s!"  if (idx_val_u >= {renderNat classDim}) " ++ "{\n" ++
+      zeroBlock ++ "    return;\n  }\n"
+    lines := lines ++ "  long idx_val = (long)idx_val_u;\n"
 
   lines := lines ++ s!"  long x_off = {renderInt64 plan.xView.offset};\n"
   for j in [:maskRank] do

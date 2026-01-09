@@ -5,6 +5,7 @@ import TinyGrad4.Backend.GatherKernel
 import TinyGrad4.Backend.Native
 import TinyGrad4.Shape
 import TinyGrad4.Benchmark.Instrumentation
+import TinyGrad4.Timing
 
 /-!
 # GPU Gather Execution via Metal
@@ -20,6 +21,7 @@ open TinyGrad4.Backend
 open TinyGrad4.Backend.Metal
 open TinyGrad4.Backend.GatherKernel
 open TinyGrad4.Benchmark (withProfile)
+open TinyGrad4 (MonadTimeNS)
 
 /-! ## Local Helpers -/
 
@@ -85,7 +87,7 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
   if numel == 0 then
     return zerosRaw dtype 0
 
-  let totalStart ← IO.monoNanosNow
+  let totalStart ← MonadTimeNS.monoNs
 
   let elemSize := dtype.itemsize
   let outBytes := numel * elemSize
@@ -102,14 +104,14 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
   let prog ← withProfile "METAL" "gather_compile" (getOrCompile name shader)
   let threadsPerGroup : Nat := 256
   let totalThreads := numel
-  let kernelStart ← IO.monoNanosNow
+  let kernelStart ← MonadTimeNS.monoNs
   withProfile "METAL" "gather_launch" do
     metalLaunch prog #[xBuf, idxBuf, outBuf] totalThreads 1 1 threadsPerGroup 1 1
     metalSync
-  let kernelStop ← IO.monoNanosNow
+  let kernelStop ← MonadTimeNS.monoNs
 
   let outBytes' ← metalCopyOutBytes outBuf outBytes
-  let totalStop ← IO.monoNanosNow
+  let totalStop ← MonadTimeNS.monoNs
 
   metalFree xBuf
   metalFree idxBuf

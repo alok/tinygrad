@@ -70,7 +70,7 @@ partial def findMonoNanosNowIdents (stx : Syntax) : Array Syntax := Id.run do
 /-- Warning message for IO.monoNanosNow usage. -/
 def monoNanosNowWarning : MessageData :=
   m!"⚠️ Prefer the timing monad helpers over raw `IO.monoNanosNow`.\n\n" ++
-  m!"**Why?** Centralizing timing via `TinyGrad4.Data.timeSpan` / `MonadTimeNS.monoNs` " ++
+  m!"**Why?** Centralizing timing via `TinyGrad4.Data.timeSpan` / `TinyGrad4.MonadTimeNS.monoNs` " ++
   m!"keeps profiling consistent and makes instrumentation easier to change.\n\n" ++
   m!"**Fix:** Use the timing monad or wrap timing in a helper.\n\n" ++
   m!"  ❌  `let t0 ← IO.monoNanosNow`\n" ++

@@ -5,6 +5,7 @@ import TinyGrad4.Backend.GatherKernel
 import TinyGrad4.Backend.Native
 import TinyGrad4.Shape
 import TinyGrad4.Benchmark.Instrumentation
+import TinyGrad4.Timing
 
 /-!
 # GPU Gather Execution via CUDA
@@ -20,6 +21,7 @@ open TinyGrad4.Backend
 open TinyGrad4.Backend.Cuda
 open TinyGrad4.Backend.GatherKernel
 open TinyGrad4.Benchmark (withProfile)
+open TinyGrad4 (MonadTimeNS)
 
 /-! ## Local Helpers -/
 
@@ -85,7 +87,7 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
   if numel == 0 then
     return zerosRaw dtype 0
 
-  let totalStart ← IO.monoNanosNow
+  let totalStart ← MonadTimeNS.monoNs
 
   let elemSize := dtype.itemsize
   let outBytes := numel * elemSize
@@ -101,14 +103,14 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
   let prog ← withProfile "CUDA" "gather_compile" (getOrCompile name shader)
   let threadsPerBlock : Nat := 256
   let totalThreads := numel
-  let kernelStart ← IO.monoNanosNow
+  let kernelStart ← MonadTimeNS.monoNs
   withProfile "CUDA" "gather_launch" do
     cudaLaunch2D prog #[xBuf, idxBuf, outBuf] totalThreads 1 threadsPerBlock 1
     cudaSync
-  let kernelStop ← IO.monoNanosNow
+  let kernelStop ← MonadTimeNS.monoNs
 
   let outBytes' ← cudaCopyOutBytes outBuf outBytes
-  let totalStop ← IO.monoNanosNow
+  let totalStop ← MonadTimeNS.monoNs
 
   cudaFree xBuf
   cudaFree idxBuf

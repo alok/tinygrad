@@ -151,6 +151,9 @@ private def runGatherCPU (plan : FusedGather.Plan) (x idx : RawBuffer)
 
 def runFusedGatherWithFallback (plan : FusedGather.Plan) (x idx : RawBuffer)
     (outShape : Shape) (dtype : DType) : IO RawBuffer := do
+  let numel := listProd outShape
+  if numel > 4294967295 then
+    return runGatherCPU plan x idx outShape dtype
   let available ← Metal.isAvailable
   if available then
     try

@@ -102,7 +102,9 @@ def runGatherKernel (name : String) (shader : String) (x idx : RawBuffer)
 
   let prog ← withProfile "CUDA" "gather_compile" (getOrCompile name shader)
   let threadsPerBlock : Nat := 256
-  let totalThreads := numel
+  let maxGridX : Nat := 2147483647
+  let maxThreads := maxGridX * threadsPerBlock
+  let totalThreads := Nat.min numel maxThreads
   let kernelStart ← MonadTimeNS.monoNs
   withProfile "CUDA" "gather_launch" do
     cudaLaunch2D prog #[xBuf, idxBuf, outBuf] totalThreads 1 threadsPerBlock 1

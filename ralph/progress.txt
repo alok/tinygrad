@@ -1,0 +1,42 @@
+Ralph progress log
+
+- 2026-01-12: Initialized Ralph loop scaffolding (PRD + progress log).
+- 2026-01-12: T1 smoke test
+  - What changed: No code changes (smoke test only).
+  - Commands/tests: `uv run --no-sync python -m pytest test/unit/test_schedule_cache.py -xvs` (3 passed).
+  - Next steps/blockers: `uv run` without `--no-sync` fails resolving `tinygrad[triton]` on darwin (triton-nightly missing); consider fixing pyproject markers or documenting.
+  - Linear: ALOK-400 marked Done + comment with results.
+
+- 2026-01-12: T3 pattern matcher cost vs benefit
+  - What changed: Fixed `RecursionError` in `UOp.key` on deep graphs by switching to `@recursive_property`; added regression test `test/unit/test_uop_key.py`.
+  - Commands/tests:
+    - `TRACK_MATCH_STATS=2 PYTHONPATH=. uv run --no-sync python test/external/external_benchmark_schedule.py` (now exits 0)
+    - `uv run --no-sync python -m pytest test/unit/test_uop_key.py -xvs` (1 passed)
+    - `uv run --no-sync python -m pytest test/test_pickle.py::TestPickle::test_pickle_pattern_matcher -xvs` (1 passed)
+    - `uv run --no-sync python -m pytest test/unit/test_schedule_cache.py -xvs` (3 passed)
+  - Next steps/blockers: If we want to shave more rewrite time for this workload, consider a follow-up guard/fast-path for zero-match patterns like `simplify_valid` (0/257 -> 57ms) and `invalid_gate` in devectorizer (0/108 -> 40ms).
+  - Linear: ALOK-402 updated (In Progress -> Done) + comment with benchmark/timing notes.
+
+- 2026-01-12: T2 UOp/schedule correctness
+  - What changed: Fixed schedule cache unrewrite to handle `CONST(device, LUNIQUE)` that isn't in ctx by creating a fresh `UOp.unique_const(...)`; added regression test.
+  - Commands/tests: `PYTHONPATH=. uv run --no-sync python -m pytest test/unit/test_schedule_cache.py -xvs` (4 passed)
+  - Next steps/blockers: `uv run` without `--no-sync` still fails resolving `tinygrad[triton]` on darwin (triton-nightly missing); decide whether to fix markers or document.
+  - Linear: ALOK-401 updated (Backlog -> In Progress -> Done) + comments with repro + fix.
+
+- 2026-01-12: T4 docs/comments for behavior changes
+  - What changed:
+    - Added docstring for `UOp.key` and expanded `recursive_property` comments to explain the non-recursive DAG hashing on deep graphs.
+    - Added an inline comment in schedule cache unrewrite explaining the `CONST(device, LUNIQUE)` fallback path that rebuilds a `UOp.unique_const(...)` when not present in ctx.
+  - Commands/tests:
+    - `uv run --no-sync python -m pytest test/unit/test_uop_key.py -xvs` (1 passed)
+    - `uv run --no-sync python -m pytest test/unit/test_schedule_cache.py -xvs` (4 passed)
+  - Next steps/blockers: None for PRD; existing note: `uv run` without `--no-sync` still fails resolving `tinygrad[triton]` on darwin (triton-nightly missing).
+  - Linear: ALOK-403 updated (Backlog -> In Progress -> Done) + comment with summary/tests.
+
+- 2026-01-13: T1 smoke test
+  - What changed: No code changes (smoke test only).
+  - Commands/tests: `uv run --no-sync python -m pytest test/unit/test_hashing.py -xvs` (6 passed, 3 skipped).
+  - Next steps/blockers: `uv run` without `--no-sync` still fails on darwin due to universal resolution pulling `tinygrad[triton]` (triton-nightly missing for Python>=3.13/darwin).
+  - Linear: Added a new comment to ALOK-400 with the smoke test results.
+
+<promise>COMPLETE</promise>

@@ -39,4 +39,12 @@ Ralph progress log
   - Next steps/blockers: `uv run` without `--no-sync` still fails on darwin due to universal resolution pulling `tinygrad[triton]` (triton-nightly missing for Python>=3.13/darwin).
   - Linear: Added a new comment to ALOK-400 with the smoke test results.
 
+- 2026-01-13: T1 smoke test (ww)
+  - What changed: Made `uv run` resolvable by default by switching the `triton` extra from `triton-nightly` to `triton>=2.1.0; sys_platform == 'linux'`.
+  - Commands/tests:
+    - `ssh ww 'curl -LsSf https://astral.sh/uv/install.sh | sh'`
+    - `ssh ww 'cd ~/tmp/tinygrad-ralph-t1 && ~/.local/bin/uv run --with pytest python -m pytest test/unit/test_pattern_matcher.py -xvs'` (16 passed, 1 skipped)
+  - Next steps/blockers: None; `uv run` now works on linux without `--no-sync`. If we want pytest timeout config to apply with minimal installs, include `pytest-timeout` in the `uv run --with` set.
+  - Linear: ALOK-400 comment added with ww repro + fix + test output.
+
 <promise>COMPLETE</promise>

@@ -46,7 +46,7 @@ tinygrad = ["py.typed"]
 
 [project.optional-dependencies]
 arm = ["unicorn"]
-triton = ["triton-nightly>=2.1.0.dev20231014192330"]
+triton = ["triton>=2.1.0; sys_platform == 'linux'"]
 linting = [
   "pylint",
   "mypy==1.19.1",

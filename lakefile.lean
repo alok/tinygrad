@@ -40,21 +40,61 @@ def objcFlags : Array String :=
 def dropSuffix (s suf : String) : String :=
   if s.endsWith suf then s.dropRight suf.length else s
 
-def checkNvcc : IO Bool := do
-  let out ← IO.Process.output { cmd := "which", args := #["nvcc"] }
-  if out.exitCode == 0 then
-    return true
-  let home := (← IO.getEnv "HOME").getD ""
-  let candidates := #[
-    "/usr/local/cuda/bin/nvcc",
-    "/usr/local/cuda-12.4/bin/nvcc",
-    home ++ "/cuda/bin/nvcc",
-    home ++ "/cuda-12.4/bin/nvcc"
-  ]
-  for path in candidates do
+def configBool? (name : Name) : Option Bool :=
+  match get_config? name with
+  | none => none
+  | some v =>
+    let v := v.toLower
+    if v == "1" || v == "true" || v == "yes" then
+      some true
+    else if v == "0" || v == "false" || v == "no" then
+      some false
+    else
+      none
+
+private def anyPathExists (paths : Array String) : IO Bool := do
+  for path in paths do
     if ← FilePath.pathExists path then
       return true
   return false
+
+def checkCudaAvailable : IO Bool := do
+  if System.Platform.isOSX then
+    return false
+  let home := (← IO.getEnv "HOME").getD ""
+  let includeCandidates := #[
+    "/usr/local/cuda/include/cuda.h",
+    "/usr/local/cuda-12.4/include/cuda.h",
+    home ++ "/cuda/include/cuda.h",
+    home ++ "/cuda-12.4/include/cuda.h",
+    "/usr/include/cuda.h"
+  ]
+  let hasInclude ← anyPathExists includeCandidates
+  if !hasInclude then
+    return false
+  let cudaLibCandidates := #[
+    "/usr/lib/x86_64-linux-gnu/libcuda.so",
+    "/usr/lib/x86_64-linux-gnu/libcuda.so.1",
+    "/usr/local/cuda/lib64/libcuda.so",
+    "/usr/local/cuda/lib64/libcuda.so.1",
+    "/usr/local/cuda-12.4/lib64/libcuda.so",
+    "/usr/local/cuda-12.4/lib64/libcuda.so.1",
+    home ++ "/cuda-12.4/lib64/libcuda.so",
+    home ++ "/cuda-12.4/lib64/libcuda.so.1"
+  ]
+  let nvrtcLibCandidates := #[
+    "/usr/lib/x86_64-linux-gnu/libnvrtc.so",
+    "/usr/lib/x86_64-linux-gnu/libnvrtc.so.1",
+    "/usr/local/cuda/lib64/libnvrtc.so",
+    "/usr/local/cuda/lib64/libnvrtc.so.1",
+    "/usr/local/cuda-12.4/lib64/libnvrtc.so",
+    "/usr/local/cuda-12.4/lib64/libnvrtc.so.1",
+    home ++ "/cuda-12.4/lib64/libnvrtc.so",
+    home ++ "/cuda-12.4/lib64/libnvrtc.so.1"
+  ]
+  let hasCudaLib ← anyPathExists cudaLibCandidates
+  let hasNvrtcLib ← anyPathExists nvrtcLibCandidates
+  return hasCudaLib && hasNvrtcLib
 
 def cudaLinkArgs : Array String :=
   #["-L/usr/lib/x86_64-linux-gnu",
@@ -69,11 +109,9 @@ def cudaLinkArgs : Array String :=
 -- Required for any executable that links libtg4c.a
 -- On non-macOS platforms, these are empty (no Metal/Accelerate support)
 def cudaLinkEnabled : Bool :=
-  match (get_config? cuda) with
-  | some "1" => true
-  | some "true" => true
-  | some "yes" => true
-  | _ => false
+  match configBool? `cuda with
+  | some v => v && !System.Platform.isOSX
+  | none => false
 
 def metalLinkArgs : Array String :=
   if System.Platform.isOSX then
@@ -96,7 +134,13 @@ extern_lib tg4c pkg := do
     let mut oFiles : Array (Job FilePath) := #[]
     let cDir := pkg.dir / "lean4" / "c"
     -- Check for CUDA availability first (affects stub compilation)
-    let hasCuda ← if System.Platform.isOSX then pure false else checkNvcc
+    let hasCuda ←
+      if System.Platform.isOSX then
+        pure false
+      else
+        match configBool? `cuda with
+        | some true => checkCudaAvailable
+        | _ => pure false
     let cFlagsWithCuda := if hasCuda then cFlags ++ #["-DTG4_HAS_CUDA"] else cFlags
     -- Build C files with Lake's clang
     for file in (← cDir.readDir) do
@@ -141,9 +185,13 @@ extern_lib tg4c pkg := do
         let cudaInclude ← do
           if ← FilePath.pathExists "/usr/local/cuda/include" then
             pure "/usr/local/cuda/include"
+          else if ← FilePath.pathExists "/usr/local/cuda-12.4/include" then
+            pure "/usr/local/cuda-12.4/include"
           else
             let home := (← IO.getEnv "HOME").getD ""
-            if ← FilePath.pathExists (home ++ "/cuda-12.4/include") then
+            if ← FilePath.pathExists (home ++ "/cuda/include") then
+              pure (home ++ "/cuda/include")
+            else if ← FilePath.pathExists (home ++ "/cuda-12.4/include") then
               pure (home ++ "/cuda-12.4/include")
             else
               pure "/usr/include"
@@ -212,9 +260,11 @@ lean_exe float16_cast_smoke where
 
 lean_exe triton_matmul_smoke where
   root := `TinyGrad4.Test.CUDATritonMatmulSmoke
+  moreLinkArgs := metalLinkArgs
 
 lean_exe linear_triton_smoke where
   root := `TinyGrad4.Test.LinearTritonSmoke
+  moreLinkArgs := metalLinkArgs
 
 lean_exe metal_matmul_test where
   root := `TinyGrad4.Test.MetalMatmulSmoke

@@ -5,6 +5,7 @@ import TinyGrad4.NN.Linear
 import TinyGrad4.Backend.CudaTritonMatmul
 import TinyGrad4.Backend.Cuda
 import TinyGrad4.Backend.Interpreter
+import TinyGrad4.Test.EmitTritonPTX
 
 open TinyGrad4
 
@@ -38,6 +39,7 @@ private def buildLinear (batch inFeatures outFeatures : Nat)
 
 /-- Smoke test: build a linear layer with shapes from TG4_TRITON_* and eval via IO path. -/
 def main : IO UInt32 := do
+  TinyGrad4.Test.EmitTritonPTX.autogenIfNeeded
   let cfg? ← TinyGrad4.Backend.CudaTritonMatmul.getConfigFromEnv
   match cfg? with
   | none =>

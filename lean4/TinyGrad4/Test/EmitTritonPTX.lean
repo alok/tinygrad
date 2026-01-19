@@ -132,3 +132,23 @@ def main : IO UInt32 := do
 
   IO.println s!"Wrote PTX to {ptxPath}"
   return 0
+
+private def envFlag (name : String) : IO Bool := do
+  match ← IO.getEnv name with
+  | none => pure false
+  | some v =>
+    let v := v.toLower
+    pure (v == "1" || v == "true" || v == "yes")
+
+/-- Auto-generate PTX if TG4_TRITON_AUTOGEN is set and the PTX is missing. -/
+def autogenIfNeeded : IO Unit := do
+  if !(← envFlag "TG4_TRITON_AUTOGEN") then
+    return
+  let ptxPath := (← IO.getEnv "TG4_TRITON_PTX").getD "tmp/triton_matmul.ptx"
+  let path := System.FilePath.mk ptxPath
+  if ← path.pathExists then
+    return
+  IO.setEnv "TG4_TRITON_PTX" ptxPath true
+  let rc ← main
+  if rc != 0 then
+    throw (IO.userError "EmitTritonPTX: autogen failed")

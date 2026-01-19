@@ -2,6 +2,7 @@ import Float64
 import TinyGrad4.Backend.Cuda
 import TinyGrad4.Backend.CudaTritonMatmul
 import TinyGrad4.Backend.Native
+import TinyGrad4.Test.EmitTritonPTX
 
 private def pushF32LE (out : ByteArray) (v : Float32) : ByteArray :=
   let bits := v.toBits
@@ -53,6 +54,7 @@ private def makeData (n : Nat) (seed : Nat) : Array Float32 := Id.run do
 
 /-- Smoke test: run Triton matmul if configured in env, compare a few samples to CPU. -/
 def main : IO UInt32 := do
+  TinyGrad4.Test.EmitTritonPTX.autogenIfNeeded
   let cfg? ← TinyGrad4.Backend.CudaTritonMatmul.getConfigFromEnv
   match cfg? with
   | none =>

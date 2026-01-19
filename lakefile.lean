@@ -198,6 +198,9 @@ lean_exe io_eval_test where
 lean_exe float16_cast_smoke where
   root := `TinyGrad4.Test.Float16CastSmoke
 
+lean_exe triton_matmul_smoke where
+  root := `TinyGrad4.Test.CUDATritonMatmulSmoke
+
 lean_exe metal_matmul_test where
   root := `TinyGrad4.Test.MetalMatmulSmoke
   moreLinkArgs := metalLinkArgs

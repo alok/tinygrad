@@ -113,6 +113,7 @@ private def envNatDefault (name : String) (default : Nat) : IO Nat := do
     -/
 def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
   let ptxStr? ← IO.getEnv "TG4_TRITON_PTX"
+  let useDefault := ptxStr?.isNone
   let ptxPath? ←
     match ptxStr? with
     | some ptxStr => pure (some (System.FilePath.mk ptxStr))
@@ -127,6 +128,16 @@ def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
   | some ptxPath =>
     if !(← ptxPath.pathExists) then
       throw (IO.userError s!"CudaTritonMatmul: TG4_TRITON_PTX not found: {ptxPath}")
+    let blockM? ← envNat? "TG4_TRITON_BLOCK_M"
+    let blockN? ← envNat? "TG4_TRITON_BLOCK_N"
+    let blockK? ← envNat? "TG4_TRITON_BLOCK_K"
+    let numWarps? ← envNat? "TG4_TRITON_NUM_WARPS"
+    let expectedM? ← envNat? "TG4_TRITON_M"
+    let expectedN? ← envNat? "TG4_TRITON_N"
+    let expectedK? ← envNat? "TG4_TRITON_K"
+    if useDefault && (blockM?.isNone || blockN?.isNone || blockK?.isNone || numWarps?.isNone ||
+        expectedM?.isNone || expectedN?.isNone || expectedK?.isNone) then
+      return none
     let kernelName := (← IO.getEnv "TG4_TRITON_KERNEL").getD "matmul_kernel"
     let blockM ← requireEnvNat "TG4_TRITON_BLOCK_M"
     let blockN ← requireEnvNat "TG4_TRITON_BLOCK_N"

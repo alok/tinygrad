@@ -11,8 +11,6 @@ Generates a PTX file for a fixed-shape Triton matmul kernel using `uv`.
 - Shapes via TG4_TRITON_M/_N/_K (compile-time constants in the kernel)
 -/
 
-namespace TinyGrad4.Test.EmitTritonPTX
-
 private def envNat (name : String) (default : Nat) : IO Nat := do
   match ← IO.getEnv name with
   | none => pure default
@@ -102,7 +100,7 @@ private def pythonSource (ptxPath : String) (m n k : Nat) (blockM blockN blockK 
   ]
 
 /-- Emit Triton PTX using uv + python. -/
-@[main] def main : IO UInt32 := do
+def main : IO UInt32 := do
   let ptxPath := (← IO.getEnv "TG4_TRITON_PTX").getD "tmp/triton_matmul.ptx"
   let blockM ← envNat "TG4_TRITON_BLOCK_M" 64
   let blockN ← envNat "TG4_TRITON_BLOCK_N" 64
@@ -134,5 +132,3 @@ private def pythonSource (ptxPath : String) (m n k : Nat) (blockM blockN blockK 
 
   IO.println s!"Wrote PTX to {ptxPath}"
   return 0
-
-end TinyGrad4.Test.EmitTritonPTX

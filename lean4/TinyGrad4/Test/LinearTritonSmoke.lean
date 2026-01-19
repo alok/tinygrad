@@ -43,18 +43,20 @@ def main : IO UInt32 := do
     IO.println "Linear Triton smoke: skipped (CUDA not available)"
     return 0
 
-  let preset := TinyGrad4.Backend.CudaTritonMatmul.TritonPreset.linear
   let cfgEnv? ← TinyGrad4.Backend.CudaTritonMatmul.getConfigFromEnv
   let (m, k, n, cfg?) ←
     match cfgEnv? with
     | some cfg =>
       pure (cfg.expectedM, cfg.expectedK, cfg.expectedN, some cfg)
     | none => do
-      TinyGrad4.Backend.CudaTritonMatmul.setDefaultPreset (some preset)
       let m := 256
       let k := 256
       let n := 256
-      let cfg? ← TinyGrad4.Backend.CudaTritonMatmul.ensureConfig preset m n k
+      let preset? := TinyGrad4.Backend.CudaTritonMatmul.choosePreset .float32 m n k
+      let cfg? ←
+        match preset? with
+        | none => pure none
+        | some preset => TinyGrad4.Backend.CudaTritonMatmul.ensureConfig preset m n k
       pure (m, k, n, cfg?)
 
   match cfg? with

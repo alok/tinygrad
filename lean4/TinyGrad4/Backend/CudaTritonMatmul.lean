@@ -27,7 +27,9 @@ open TinyGrad4
 open TinyGrad4.Backend.Cuda
 
 inductive TritonPreset where
+  | linearSmall
   | linear
+  | linearLarge
   deriving Repr, DecidableEq, Inhabited
 
 structure TritonPresetParams where
@@ -38,10 +40,14 @@ structure TritonPresetParams where
   numStages : Nat
 
 private def presetParams : TritonPreset → TritonPresetParams
+  | .linearSmall => { blockM := 64, blockN := 64, blockK := 32, numWarps := 4, numStages := 2 }
   | .linear => { blockM := 64, blockN := 128, blockK := 64, numWarps := 4, numStages := 2 }
+  | .linearLarge => { blockM := 128, blockN := 128, blockK := 32, numWarps := 8, numStages := 3 }
 
 private def presetTag : TritonPreset → String
+  | .linearSmall => "linear_small"
   | .linear => "linear"
+  | .linearLarge => "linear_large"
 
 private def defaultPtxPath (preset : TritonPreset) (m n k : Nat) : System.FilePath :=
   System.FilePath.mk "tmp" / s!"triton_{presetTag preset}_{m}x{n}x{k}.ptx"
@@ -57,6 +63,22 @@ private def emitConfigForPreset (preset : TritonPreset) (m n k : Nat) : TinyGrad
     m := m,
     n := n,
     k := k }
+
+private def divisible (x y : Nat) : Bool :=
+  x % y == 0
+
+/-- Select a Triton preset for a matmul shape/dtype. -/
+def choosePreset (dtype : DType) (m n k : Nat) : Option TritonPreset :=
+  if dtype != .float16 && dtype != .float32 then
+    none
+  else if divisible m 128 && divisible n 128 && divisible k 32 then
+    some TritonPreset.linearLarge
+  else if divisible m 64 && divisible n 128 && divisible k 64 then
+    some TritonPreset.linear
+  else if divisible m 64 && divisible n 64 && divisible k 32 then
+    some TritonPreset.linearSmall
+  else
+    none
 
 /-- Configuration for a Triton-generated matmul kernel. -/
 structure TritonMatmulConfig where
@@ -307,8 +329,11 @@ def tryMatmulF32ViaF16 (a b : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) :
     | some cfg => pure (some cfg)
     | none =>
       match ← getDefaultPreset with
-      | none => pure none
       | some preset => ensureConfig preset m n k
+      | none =>
+        match choosePreset .float32 m n k with
+        | none => pure none
+        | some preset => ensureConfig preset m n k
   match cfg? with
   | none => return none
   | some cfg =>

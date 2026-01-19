@@ -15,3 +15,9 @@ Never mix functionality changes with whitespace changes. All functionality chang
 ## style
 
 Use **2-space indentation**, and keep lines to a maximum of **150 characters**. Match the existing style.
+
+## Resources
+
+- `ssh ww` should give access to 2 A6000, and an env that can run triton (unlike macos).
+
+It also lets you run `triton`, which MacOS doesn't support. (focus on linux support first).

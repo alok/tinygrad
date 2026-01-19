@@ -3,8 +3,19 @@ import TinyGrad4.Backend.Cuda
 import TinyGrad4.Backend.CudaTritonMatmul
 import TinyGrad4.Backend.Native
 
--- Disable RawBuffer linter: this test works directly with ByteArray buffers
-set_option linter.useRawBuffer false
+private def pushF32LE (out : ByteArray) (v : Float32) : ByteArray :=
+  let bits := v.toBits
+  let b0 := (bits &&& 0xFF).toUInt8
+  let b1 := ((bits >>> 8) &&& 0xFF).toUInt8
+  let b2 := ((bits >>> 16) &&& 0xFF).toUInt8
+  let b3 := ((bits >>> 24) &&& 0xFF).toUInt8
+  out.push b0 |>.push b1 |>.push b2 |>.push b3
+
+private def packF32 (vals : Array Float32) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity (vals.size * 4)
+  for v in vals do
+    out := pushF32LE out v
+  return out
 
 private def readU32LE (b : ByteArray) (offset : Nat) : UInt32 :=
   let b0 := b.get! offset
@@ -31,14 +42,14 @@ private def sampleIndices (n : Nat) : Array Nat :=
     let mid := n / 2
     #[0, 1, 2, mid, n - 1]
 
-private def makeData (n : Nat) (seed : Nat) : FloatArray := Id.run do
+private def makeData (n : Nat) (seed : Nat) : Array Float32 := Id.run do
   let mut out := Array.emptyWithCapacity n
   let mut s := UInt64.ofNat seed
   for _ in [:n] do
     s := s * 6364136223846793005 + 1
-    let v := (Float64.ofNat (s.toNat % 1000)) / 100.0
+    let v := ((Float64.ofNat (s.toNat % 1000)) / 100.0).toFloat32
     out := out.push v
-  return FloatArray.mk out
+  return out
 
 /-- Smoke test: run Triton matmul if configured in env, compare a few samples to CPU. -/
 def main : IO UInt32 := do
@@ -61,8 +72,8 @@ def main : IO UInt32 := do
 
     let aVals := makeData aNumel 123
     let bVals := makeData bNumel 456
-    let aBytes := TinyGrad4.Backend.Native.packF32FromF64 aVals
-    let bBytes := TinyGrad4.Backend.Native.packF32FromF64 bVals
+    let aBytes := packF32 aVals
+    let bBytes := packF32 bVals
 
     let aBuf : TinyGrad4.RawBuffer := { dtype := .float32, data := aBytes }
     let bBuf : TinyGrad4.RawBuffer := { dtype := .float32, data := bBytes }

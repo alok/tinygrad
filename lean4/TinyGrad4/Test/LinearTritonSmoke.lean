@@ -29,6 +29,17 @@ private def checkExpected (vals : Array Float64) (expected : Float64) : IO Bool 
       IO.println s!"Linear Triton smoke: FAIL (idx {idx} {got} != {expected})"
   return ok
 
+private def defaultEmitConfig : TinyGrad4.Test.EmitTritonPTX.EmitConfig :=
+  { ptxPath := "tmp/triton_matmul.ptx",
+    blockM := 64,
+    blockN := 128,
+    blockK := 64,
+    numWarps := 4,
+    numStages := 2,
+    m := 256,
+    n := 256,
+    k := 256 }
+
 private def buildLinear (batch inFeatures outFeatures : Nat)
     : TensorM (Matrix batch outFeatures .float32) := do
   let x ← Tensor.full [batch, inFeatures] .float32 1.0
@@ -39,18 +50,50 @@ private def buildLinear (batch inFeatures outFeatures : Nat)
 
 /-- Smoke test: build a linear layer with shapes from TG4_TRITON_* and eval via IO path. -/
 def main : IO UInt32 := do
+  let available ← TinyGrad4.Backend.Cuda.isAvailable
+  if !available then
+    IO.println "Linear Triton smoke: skipped (CUDA not available)"
+    return 0
+
   TinyGrad4.Test.EmitTritonPTX.autogenIfNeeded
   let cfg? ← TinyGrad4.Backend.CudaTritonMatmul.getConfigFromEnv
+  let cfg? ←
+    match cfg? with
+    | some cfg => pure (some cfg)
+    | none => do
+      let emitCfg := defaultEmitConfig
+      let ptxPath := System.FilePath.mk emitCfg.ptxPath
+      let existed ← ptxPath.pathExists
+      let ok ←
+        if existed then
+          pure true
+        else do
+          let rc ← TinyGrad4.Test.EmitTritonPTX.emit emitCfg
+          pure (rc == 0)
+      let ptxExists ← ptxPath.pathExists
+      if !ok || !ptxExists then
+        pure none
+      else
+        let cfg : TinyGrad4.Backend.CudaTritonMatmul.TritonMatmulConfig := {
+          kernelName := "matmul_kernel",
+          ptxPath := ptxPath,
+          blockM := emitCfg.blockM,
+          blockN := emitCfg.blockN,
+          blockK := emitCfg.blockK,
+          numWarps := emitCfg.numWarps,
+          sharedBytes := 0,
+          expectedM := emitCfg.m,
+          expectedN := emitCfg.n,
+          expectedK := emitCfg.k
+        }
+        TinyGrad4.Backend.CudaTritonMatmul.setConfig (some cfg)
+        pure (some cfg)
+
   match cfg? with
   | none =>
-    IO.println "Linear Triton smoke: skipped (TG4_TRITON_PTX not set)"
-    return 0
+    IO.println "Linear Triton smoke: FAIL (no Triton config available)"
+    return 1
   | some cfg =>
-    let available ← TinyGrad4.Backend.Cuda.isAvailable
-    if !available then
-      IO.println "Linear Triton smoke: skipped (CUDA not available)"
-      return 0
-
     let batch := cfg.expectedM
     let inFeatures := cfg.expectedK
     let outFeatures := cfg.expectedN

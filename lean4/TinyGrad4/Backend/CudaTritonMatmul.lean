@@ -126,6 +126,10 @@ def getConfigFromEnv : IO (Option TritonMatmulConfig) := do
 def clearConfigCache : IO Unit :=
   tritonConfigCache.set none
 
+/-- Override cached Triton config (useful for tests or programmatic setup). -/
+def setConfig (cfg? : Option TritonMatmulConfig) : IO Unit :=
+  tritonConfigCache.set (some cfg?)
+
 /-- Load a PTX module from disk and bind the kernel. -/
 private def loadKernel (cfg : TritonMatmulConfig) : IO CUDAProgram := do
   let ptx ← IO.FS.readFile cfg.ptxPath

@@ -13,6 +13,17 @@ Generates a PTX file for a fixed-shape Triton matmul kernel using `uv`.
 
 namespace TinyGrad4.Test.EmitTritonPTX
 
+structure EmitConfig where
+  ptxPath : String := "tmp/triton_matmul.ptx"
+  blockM : Nat := 64
+  blockN : Nat := 64
+  blockK : Nat := 32
+  numWarps : Nat := 4
+  numStages : Nat := 2
+  m : Nat := 256
+  n : Nat := 256
+  k : Nat := 256
+
 private def envNat (name : String) (default : Nat) : IO Nat := do
   match ← IO.getEnv name with
   | none => pure default
@@ -101,21 +112,13 @@ private def pythonSource (ptxPath : String) (m n k : Nat) (blockM blockN blockK 
     s!"  emit_ptx(\"{ptxPath}\")"
   ]
 
-/-- Emit Triton PTX using uv + python. -/
-def emitMain : IO UInt32 := do
-  let ptxPath := (← IO.getEnv "TG4_TRITON_PTX").getD "tmp/triton_matmul.ptx"
-  let blockM ← envNat "TG4_TRITON_BLOCK_M" 64
-  let blockN ← envNat "TG4_TRITON_BLOCK_N" 64
-  let blockK ← envNat "TG4_TRITON_BLOCK_K" 32
-  let numWarps ← envNat "TG4_TRITON_NUM_WARPS" 4
-  let numStages ← envNat "TG4_TRITON_NUM_STAGES" 2
-  let m ← envNat "TG4_TRITON_M" 256
-  let n ← envNat "TG4_TRITON_N" 256
-  let k ← envNat "TG4_TRITON_K" 256
-
+/-- Emit Triton PTX for an explicit config. -/
+def emit (cfg : EmitConfig) : IO UInt32 := do
   let scriptPath := System.FilePath.mk "tmp" / "emit_triton_ptx.py"
   IO.FS.createDirAll (scriptPath.parent.getD (System.FilePath.mk "."))
-  let source := pythonSource ptxPath m n k blockM blockN blockK numWarps numStages
+  let source :=
+    pythonSource cfg.ptxPath cfg.m cfg.n cfg.k
+      cfg.blockM cfg.blockN cfg.blockK cfg.numWarps cfg.numStages
   IO.FS.writeFile scriptPath source
 
   let uv ← findUv
@@ -132,8 +135,31 @@ def emitMain : IO UInt32 := do
     IO.eprintln out.stderr
     return 1
 
-  IO.println s!"Wrote PTX to {ptxPath}"
+  IO.println s!"Wrote PTX to {cfg.ptxPath}"
   return 0
+
+/-- Emit Triton PTX using uv + python. -/
+def emitMain : IO UInt32 := do
+  let ptxPath := (← IO.getEnv "TG4_TRITON_PTX").getD "tmp/triton_matmul.ptx"
+  let blockM ← envNat "TG4_TRITON_BLOCK_M" 64
+  let blockN ← envNat "TG4_TRITON_BLOCK_N" 64
+  let blockK ← envNat "TG4_TRITON_BLOCK_K" 32
+  let numWarps ← envNat "TG4_TRITON_NUM_WARPS" 4
+  let numStages ← envNat "TG4_TRITON_NUM_STAGES" 2
+  let m ← envNat "TG4_TRITON_M" 256
+  let n ← envNat "TG4_TRITON_N" 256
+  let k ← envNat "TG4_TRITON_K" 256
+  emit {
+    ptxPath,
+    blockM,
+    blockN,
+    blockK,
+    numWarps,
+    numStages,
+    m,
+    n,
+    k
+  }
 
 private def envFlag (name : String) : IO Bool := do
   match ← IO.getEnv name with

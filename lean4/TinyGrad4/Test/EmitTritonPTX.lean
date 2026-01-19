@@ -102,7 +102,7 @@ private def pythonSource (ptxPath : String) (m n k : Nat) (blockM blockN blockK 
   ]
 
 /-- Emit Triton PTX using uv + python. -/
-def main : IO UInt32 := do
+@[main] def main : IO UInt32 := do
   let ptxPath := (← IO.getEnv "TG4_TRITON_PTX").getD "tmp/triton_matmul.ptx"
   let blockM ← envNat "TG4_TRITON_BLOCK_M" 64
   let blockN ← envNat "TG4_TRITON_BLOCK_N" 64

@@ -282,6 +282,10 @@ lean_exe linear_triton_bias_smoke where
   root := `TinyGrad4.Test.LinearTritonBiasSmoke
   moreLinkArgs := metalLinkArgs
 
+lean_exe linear_triton_bias_batched_smoke where
+  root := `TinyGrad4.Test.LinearTritonBiasBatchedSmoke
+  moreLinkArgs := metalLinkArgs
+
 lean_exe emit_triton_ptx where
   root := `TinyGrad4.Test.EmitTritonPTXMain
 

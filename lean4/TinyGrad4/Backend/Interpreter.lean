@@ -1141,9 +1141,10 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
     let hasScale := plan.scaleBits.isSome
     let hasRelu := plan.relu
     let fast := plan.aFast && plan.bFast && (plan.biasNumel == 0 || plan.biasFast)
-    let useTriton := !plan.needsStack && !isBatched && !hasBias2 && !hasScale && !hasRelu && fast
+    let useTriton2D := !plan.needsStack && !isBatched && !hasBias2 && !hasScale && !hasRelu && fast
+    let useTritonBatched := !plan.needsStack && isBatched && !hasBias2 && !hasScale && !hasRelu && fast
 
-    if !useTriton then
+    if !useTriton2D && !useTritonBatched then
       return evalFusedMatmulBias u plan env cache
 
     let aFallback := env.getD plan.aBase (RawBuffer.zeros .float32 0)
@@ -1160,6 +1161,17 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
       | d :: ds => d == 1 && isBiasShape ds
     let simpleBias :=
       plan.biasNumel == plan.n && plan.biasFast && isBiasShape plan.biasShape.toList
+    if useTritonBatched then
+      if plan.biasNumel == 0 then
+        match (← CudaTritonMatmul.tryMatmulBatchedF32ViaF16 aBuf bBuf plan.m plan.k plan.n plan.aStarts plan.bStarts) with
+        | some out => return out
+        | none => return evalFusedMatmulBias u plan env cache
+      if simpleBias && plan.biasStarts.size == plan.aStarts.size then
+        match (← CudaTritonMatmul.tryMatmulBatchedF32ViaF16Bias aBuf bBuf biasBuf plan.m plan.k plan.n plan.aStarts plan.bStarts plan.biasStarts) with
+        | some out => return out
+        | none => return evalFusedMatmulBias u plan env cache
+      return evalFusedMatmulBias u plan env cache
+
     if plan.biasNumel != 0 && simpleBias then
       match (← CudaTritonMatmul.tryMatmulF32ViaF16Bias aBuf bBuf biasBuf plan.m plan.k plan.n) with
       | some out => return out

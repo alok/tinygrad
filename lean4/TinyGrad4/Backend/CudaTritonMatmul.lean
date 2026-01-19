@@ -583,6 +583,54 @@ private def padKernelArgs (bufs : Array CUDABuffer) (count : Nat) (fill : CUDABu
   let outF32 := Native.f16ToF32 outF16.data
   pure { dtype := .float32, data := outF32 }
 
+/-- Execute batched Triton matmul for float32 inputs via host loop. -/
+@[inline] def matmulBatchedF32ViaF16 (cfg : TritonMatmulConfig)
+    (a b : RawBuffer) (m k n : Nat) (aStarts bStarts : Array Nat) : IO RawBuffer := do
+  let numBatches := aStarts.size
+  ensure (bStarts.size == numBatches) "CudaTritonMatmul: batch sizes mismatch"
+  if numBatches == 0 then
+    return { dtype := .float32, data := ByteArray.empty }
+  let aBytes := m * k * 4
+  let bBytes := k * n * 4
+  let mut out := ByteArray.emptyWithCapacity (numBatches * m * n * 4)
+  for i in [:numBatches] do
+    let aStart := aStarts[i]!
+    let bStart := bStarts[i]!
+    let aSlice := a.data.extract aStart (aStart + aBytes)
+    let bSlice := b.data.extract bStart (bStart + bBytes)
+    let aBuf : RawBuffer := { dtype := .float32, data := aSlice }
+    let bBuf : RawBuffer := { dtype := .float32, data := bSlice }
+    let batchOut ← matmulF32ViaF16 cfg aBuf bBuf m k n
+    out := out ++ batchOut.data
+  pure { dtype := .float32, data := out }
+
+/-- Execute batched Triton matmul with bias for float32 inputs via host loop. -/
+@[inline] def matmulBatchedF32ViaF16Bias (cfg : TritonMatmulConfig)
+    (a b bias : RawBuffer) (m k n : Nat)
+    (aStarts bStarts biasStarts : Array Nat) : IO RawBuffer := do
+  let numBatches := aStarts.size
+  ensure (bStarts.size == numBatches) "CudaTritonMatmul: batch sizes mismatch"
+  ensure (biasStarts.size == numBatches) "CudaTritonMatmul: bias batch sizes mismatch"
+  if numBatches == 0 then
+    return { dtype := .float32, data := ByteArray.empty }
+  let aBytes := m * k * 4
+  let bBytes := k * n * 4
+  let biasBytes := n * 4
+  let mut out := ByteArray.emptyWithCapacity (numBatches * m * n * 4)
+  for i in [:numBatches] do
+    let aStart := aStarts[i]!
+    let bStart := bStarts[i]!
+    let biasStart := biasStarts[i]!
+    let aSlice := a.data.extract aStart (aStart + aBytes)
+    let bSlice := b.data.extract bStart (bStart + bBytes)
+    let biasSlice := bias.data.extract biasStart (biasStart + biasBytes)
+    let aBuf : RawBuffer := { dtype := .float32, data := aSlice }
+    let bBuf : RawBuffer := { dtype := .float32, data := bSlice }
+    let biasBuf : RawBuffer := { dtype := .float32, data := biasSlice }
+    let batchOut ← matmulF32ViaF16Bias cfg aBuf bBuf biasBuf m k n
+    out := out ++ batchOut.data
+  pure { dtype := .float32, data := out }
+
 /-- Attempt Triton matmul for float32 inputs if configured and CUDA is available. -/
 def tryMatmulF32ViaF16 (a b : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) := do
   if a.dtype != .float32 || b.dtype != .float32 then
@@ -641,6 +689,70 @@ def tryMatmulF32ViaF16Bias (a b bias : RawBuffer) (m k n : Nat) : IO (Option Raw
       return none
     try
       let out ← matmulF32ViaF16Bias cfg a b bias m k n
+      return some out
+    catch _ =>
+      return none
+
+/-- Attempt batched Triton matmul for float32 inputs if configured and CUDA is available. -/
+def tryMatmulBatchedF32ViaF16 (a b : RawBuffer) (m k n : Nat)
+    (aStarts bStarts : Array Nat) : IO (Option RawBuffer) := do
+  if a.dtype != .float32 || b.dtype != .float32 then
+    return none
+  let available ← TinyGrad4.Backend.Cuda.isAvailable
+  if !available then
+    return none
+  let cfg? ← getConfigFromEnv
+  let cfg? ←
+    match cfg? with
+    | some cfg => pure (some cfg)
+    | none =>
+      match ← getDefaultPreset with
+      | some preset => ensureConfig preset m n k
+      | none =>
+        match choosePreset .float32 m n k with
+        | none => pure none
+        | some preset => ensureConfig preset m n k
+  match cfg? with
+  | none => return none
+  | some cfg =>
+    if m != cfg.expectedM || n != cfg.expectedN || k != cfg.expectedK then
+      return none
+    if m % cfg.blockM != 0 || n % cfg.blockN != 0 || k % cfg.blockK != 0 then
+      return none
+    try
+      let out ← matmulBatchedF32ViaF16 cfg a b m k n aStarts bStarts
+      return some out
+    catch _ =>
+      return none
+
+/-- Attempt batched Triton matmul with bias for float32 inputs if CUDA is available. -/
+def tryMatmulBatchedF32ViaF16Bias (a b bias : RawBuffer) (m k n : Nat)
+    (aStarts bStarts biasStarts : Array Nat) : IO (Option RawBuffer) := do
+  if a.dtype != .float32 || b.dtype != .float32 || bias.dtype != .float32 then
+    return none
+  let available ← TinyGrad4.Backend.Cuda.isAvailable
+  if !available then
+    return none
+  let cfgEnv? ← getBiasConfigFromEnv
+  let cfg? ←
+    match cfgEnv? with
+    | some cfg => pure (some cfg)
+    | none =>
+      match ← getDefaultPreset with
+      | some preset => ensureConfigBias preset m n k
+      | none =>
+        match choosePreset .float32 m n k with
+        | none => pure none
+        | some preset => ensureConfigBias preset m n k
+  match cfg? with
+  | none => return none
+  | some cfg =>
+    if m != cfg.expectedM || n != cfg.expectedN || k != cfg.expectedK then
+      return none
+    if m % cfg.blockM != 0 || n % cfg.blockN != 0 || k % cfg.blockK != 0 then
+      return none
+    try
+      let out ← matmulBatchedF32ViaF16Bias cfg a b bias m k n aStarts bStarts biasStarts
       return some out
     catch _ =>
       return none

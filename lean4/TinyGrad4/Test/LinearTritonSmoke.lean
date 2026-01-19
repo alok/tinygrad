@@ -8,6 +8,26 @@ import TinyGrad4.Backend.Interpreter
 
 open TinyGrad4
 
+private def approxEq (a b : Float64) (eps : Float64 := 1.0e-2) : Bool :=
+  Float64.abs (a - b) <= eps
+
+private def checkExpected (vals : Array Float64) (expected : Float64) : IO Bool := do
+  if vals.isEmpty then
+    IO.println "Linear Triton smoke: FAIL (no output values)"
+    return false
+  let idxs :=
+    if vals.size <= 2 then
+      (List.range vals.size)
+    else
+      [0, vals.size / 2, vals.size - 1]
+  let mut ok := true
+  for idx in idxs do
+    let got := vals[idx]!
+    if !approxEq got expected then
+      ok := false
+      IO.println s!"Linear Triton smoke: FAIL (idx {idx} {got} != {expected})"
+  return ok
+
 private def buildLinear (batch inFeatures outFeatures : Nat)
     : TensorM (Matrix batch outFeatures .float32) := do
   let x ← Tensor.full [batch, inFeatures] .float32 1.0
@@ -38,6 +58,11 @@ def main : IO UInt32 := do
     let expectedBytes := batch * outFeatures * 4
     if out.data.size != expectedBytes then
       IO.println s!"Linear Triton smoke: FAIL (size {out.data.size} != {expectedBytes})"
+      return 1
+    let expected := Float64.ofNat inFeatures + 0.5
+    let vals := RawBuffer.unpackF32Bytes out.data
+    let ok ← checkExpected vals expected
+    if !ok then
       return 1
 
     IO.println "Linear Triton smoke: ok"

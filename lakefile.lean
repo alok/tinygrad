@@ -148,7 +148,11 @@ extern_lib tg4c pkg := do
         pure false
       else
         match configBool? `cuda with
-        | some true => checkCudaAvailable
+        | some true =>
+          let available ← checkCudaAvailable
+          if !available then
+            IO.eprintln "Warning: CUDA requested but not detected; continuing anyway"
+          pure true
         | _ => pure false
     let cFlagsWithCuda := if hasCuda then cFlags ++ #["-DTG4_HAS_CUDA"] else cFlags
     -- Build C files with Lake's clang

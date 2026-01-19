@@ -8,6 +8,7 @@ Generates a PTX file for a fixed-shape Triton matmul kernel using `uv`.
 - Override with TG4_TRITON_PTX
 - Kernel name via TG4_TRITON_KERNEL
 - Bias kernel via TG4_TRITON_WITH_BIAS
+- Force re-emit via TG4_TRITON_FORCE
 - Block sizes via TG4_TRITON_BLOCK_M/_N/_K
 - Warp/stage via TG4_TRITON_NUM_WARPS, TG4_TRITON_NUM_STAGES
 - Shapes via TG4_TRITON_M/_N/_K (compile-time constants in the kernel)
@@ -138,10 +139,20 @@ private def pythonSource (cfg : EmitConfig) : String :=
     s!"  emit_ptx(\"{cfg.ptxPath.toString}\")"
   ]
 
+private def envFlag (name : String) : IO Bool := do
+  match ← IO.getEnv name with
+  | none => pure false
+  | some v =>
+    let v := v.toLower
+    pure (v == "1" || v == "true" || v == "yes")
+
 /-- Emit Triton PTX for an explicit config. -/
 def emit (cfg : EmitConfig) : IO UInt32 := do
   let scriptPath := System.FilePath.mk "tmp" / "emit_triton_ptx.py"
   IO.FS.createDirAll (scriptPath.parent.getD (System.FilePath.mk "."))
+  if (← cfg.ptxPath.pathExists) && !(← envFlag "TG4_TRITON_FORCE") then
+    IO.println s!"PTX already exists at {cfg.ptxPath}, skipping emit"
+    return 0
   let source := pythonSource cfg
   IO.FS.writeFile scriptPath source
 
@@ -206,13 +217,6 @@ def configFromEnv : IO EmitConfig := do
 def emitFromEnv : IO UInt32 := do
   let cfg ← configFromEnv
   emit cfg
-
-private def envFlag (name : String) : IO Bool := do
-  match ← IO.getEnv name with
-  | none => pure false
-  | some v =>
-    let v := v.toLower
-    pure (v == "1" || v == "true" || v == "yes")
 
 /-- Auto-generate PTX if TG4_TRITON_AUTOGEN is set and the PTX is missing. -/
 def autogenIfNeeded : IO Unit := do

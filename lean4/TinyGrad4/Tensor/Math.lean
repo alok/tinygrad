@@ -750,13 +750,23 @@ def linear {batch inDim outDim : Nat} {d : DType}
     : TensorM (Matrix batch outDim d) := do
   matmul x w
 
+/-- Fully-connected layer with optional bias: X @ W (+ b) -/
+def linearOpt {batch inDim outDim : Nat} {d : DType}
+    (x : Matrix batch inDim d) (w : Matrix inDim outDim d)
+    (bias : Option (Vector outDim d) := none)
+    : TensorM (Matrix batch outDim d) := do
+  let y ← matmul x w
+  match bias with
+  | none => pure y
+  | some b =>
+    let yb ← addB y b
+    pure { uop := yb.uop, h_shape := sorry_proof, requiresGrad := yb.requiresGrad }
+
 /-- Fully-connected layer with bias: X @ W + b (broadcasted over batch). -/
 def linearBias {batch inDim outDim : Nat} {d : DType}
     (x : Matrix batch inDim d) (w : Matrix inDim outDim d) (b : Vector outDim d)
     : TensorM (Matrix batch outDim d) := do
-  let y ← matmul x w
-  let yb ← addB y b
-  pure { uop := yb.uop, h_shape := sorry_proof, requiresGrad := yb.requiresGrad }
+  linearOpt x w (some b)
 
 /-- Batched matrix multiplication with broadcast on the batch dim:
     [b1, m, k] @ [b2, k, n] -> [max b1 b2, m, n]. -/

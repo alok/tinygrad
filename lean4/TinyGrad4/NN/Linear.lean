@@ -50,14 +50,7 @@ def create (inFeatures outFeatures : Nat) (dt : DType := .float32) (useBias : Bo
 def forward {batch : Nat} (params : LinearParams inFeatures outFeatures dt)
     (x : Matrix batch inFeatures dt) : TensorM (Matrix batch outFeatures dt) := do
   -- x @ W: [batch, in] @ [in, out] = [batch, out]
-  let y ← matmul x params.weight
-
-  match params.bias with
-  | none => pure y
-  | some b =>
-    -- Add bias with broadcasting
-    let yb ← addB y b
-    pure { uop := yb.uop, h_shape := sorry_proof, requiresGrad := yb.requiresGrad }
+  linearOpt x params.weight params.bias
 
 /-- Get all trainable parameters -/
 def parameters (params : LinearParams inFeatures outFeatures dt)
@@ -74,11 +67,6 @@ def linear' {batch inFeatures outFeatures : Nat} {dt : DType}
     (weight : Matrix inFeatures outFeatures dt)
     (bias : Option (Vector outFeatures dt) := none)
     : TensorM (Matrix batch outFeatures dt) := do
-  let y ← matmul x weight
-  match bias with
-  | none => pure y
-  | some b =>
-    let yb ← addB y b
-    pure { uop := yb.uop, h_shape := sorry_proof, requiresGrad := yb.requiresGrad }
+  linearOpt x weight bias
 
 end TinyGrad4.NN

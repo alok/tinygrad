@@ -148,7 +148,7 @@ def autogenIfNeeded : IO Unit := do
   let path := System.FilePath.mk ptxPath
   if ← path.pathExists then
     return
-  IO.setEnv "TG4_TRITON_PTX" ptxPath true
+  IO.setEnvVar "TG4_TRITON_PTX" ptxPath
   let rc ← main
   if rc != 0 then
     throw (IO.userError "EmitTritonPTX: autogen failed")

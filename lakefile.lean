@@ -106,13 +106,12 @@ def checkCudaAvailable : IO Bool := do
   return hasCudaLib && hasNvrtcLib
 
 def cudaLinkArgs : Array String :=
-  #["-L/usr/lib/x86_64-linux-gnu",
+  #["/usr/lib/x86_64-linux-gnu/libcuda.so",
     "-L/usr/local/cuda/lib64",
     "-L/home/alok/cuda-12.4/lib64",
-    "-Wl,-rpath,/usr/lib/x86_64-linux-gnu",
     "-Wl,-rpath,/usr/local/cuda/lib64",
     "-Wl,-rpath,/home/alok/cuda-12.4/lib64",
-    "-lcuda", "-lnvrtc", "-lstdc++"]
+    "-lnvrtc", "-lstdc++"]
 
 -- Linker args for Metal + Accelerate FFI (macOS only)
 -- Required for any executable that links libtg4c.a

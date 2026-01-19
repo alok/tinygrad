@@ -77,10 +77,18 @@ private def envNatDefault (name : String) (default : Nat) : IO Nat := do
     -/
 def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
   let ptxStr? ← IO.getEnv "TG4_TRITON_PTX"
-  match ptxStr? with
+  let ptxPath? ←
+    match ptxStr? with
+    | some ptxStr => pure (some (System.FilePath.mk ptxStr))
+    | none =>
+      let defaultPath := System.FilePath.mk "tmp" / "triton_matmul.ptx"
+      if ← defaultPath.pathExists then
+        pure (some defaultPath)
+      else
+        pure none
+  match ptxPath? with
   | none => return none
-  | some ptxStr =>
-    let ptxPath := System.FilePath.mk ptxStr
+  | some ptxPath =>
     if !(← ptxPath.pathExists) then
       throw (IO.userError s!"CudaTritonMatmul: TG4_TRITON_PTX not found: {ptxPath}")
     let kernelName := (← IO.getEnv "TG4_TRITON_KERNEL").getD "matmul_kernel"

@@ -3883,9 +3883,21 @@ LEAN_EXPORT lean_obj_res tg4_cuda_compile(b_lean_obj_arg name, b_lean_obj_arg so
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
+LEAN_EXPORT lean_obj_res tg4_cuda_load_ptx(b_lean_obj_arg name, b_lean_obj_arg ptx, lean_object* world) {
+  (void)name; (void)ptx; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
 LEAN_EXPORT lean_obj_res tg4_cuda_launch_2d(b_lean_obj_arg prog, b_lean_obj_arg bufs,
     b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg bx, b_lean_obj_arg by_, lean_object* world) {
   (void)prog; (void)bufs; (void)gx; (void)gy; (void)bx; (void)by_; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_launch_grid_2d(b_lean_obj_arg prog, b_lean_obj_arg bufs,
+    b_lean_obj_arg gx, b_lean_obj_arg gy, b_lean_obj_arg bx, b_lean_obj_arg by_,
+    b_lean_obj_arg shared_mem, lean_object* world) {
+  (void)prog; (void)bufs; (void)gx; (void)gy; (void)bx; (void)by_; (void)shared_mem; (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
@@ -4052,6 +4064,12 @@ LEAN_EXPORT lean_obj_res tg4_metal_matmul_sync(b_lean_obj_arg a, b_lean_obj_arg 
 
 LEAN_EXPORT lean_obj_res tg4_metal_wrap_bytes_nocopy(b_lean_obj_arg data, lean_object* world) {
   (void)data; (void)world;
+  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_metal_wrap_bytes_nocopy_strict(b_lean_obj_arg data, b_lean_obj_arg offset,
+    b_lean_obj_arg len, lean_object* world) {
+  (void)data; (void)offset; (void)len; (void)world;
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("Metal not available (not macOS)")));
 }
 

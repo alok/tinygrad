@@ -42,7 +42,19 @@ def dropSuffix (s suf : String) : String :=
 
 def checkNvcc : IO Bool := do
   let out ← IO.Process.output { cmd := "which", args := #["nvcc"] }
-  return out.exitCode == 0
+  if out.exitCode == 0 then
+    return true
+  let home := (← IO.getEnv "HOME").getD ""
+  let candidates := #[
+    "/usr/local/cuda/bin/nvcc",
+    "/usr/local/cuda-12.4/bin/nvcc",
+    home ++ "/cuda/bin/nvcc",
+    home ++ "/cuda-12.4/bin/nvcc"
+  ]
+  for path in candidates do
+    if ← FilePath.pathExists path then
+      return true
+  return false
 
 def cudaLinkArgs : Array String :=
   #["-L/usr/lib/x86_64-linux-gnu",

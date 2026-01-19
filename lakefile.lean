@@ -201,6 +201,9 @@ lean_exe float16_cast_smoke where
 lean_exe triton_matmul_smoke where
   root := `TinyGrad4.Test.CUDATritonMatmulSmoke
 
+lean_exe linear_triton_smoke where
+  root := `TinyGrad4.Test.LinearTritonSmoke
+
 lean_exe metal_matmul_test where
   root := `TinyGrad4.Test.MetalMatmulSmoke
   moreLinkArgs := metalLinkArgs

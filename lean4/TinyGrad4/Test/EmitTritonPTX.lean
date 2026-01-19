@@ -11,6 +11,8 @@ Generates a PTX file for a fixed-shape Triton matmul kernel using `uv`.
 - Shapes via TG4_TRITON_M/_N/_K (compile-time constants in the kernel)
 -/
 
+namespace TinyGrad4.Test.EmitTritonPTX
+
 private def envNat (name : String) (default : Nat) : IO Nat := do
   match ← IO.getEnv name with
   | none => pure default
@@ -151,3 +153,5 @@ def autogenIfNeeded : IO Unit := do
   let rc ← emitMain
   if rc != 0 then
     throw (IO.userError "EmitTritonPTX: autogen failed")
+
+end TinyGrad4.Test.EmitTritonPTX

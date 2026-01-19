@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Schedule
 import TinyGrad4.Backend.Device
 import Std.Data.HashMap

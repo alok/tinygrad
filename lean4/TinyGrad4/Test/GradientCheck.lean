@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -87,7 +88,7 @@ def testSquareGradient : IO Unit := do
   | some (xVal, x2Val, lossVal, gradVal, gradOp, gradArg) =>
     let grad := gradVal[0]!
     let expected := 6.0  -- d/dx(x^2) at x=3 is 2*3 = 6
-    let diff := Float.abs (grad - expected)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.01
     IO.println s!"Test x^2 gradient:"
     IO.println s!"  Forward x: {xVal.reprAsString}"
@@ -129,7 +130,7 @@ def testMulGradient : IO Unit := do
   IO.println s!"  d/dy(x*y) at x=2,y=5: {gradY.getD 0} (expected: 2.0)"
   match gradX, gradY with
   | some gx, some gy =>
-    let pass := Float.abs (gx - 5.0) < 0.01 && Float.abs (gy - 2.0) < 0.01
+    let pass := Float64.abs (gx - 5.0) < 0.01 && Float64.abs (gy - 2.0) < 0.01
     IO.println s!"  PASS: {if pass then "true" else "false"}"
   | _, _ => IO.println "  FAIL: Missing gradients"
 
@@ -163,8 +164,8 @@ def testMatrixMulGradient : IO Unit := do
   match gradA, gradB with
   | some ga, some gb =>
     -- Check all elements of gradA are 3.0 and gradB are 2.0
-    let gaOk := (List.range ga.numF32).all fun i => Float.abs (ga.getF32 i - 3.0) < 0.01
-    let gbOk := (List.range gb.numF32).all fun i => Float.abs (gb.getF32 i - 2.0) < 0.01
+    let gaOk := (List.range ga.numF32).all fun i => Float64.abs (ga.getF32 i - 3.0) < 0.01
+    let gbOk := (List.range gb.numF32).all fun i => Float64.abs (gb.getF32 i - 2.0) < 0.01
     IO.println s!"  PASS: {if gaOk && gbOk then "true" else "false"}"
   | _, _ => IO.println "  FAIL: Missing gradients"
 
@@ -190,18 +191,18 @@ def testChainRule : IO Unit := do
   IO.println s!"  Computed gradient: {result}"
   match result with
   | some g =>
-    let pass := Float.abs (g - 6.0) < 0.01
+    let pass := Float64.abs (g - 6.0) < 0.01
     IO.println s!"  PASS: {if pass then "true" else "false"}"
   | none => IO.println "  FAIL: No gradient"
 
-private def assertAllClose (arr : RawBuffer) (expected : Array Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : RawBuffer) (expected : Array Float64) (tol : Float64) (label : String) : IO Unit := do
   let n := arr.numF32
   if n != expected.size then
     throw (IO.userError s!"{label}: size {n} != {expected.size}")
   for i in [:n] do
     let v := arr.getF32 i
     let e := expected[i]!
-    let diff := Float.abs (v - e)
+    let diff := Float64.abs (v - e)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {e} diff {diff} > {tol}")
 
@@ -253,8 +254,8 @@ def testSinGradient : IO Unit := do
   match result with
   | some gradArr =>
     let grad := gradArr[0]!
-    let expected := Float.cos 0.5  -- d/dx sin(x) = cos(x)
-    let diff := Float.abs (grad - expected)
+    let expected := Float64.cos 0.5  -- d/dx sin(x) = cos(x)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.01
     IO.println s!"Test sin gradient:"
     IO.println s!"  Autodiff: {grad}, Expected cos(0.5): {expected}"
@@ -276,8 +277,8 @@ def testCosGradient : IO Unit := do
   match result with
   | some gradArr =>
     let grad := gradArr[0]!
-    let expected := -Float.sin 0.5  -- d/dx cos(x) = -sin(x)
-    let diff := Float.abs (grad - expected)
+    let expected := -Float64.sin 0.5  -- d/dx cos(x) = -sin(x)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.01
     IO.println s!"Test cos gradient:"
     IO.println s!"  Autodiff: {grad}, Expected -sin(0.5): {expected}"
@@ -299,9 +300,9 @@ def testTanGradient : IO Unit := do
   match result with
   | some gradArr =>
     let grad := gradArr[0]!
-    let tanVal := Float.tan 0.3
+    let tanVal := Float64.tan 0.3
     let expected := 1.0 + tanVal * tanVal  -- sec^2(x) = 1 + tan^2(x)
-    let diff := Float.abs (grad - expected)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.01
     IO.println s!"Test tan gradient:"
     IO.println s!"  Autodiff: {grad}, Expected 1+tan^2(0.3): {expected}"
@@ -326,7 +327,7 @@ def testPowGradientBase : IO Unit := do
     let grad := gradArr[0]!
     -- d/db b^e = e * b^(e-1) = 3 * 2^2 = 12
     let expected := 3.0 * 4.0
-    let diff := Float.abs (grad - expected)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.1
     IO.println s!"Test pow gradient (d/db):"
     IO.println s!"  Autodiff: {grad}, Expected 3*2^2=12: {expected}"
@@ -350,7 +351,7 @@ def testExp2Gradient : IO Unit := do
     let grad := gradArr[0]!
     let ln2 := 0.6931471805599453
     let expected := 4.0 * ln2  -- 2^2 * ln(2) ≈ 2.77
-    let diff := Float.abs (grad - expected)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.01
     IO.println s!"Test exp2 gradient:"
     IO.println s!"  Autodiff: {grad}, Expected 4*ln(2): {expected}"
@@ -374,7 +375,7 @@ def testLog2Gradient : IO Unit := do
     let grad := gradArr[0]!
     let ln2 := 0.6931471805599453
     let expected := 1.0 / (4.0 * ln2)  -- 1/(4 * ln(2)) ≈ 0.36
-    let diff := Float.abs (grad - expected)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.01
     IO.println s!"Test log2 gradient:"
     IO.println s!"  Autodiff: {grad}, Expected 1/(4*ln2): {expected}"
@@ -397,7 +398,7 @@ def testSqrtGradient : IO Unit := do
   | some gradArr =>
     let grad := gradArr[0]!
     let expected := 1.0 / (2.0 * 2.0)  -- 1/(2*sqrt(4)) = 0.25
-    let diff := Float.abs (grad - expected)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.01
     IO.println s!"Test sqrt gradient:"
     IO.println s!"  Autodiff: {grad}, Expected 1/(2*2)=0.25: {expected}"
@@ -420,7 +421,7 @@ def testReciprocalGradient : IO Unit := do
   | some gradArr =>
     let grad := gradArr[0]!
     let expected := -1.0 / 4.0  -- -1/x^2 = -1/4 = -0.25
-    let diff := Float.abs (grad - expected)
+    let diff := Float64.abs (grad - expected)
     let pass := diff < 0.01
     IO.println s!"Test reciprocal gradient:"
     IO.println s!"  Autodiff: {grad}, Expected -1/4=-0.25: {expected}"

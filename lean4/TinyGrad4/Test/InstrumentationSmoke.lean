@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Benchmark.Instrumentation
 import TinyGrad4.Backend.Metal
 

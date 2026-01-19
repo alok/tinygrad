@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.DType
 import TinyGrad4.UOp.UOp
 import TinyGrad4.Backend.Schedule

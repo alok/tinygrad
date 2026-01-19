@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Basic
 import TinyGrad4.Shape
 import TinyGrad4.DType
@@ -5,7 +6,7 @@ import TinyGrad4.Backend.Buffer
 
 namespace TinyGrad4
 
--- Disable RawBuffer linter: uses Array Float for internal packF32 helper
+-- Disable RawBuffer linter: uses Array Float64 for internal packF32 helper
 set_option linter.useRawBuffer false
 
 /-- Packed data array with static shape and dtype at the type level. -/
@@ -47,10 +48,10 @@ private def pushBytes (out : ByteArray) (bytes : Array UInt8) : ByteArray := Id.
     acc := acc.push b
   return acc
 
-private def packF32 (vals : Array Float) : ByteArray := Id.run do
+private def packF32 (vals : Array Float64) : ByteArray := Id.run do
   let mut out := ByteArray.emptyWithCapacity (vals.size * 4)
   for v in vals do
-    let bits := (Float.toFloat32 v).toBits
+    let bits := (Float64.toFloat32 v).toBits
     out := pushBytes out (bytesFromUInt32 bits)
   return out
 
@@ -63,8 +64,8 @@ private def packI16 (vals : Array Int16) : ByteArray := Id.run do
     out := pushBytes out (bytesFromUInt16 (int16ToUInt16 v))
   return out
 
-/-- Construct float32 data from an Array Float (pads or truncates to shape). -/
-def ofArrayF32 (shape : Shape) (vals : Array Float) : DataArrayN shape .float32 :=
+/-- Construct float32 data from an Array Float64 (pads or truncates to shape). -/
+def ofArrayF32 (shape : Shape) (vals : Array Float64) : DataArrayN shape .float32 :=
   let expected := Shape.numel shape
   let vals' :=
     if vals.size == expected then

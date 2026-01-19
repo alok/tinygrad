@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 import TinyGrad4.Test.BroadcastOpSmoke
@@ -24,6 +25,7 @@ import TinyGrad4.Test.MatmulViewFusionSmoke
 import TinyGrad4.Test.NoopMovementOptSmoke
 import TinyGrad4.Test.NotationSmoke
 import TinyGrad4.Test.OptimInterfaceSmoke
+import TinyGrad4.Test.GatherScatterSmoke
 import TinyGrad4.Test.ReduceAxisFinSmoke
 import TinyGrad4.Test.ValidateSmoke
 import TinyGrad4.Test.ViewFusionSmoke
@@ -71,6 +73,7 @@ def runAll : IO Unit := do
   TinyGrad4.Test.DataArrayNSmallDtypeSmoke.runAll
   TinyGrad4.Test.MathOpsSmoke.runAll
   TinyGrad4.Test.MatmulViewFusionSmoke.runAll
+  TinyGrad4.Test.GatherScatterSmoke.runAll
   TinyGrad4.Test.WeightInitSmoke.runAll
   TinyGrad4.Test.ViewFusionSmoke.runAll
   TinyGrad4.Test.ViewStackFusionSmoke.runAll

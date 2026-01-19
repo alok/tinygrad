@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Device
 
 /-!
@@ -59,10 +60,19 @@ opaque cudaCopyOutBytes : @& CUDABuffer → @& Nat → IO ByteArray
 @[extern "tg4_cuda_compile"]
 opaque cudaCompile : @& String → @& String → IO CUDAProgram
 
+/-- Load precompiled PTX and bind a kernel -/
+@[extern "tg4_cuda_load_ptx"]
+opaque cudaLoadPTX : @& String → @& String → IO CUDAProgram
+
 /-- Launch a CUDA kernel with 2D grid -/
 @[extern "tg4_cuda_launch_2d"]
 opaque cudaLaunch2D : @& CUDAProgram → @& (Array CUDABuffer) →
     @& Nat → @& Nat → @& Nat → @& Nat → IO Unit
+
+/-- Launch a CUDA kernel with explicit 2D grid and shared memory -/
+@[extern "tg4_cuda_launch_grid_2d"]
+opaque cudaLaunchGrid2D : @& CUDAProgram → @& (Array CUDABuffer) →
+    @& Nat → @& Nat → @& Nat → @& Nat → @& Nat → IO Unit
 
 /-- Wait for all GPU work to complete -/
 @[extern "tg4_cuda_sync"]

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -10,7 +11,7 @@ Checks the `ByteArray`-backed interpreter fast paths for:
 
 namespace TinyGrad4.Test.ReduceAxis
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
@@ -22,11 +23,11 @@ private def assertSize (arr : RawBuffer) (expected : Nat) (label : String) : IO 
   if vals.size != expected then
     throw (IO.userError s!"{label}: size {vals.size} != {expected}")
 
-private def assertAllClose (arr : RawBuffer) (expected : Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : RawBuffer) (expected : Float64) (tol : Float64) (label : String) : IO Unit := do
   let vals := arr.toFloatArray
   for i in [:vals.size] do
     let v := vals[i]!
-    let diff := Float.abs (v - expected)
+    let diff := Float64.abs (v - expected)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {expected} diff {diff} > {tol}")
 

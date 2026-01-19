@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Data.GPULoader
 
 /-!
@@ -15,7 +16,7 @@ open TinyGrad4.Data
 namespace TinyGrad4.Test
 
 /-- Measure time in milliseconds -/
-def timeMs (action : IO α) : IO (Float × α) := do
+def timeMs (action : IO α) : IO (Float64 × α) := do
   let start ← IO.monoNanosNow
   let result ← action
   let stop ← IO.monoNanosNow

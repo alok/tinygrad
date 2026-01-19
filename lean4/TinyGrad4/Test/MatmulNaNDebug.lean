@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.MetalMatmul
@@ -15,11 +16,11 @@ open TinyGrad4.Backend
 open TinyGrad4.Backend.Metal
 
 /-- Check if array contains NaN -/
-def hasNaN (arr : Array Float) : Bool :=
+def hasNaN (arr : Array Float64) : Bool :=
   arr.any fun x => x != x  -- NaN != NaN
 
 /-- Count NaN values -/
-def countNaN (arr : Array Float) : Nat :=
+def countNaN (arr : Array Float64) : Nat :=
   arr.foldl (fun acc x => if x != x then acc + 1 else acc) 0
 
 def testMatmulSize (m k n : Nat) (desc : String) : IO Unit := do
@@ -44,7 +45,7 @@ def testMatmulSize (m k n : Nat) (desc : String) : IO Unit := do
   let cpuStart ← IO.monoNanosNow
   let cpuResult := MetalMatmul.matmul2DCPU aBuf bBuf m k n
   let cpuEnd ← IO.monoNanosNow
-  let cpuMs := Float.ofNat (cpuEnd - cpuStart) / 1000000.0
+  let cpuMs := Float64.ofNat (cpuEnd - cpuStart) / 1000000.0
 
   let cpuDecoded := cpuResult.decode.data
   let cpuNaN := countNaN cpuDecoded
@@ -52,7 +53,7 @@ def testMatmulSize (m k n : Nat) (desc : String) : IO Unit := do
   IO.println s!"  CPU first few: {cpuDecoded[:min 10 cSize]}"
 
   -- Expected value: each output element = k * 0.01 * 0.01 = k * 0.0001
-  let expected := Float.ofNat k * 0.0001
+  let expected := Float64.ofNat k * 0.0001
   IO.println s!"  Expected value per element: {expected}"
 
   -- GPU matmul
@@ -64,7 +65,7 @@ def testMatmulSize (m k n : Nat) (desc : String) : IO Unit := do
   let gpuStart ← IO.monoNanosNow
   let gpuResult ← MetalMatmul.matmul2D aBuf bBuf m k n
   let gpuEnd ← IO.monoNanosNow
-  let gpuMs := Float.ofNat (gpuEnd - gpuStart) / 1000000.0
+  let gpuMs := Float64.ofNat (gpuEnd - gpuStart) / 1000000.0
 
   let gpuDecoded := gpuResult.decode.data
   let gpuNaN := countNaN gpuDecoded
@@ -82,9 +83,9 @@ def testMatmulSize (m k n : Nat) (desc : String) : IO Unit := do
   else
     IO.println s!"  GPU first few: {gpuDecoded[:min 10 cSize]}"
     -- Check accuracy
-    let mut maxDiff : Float := 0.0
+    let mut maxDiff : Float64 := 0.0
     for i in [:min 100 cSize] do
-      let diff := Float.abs (gpuDecoded[i]! - cpuDecoded[i]!)
+      let diff := Float64.abs (gpuDecoded[i]! - cpuDecoded[i]!)
       if diff > maxDiff then maxDiff := diff
     IO.println s!"  Max diff (first 100): {maxDiff}"
     if maxDiff > 0.01 then

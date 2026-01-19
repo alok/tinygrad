@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Accelerate
 import TinyGrad4.Data.Prefetch
 
@@ -61,12 +62,12 @@ private def sumBytesAccel (data : ByteArray) : UInt64 :=
   else
     sumBytesSlow data
 
-private def normalizeSumBytes (data : ByteArray) : Float :=
+private def normalizeSumBytes (data : ByteArray) : Float64 :=
   if isAvailable then
     normalizeSumU8 data 0 data.size
   else
     Id.run do
-      let mut total : Float := 0.0
+      let mut total : Float64 := 0.0
       for i in [:data.size] do
         let v := (data.get! i).toFloat / 255.0
         total := total + v
@@ -82,7 +83,7 @@ private def touchBytes (data : ByteArray) : UInt64 :=
 private def pctIndex (n : Nat) (num denom : Nat) : Nat :=
   if n == 0 then 0 else (num * (n - 1)) / denom
 
-private def statsMs (samples : Array Nat) : (Float × Float × Float × Float) :=
+private def statsMs (samples : Array Nat) : (Float64 × Float64 × Float64 × Float64) :=
   if samples.isEmpty then (0.0, 0.0, 0.0, 0.0) else
     let sorted := samples.qsort (· ≤ ·)
     let n := sorted.size
@@ -97,13 +98,13 @@ private structure BenchResult where
   wallNs : Nat
   samples : Array Nat
   checksum : UInt64
-  normTotal : Float
+  normTotal : Float64
 
 private def benchSync (cfg : BenchConfig) : IO BenchResult := do
   IO.FS.withFile cfg.path .read fun h => do
     let mut samples : Array Nat := #[]
     let mut checksum : UInt64 := 0
-    let mut normTotal : Float := 0.0
+    let mut normTotal : Float64 := 0.0
     let mut totalBytes : Nat := 0
 
     let startAll ← IO.monoNanosNow
@@ -167,7 +168,7 @@ private def benchPrefetch (cfg : BenchConfig) : IO BenchResult := do
   let prefetcher ← FilePrefetcher.create cfg
   let mut samples : Array Nat := #[]
   let mut checksum : UInt64 := 0
-  let mut normTotal : Float := 0.0
+  let mut normTotal : Float64 := 0.0
   let mut totalBytes : Nat := 0
 
   let startAll ← IO.monoNanosNow

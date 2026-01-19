@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 import TinyGrad4.Tensor.Movement
@@ -29,7 +30,7 @@ def create (vocabSize embedSize : Nat) (dt : DType := .float32) (seed : Nat := 4
   -- Glorot bound = sqrt(6 / (fan_in + fan_out))
   let fanIn := vocabSize
   let fanOut := embedSize
-  let bound := (Float.sqrt (6.0 / Float.ofNat (fanIn + fanOut))).toFloat32
+  let bound := (Float64.sqrt (6.0 / Float64.ofNat (fanIn + fanOut))).toFloat32
 
   -- Random uniform in [-bound, bound]
   let r ← Tensor.rand [vocabSize, embedSize] dt seed
@@ -53,10 +54,10 @@ def forward {batch : Nat} (params : EmbeddingParams vocabSize embedSize dt)
   -- Create one-hot: [batch, vocabSize]
   -- arange [vocabSize] broadcasted to [batch, vocabSize]
   let arangeVocab ← Tensor.arange vocabSize .int32
-  let arangeExpanded ← expand arangeVocab [batch, vocabSize]
+  let arangeExpanded ← expandUnsafe arangeVocab [batch, vocabSize]
 
   -- indices expanded to [batch, vocabSize]
-  let indicesExpanded ← expand indices [batch, vocabSize]
+  let indicesExpanded ← expandUnsafe indices [batch, vocabSize]
 
   -- Compare: one_hot[i,j] = 1 if indices[i] == j else 0
   let oneHotBool ← cmpeq indicesExpanded arangeExpanded

@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -18,18 +19,18 @@ open Interpreter
 open Backend
 open StaticTensor
 
-private def assertAllClose (arr : FloatArray) (expected : FloatArray) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : FloatArray) (expected : FloatArray) (tol : Float64) (label : String) : IO Unit := do
   if arr.size != expected.size then
     throw (IO.userError s!"{label}: size {arr.size} != {expected.size}")
   for i in [:arr.size] do
     let v := arr[i]!
     let e := expected[i]!
-    let diff := Float.abs (v - e)
+    let diff := Float64.abs (v - e)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {e} diff {diff} > {tol}")
 
 private def shrink3d (data : FloatArray) (shape : Shape) (bounds : List (Nat × Nat)) : FloatArray := Id.run do
-  let newShape := Shape.shrink shape bounds
+  let newShape := Shape.shrinkUnsafe shape bounds
   let numel := listProd newShape
   let mut out := FloatArray.emptyWithCapacity numel
   for i in [:numel] do
@@ -58,7 +59,7 @@ private def testPermuteIntoFusedContract : IO Unit := do
   let (aU, bU, outU) := runTensorM do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [n, k] .float32
-    let bT ← StaticTensor.permute b [1, 0]
+    let bT ← StaticTensor.permuteUnsafe b [1, 0]
     let out ← UOp.contract2D a.uop bT.uop
     pure (a.uop, b.uop, out)
 
@@ -77,7 +78,7 @@ private def testPermuteIntoFusedContract : IO Unit := do
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected permute/contract to be virtualized into kernel, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected permuteUnsafe/contract to be virtualized into kernel, found {bad.length}\n{msg}")
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outArr := (outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))).decode
@@ -112,8 +113,8 @@ private def testPermuteReshapeIntoFusedContract : IO Unit := do
   let (aU, bU, outU) := runTensorM do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 3, 4] .float32
-    let bp ← StaticTensor.permute b [1, 0, 2]
-    let br ← StaticTensor.reshape bp [k, n]
+    let bp ← StaticTensor.permuteUnsafe b [1, 0, 2]
+    let br ← StaticTensor.reshapeUnsafe bp [k, n]
     let out ← UOp.contract2D a.uop br.uop
     pure (a.uop, b.uop, out)
 
@@ -126,7 +127,7 @@ private def testPermuteReshapeIntoFusedContract : IO Unit := do
   match compiled.implMap[outU.uid]? with
   | some (.fusedContract plan) =>
     if !plan.needsStack then
-      throw (IO.userError "expected fusedContract to require a view stack (permute→reshape)")
+      throw (IO.userError "expected fusedContract to require a view stackUnsafe (permuteUnsafe→reshapeUnsafe)")
   | _ => throw (IO.userError "expected root to select fusedContract")
 
   let bad := compiled.nodes.filter fun u =>
@@ -134,7 +135,7 @@ private def testPermuteReshapeIntoFusedContract : IO Unit := do
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected permute/reshape/contract to be virtualized into kernel, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected permuteUnsafe/reshapeUnsafe/contract to be virtualized into kernel, found {bad.length}\n{msg}")
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outArr := (outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))).decode
@@ -143,7 +144,7 @@ private def testPermuteReshapeIntoFusedContract : IO Unit := do
   let expectedBytes := Native.matmulF32 ab bpBytes m k n
   let expected := RawBuffer.decode { dtype := .float32, data := expectedBytes }
 
-  assertAllClose outArr expected 0.001 "contract view-stack fusion"
+  assertAllClose outArr expected 0.001 "contract view-stackUnsafe fusion"
 
 private def testShrinkReshapeFoldIntoFusedContract : IO Unit := do
   let m := 3
@@ -161,8 +162,8 @@ private def testShrinkReshapeFoldIntoFusedContract : IO Unit := do
   let (aU, bU, outU) := runTensorM do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 3, 4] .float32
-    let bs ← StaticTensor.shrink b [(0, 2), (0, 2), (0, 4)]
-    let br ← StaticTensor.reshape bs [k, n]
+    let bs ← StaticTensor.shrinkUnsafe b [(0, 2), (0, 2), (0, 4)]
+    let br ← StaticTensor.reshapeUnsafe bs [k, n]
     let out ← UOp.contract2D a.uop br.uop
     pure (a.uop, b.uop, out)
 
@@ -175,7 +176,7 @@ private def testShrinkReshapeFoldIntoFusedContract : IO Unit := do
   match compiled.implMap[outU.uid]? with
   | some (.fusedContract plan) =>
     if plan.needsStack then
-      throw (IO.userError "expected shrink→reshape fold to avoid a view stack")
+      throw (IO.userError "expected shrinkUnsafe→reshapeUnsafe fold to avoid a view stackUnsafe")
   | _ => throw (IO.userError "expected root to select fusedContract")
 
   let bad := compiled.nodes.filter fun u =>
@@ -183,14 +184,14 @@ private def testShrinkReshapeFoldIntoFusedContract : IO Unit := do
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected shrink/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected shrinkUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outArr := (outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))).decode
 
   let expectedBytes := Native.matmulF32 ab bb m k n
   let expected := RawBuffer.decode { dtype := .float32, data := expectedBytes }
-  assertAllClose outArr expected 0.001 "contract shrink→reshape fold"
+  assertAllClose outArr expected 0.001 "contract shrinkUnsafe→reshapeUnsafe fold"
 
 private def testShrinkReshapeGapIntoFusedContract : IO Unit := do
   let m := 2
@@ -208,8 +209,8 @@ private def testShrinkReshapeGapIntoFusedContract : IO Unit := do
   let (aU, bU, outU) := runTensorM do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 3, 4] .float32
-    let bs ← StaticTensor.shrink b [(0, 2), (0, 2), (0, 4)]
-    let br ← StaticTensor.reshape bs [k, n]
+    let bs ← StaticTensor.shrinkUnsafe b [(0, 2), (0, 2), (0, 4)]
+    let br ← StaticTensor.reshapeUnsafe bs [k, n]
     let out ← UOp.contract2D a.uop br.uop
     pure (a.uop, b.uop, out)
 
@@ -222,7 +223,7 @@ private def testShrinkReshapeGapIntoFusedContract : IO Unit := do
   match compiled.implMap[outU.uid]? with
   | some (.fusedContract plan) =>
     if !plan.needsStack then
-      throw (IO.userError "expected shrink→reshape gap to require a view stack")
+      throw (IO.userError "expected shrinkUnsafe→reshapeUnsafe gap to require a view stackUnsafe")
   | _ => throw (IO.userError "expected root to select fusedContract")
 
   let bad := compiled.nodes.filter fun u =>
@@ -230,14 +231,14 @@ private def testShrinkReshapeGapIntoFusedContract : IO Unit := do
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected shrink/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected shrinkUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outArr := (outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))).decode
 
   let expectedBytes := Native.matmulF32 ab bb m k n
   let expected := RawBuffer.decode { dtype := .float32, data := expectedBytes }
-  assertAllClose outArr expected 0.001 "contract shrink→reshape gap"
+  assertAllClose outArr expected 0.001 "contract shrinkUnsafe→reshapeUnsafe gap"
 
 private def testPadReshapeIntoFusedContract : IO Unit := do
   let m := 3
@@ -255,8 +256,8 @@ private def testPadReshapeIntoFusedContract : IO Unit := do
   let (aU, bU, outU) := runTensorM do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 2, 2] .float32
-    let bp ← StaticTensor.pad b [(0, 0), (0, 0), (0, 2)]
-    let br ← StaticTensor.reshape bp [k, n]
+    let bp ← StaticTensor.padUnsafe b [(0, 0), (0, 0), (0, 2)]
+    let br ← StaticTensor.reshapeUnsafe bp [k, n]
     let out ← UOp.contract2D a.uop br.uop
     pure (a.uop, b.uop, out)
 
@@ -276,14 +277,14 @@ private def testPadReshapeIntoFusedContract : IO Unit := do
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected pad/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected padUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let expectedBytes := Native.matmulF32 ab bPadBytes m k n
   let expected := RawBuffer.decode { dtype := .float32, data := expectedBytes }
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outArr := (outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))).decode
-  assertAllClose outArr expected 0.001 "contract pad→reshape"
+  assertAllClose outArr expected 0.001 "contract padUnsafe→reshapeUnsafe"
 
 private def testPadReshapeStackIntoFusedContract : IO Unit := do
   let m := 2
@@ -300,8 +301,8 @@ private def testPadReshapeStackIntoFusedContract : IO Unit := do
   let (aU, bU, outU) := runTensorM do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 3] .float32
-    let bp ← StaticTensor.pad b [(1, 1), (0, 0)]
-    let br ← StaticTensor.reshape bp [k, n]
+    let bp ← StaticTensor.padUnsafe b [(1, 1), (0, 0)]
+    let br ← StaticTensor.reshapeUnsafe bp [k, n]
     let out ← UOp.contract2D a.uop br.uop
     pure (a.uop, b.uop, out)
 
@@ -314,7 +315,7 @@ private def testPadReshapeStackIntoFusedContract : IO Unit := do
   match compiled.implMap[outU.uid]? with
   | some (.fusedContract plan) =>
     if !plan.needsStack then
-      throw (IO.userError "expected pad→reshape to require a view stack")
+      throw (IO.userError "expected padUnsafe→reshapeUnsafe to require a view stackUnsafe")
   | _ => throw (IO.userError "expected root to select fusedContract")
 
   let bad := compiled.nodes.filter fun u =>
@@ -322,14 +323,14 @@ private def testPadReshapeStackIntoFusedContract : IO Unit := do
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected pad/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected padUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let expectedBytes := Native.matmulF32 ab bPadBytes m k n
   let expected := RawBuffer.decode { dtype := .float32, data := expectedBytes }
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outArr := (outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))).decode
-  assertAllClose outArr expected 0.001 "contract pad→reshape stack"
+  assertAllClose outArr expected 0.001 "contract padUnsafe→reshapeUnsafe stackUnsafe"
 
 private def testFlipReshapeIntoFusedContract : IO Unit := do
   let m := 3
@@ -346,8 +347,8 @@ private def testFlipReshapeIntoFusedContract : IO Unit := do
   let (aU, bU, outU) := runTensorM do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 2, 2] .float32
-    let bf ← StaticTensor.flip b [2]
-    let br ← StaticTensor.reshape bf [k, n]
+    let bf ← StaticTensor.flipUnsafe b [2]
+    let br ← StaticTensor.reshapeUnsafe bf [k, n]
     let out ← UOp.contract2D a.uop br.uop
     pure (a.uop, b.uop, out)
 
@@ -360,7 +361,7 @@ private def testFlipReshapeIntoFusedContract : IO Unit := do
   match compiled.implMap[outU.uid]? with
   | some (.fusedContract plan) =>
     if !plan.needsStack then
-      throw (IO.userError "expected flip→reshape to require a view stack")
+      throw (IO.userError "expected flipUnsafe→reshapeUnsafe to require a view stackUnsafe")
   | _ => throw (IO.userError "expected root to select fusedContract")
 
   let bad := compiled.nodes.filter fun u =>
@@ -368,31 +369,31 @@ private def testFlipReshapeIntoFusedContract : IO Unit := do
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected flip/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected flipUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let expectedBytes := Native.matmulF32 ab bFlipBytes m k n
   let expected := RawBuffer.decode { dtype := .float32, data := expectedBytes }
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outArr := (outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))).decode
-  assertAllClose outArr expected 0.001 "contract flip→reshape"
+  assertAllClose outArr expected 0.001 "contract flipUnsafe→reshapeUnsafe"
 
 def runAll : IO Unit := do
   IO.println "=== ContractViewFusionSmoke Tests ==="
   testPermuteIntoFusedContract
-  IO.println "✓ permute virtualized in fused contract"
+  IO.println "✓ permuteUnsafe virtualized in fused contract"
   testPermuteReshapeIntoFusedContract
-  IO.println "✓ permute→reshape virtualized in fused contract"
+  IO.println "✓ permuteUnsafe→reshapeUnsafe virtualized in fused contract"
   testShrinkReshapeFoldIntoFusedContract
-  IO.println "✓ shrink→reshape fold virtualized in fused contract"
+  IO.println "✓ shrinkUnsafe→reshapeUnsafe fold virtualized in fused contract"
   testShrinkReshapeGapIntoFusedContract
-  IO.println "✓ shrink→reshape gap virtualized in fused contract"
+  IO.println "✓ shrinkUnsafe→reshapeUnsafe gap virtualized in fused contract"
   testPadReshapeIntoFusedContract
-  IO.println "✓ pad→reshape virtualized in fused contract"
+  IO.println "✓ padUnsafe→reshapeUnsafe virtualized in fused contract"
   testPadReshapeStackIntoFusedContract
-  IO.println "✓ pad→reshape stack virtualized in fused contract"
+  IO.println "✓ padUnsafe→reshapeUnsafe stackUnsafe virtualized in fused contract"
   testFlipReshapeIntoFusedContract
-  IO.println "✓ flip→reshape virtualized in fused contract"
+  IO.println "✓ flipUnsafe→reshapeUnsafe virtualized in fused contract"
   IO.println "=== ContractViewFusionSmoke OK ==="
 
 end TinyGrad4.Test.ContractViewFusionSmoke

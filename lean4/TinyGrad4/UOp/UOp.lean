@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Basic
 import TinyGrad4.DType
 import TinyGrad4.Shape
@@ -14,7 +15,7 @@ namespace TinyGrad4
 
 open Std
 
-instance : Hashable Float where
+instance : Hashable Float64 where
   hash f :=
     let bits := f.toBits
     let bits := if bits == (0x8000000000000000 : UInt64) then 0 else bits
@@ -30,7 +31,7 @@ The core IR for TinyGrad4.
 inductive UArg where
   | empty  -- renamed from `none` to avoid collision with Option.none
   | constInt (v : Int)
-  | constFloat (v : Float)
+  | constFloat (v : Float64)
   | constF32Bits (bits : UInt32)
   | constF32Array (bits : Array UInt32)
   | constBytesArray (bytes : ByteArray)  -- dtype-agnostic raw bytes storage
@@ -69,11 +70,11 @@ def getRangeSpec : UArg → Option (Nat × AxisType × List Nat)
   | .rangeSpec axisId axisType args => some (axisId, axisType, args)
   | _ => Option.none
 
-/-- Convert Int to Float -/
-private def intToFloat (v : Int) : Float :=
+/-- Convert Int to Float64 -/
+private def intToFloat (v : Int) : Float64 :=
   if v >= 0 then v.toNat.toFloat else -((-v).toNat.toFloat)
 
-def getFloat : UArg → Option Float
+def getFloat : UArg → Option Float64
   | .constFloat v => some v
   | .constInt v => some (intToFloat v)
   | .constF32Bits bits => some ((Float32.ofBits bits).toFloat)

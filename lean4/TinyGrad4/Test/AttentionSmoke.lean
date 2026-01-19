@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -30,13 +31,13 @@ private def startsBytes (batch : Nat) (matNumel : Nat) : Array Nat := Id.run do
     out := out.push (i * matNumel * 4)
   return out
 
-private def assertAllClose (arr : FloatArray) (expected : FloatArray) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : FloatArray) (expected : FloatArray) (tol : Float64) (label : String) : IO Unit := do
   if arr.size != expected.size then
     throw (IO.userError s!"{label}: size {arr.size} != {expected.size}")
   for i in [:arr.size] do
     let v := arr[i]!
     let e := expected[i]!
-    let diff := Float.abs (v - e)
+    let diff := Float64.abs (v - e)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {e} diff {diff} > {tol}")
 
@@ -75,7 +76,7 @@ private def testAttentionB2T3D2 : IO Unit := do
     let v ← Tensor.buffer [b, t, d] .float32
     let mask ← Tensor.buffer [t, t] .float32
 
-    let kT ← StaticTensor.permute k [0, 2, 1]
+    let kT ← StaticTensor.permuteUnsafe k [0, 2, 1]
     let scores ← UOp.contract2D q.uop kT.uop
     let scale ← UOp.const .float32 invSqrtD
     let scoresScaled ← UOp.mul scores scale
@@ -125,7 +126,7 @@ private def testAttentionB2T3D2 : IO Unit := do
   -- Interpreter output (should choose fusions).
   let outArr := (← Interpreter.evalRawCached outU env).decode
 
-  -- Baseline output (explicitly unfused kernels): permute, matmul, add(bcast), softmax, matmul.
+  -- Baseline output (explicitly unfused kernels): permuteUnsafe, matmul, add(bcast), softmax, matmul.
   let kTBytes := Native.permuteF32 kb #[b, t, d] #[0, 2, 1]
 
   let qStarts := startsBytes b (t * d)

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -10,7 +11,7 @@ Directly exercises the portable C fused elementwise VM:
 
 namespace TinyGrad4.Test.FusedEwise
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
@@ -18,22 +19,22 @@ open Interpreter
 open Backend
 
 /-- Pack float64 array to float32 bytes -/
-private def packF32 (data : Array Float) : ByteArray :=
+private def packF32 (data : Array Float64) : ByteArray :=
   Native.packF32FromF64 ⟨data⟩
 
-private def assertAllClose (arr : Array Float) (expected : Array Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : Array Float64) (expected : Array Float64) (tol : Float64) (label : String) : IO Unit := do
   if arr.size != expected.size then
     throw (IO.userError s!"{label}: size {arr.size} != {expected.size}")
   for i in [:arr.size] do
     let v := arr[i]!
     let e := expected[i]!
-    let diff := Float.abs (v - e)
+    let diff := Float64.abs (v - e)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {e} diff {diff} > {tol}")
 
 private def testAddScalarBcast : IO Unit := do
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0]
-  let y : Array Float := #[10.0]
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0]
+  let y : Array Float64 := #[10.0]
   let xb := packF32 x
   let yb := packF32 y
 
@@ -52,8 +53,8 @@ private def testAddScalarBcast : IO Unit := do
 
 private def testWhereBool : IO Unit := do
   let cond : ByteArray := ByteArray.mk #[1, 0, 1, 0]
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0]
-  let y : Array Float := #[10.0, 20.0, 30.0, 40.0]
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0]
+  let y : Array Float64 := #[10.0, 20.0, 30.0, 40.0]
   let xb := packF32 x
   let yb := packF32 y
 

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 import TinyGrad4.Backend.Interpreter
@@ -25,15 +26,15 @@ Papers:
 /-- Adam optimizer configuration -/
 structure AdamConfig where
   /-- Learning rate -/
-  lr : Float := 0.001
+  lr : Float64 := 0.001
   /-- First moment decay rate -/
-  beta1 : Float := 0.9
+  beta1 : Float64 := 0.9
   /-- Second moment decay rate -/
-  beta2 : Float := 0.999
+  beta2 : Float64 := 0.999
   /-- Numerical stability epsilon -/
-  eps : Float := 1e-8
+  eps : Float64 := 1e-8
   /-- Weight decay (0 for vanilla Adam, >0 for AdamW) -/
-  weightDecay : Float := 0.0
+  weightDecay : Float64 := 0.0
   deriving Repr
 
 /-- Adam moment state for a parameter (stored as RawBuffer for dtype support) -/
@@ -53,9 +54,9 @@ structure Adam where
   /-- Step count (for bias correction) -/
   step : Nat := 0
   /-- Running product of beta1^t for bias correction -/
-  beta1_t : Float := 1.0
+  beta1_t : Float64 := 1.0
   /-- Running product of beta2^t for bias correction -/
-  beta2_t : Float := 1.0
+  beta2_t : Float64 := 1.0
   /-- Per-parameter moments (indexed by uid) -/
   moments : Std.HashMap UOpId AdamMoments := {}
   deriving Repr
@@ -63,13 +64,13 @@ structure Adam where
 namespace Adam
 
 /-- Create Adam optimizer -/
-def create (lr : Float := 0.001) (beta1 : Float := 0.9) (beta2 : Float := 0.999)
-    (eps : Float := 1e-8) : Adam :=
+def create (lr : Float64 := 0.001) (beta1 : Float64 := 0.9) (beta2 : Float64 := 0.999)
+    (eps : Float64 := 1e-8) : Adam :=
   { config := { lr, beta1, beta2, eps, weightDecay := 0.0 } }
 
 /-- Create AdamW optimizer -/
-def createW (lr : Float := 0.001) (beta1 : Float := 0.9) (beta2 : Float := 0.999)
-    (eps : Float := 1e-8) (weightDecay : Float := 0.01) : Adam :=
+def createW (lr : Float64 := 0.001) (beta1 : Float64 := 0.9) (beta2 : Float64 := 0.999)
+    (eps : Float64 := 1e-8) (weightDecay : Float64 := 0.01) : Adam :=
   { config := { lr, beta1, beta2, eps, weightDecay } }
 
 /-- Initialize moments for a parameter -/
@@ -89,7 +90,7 @@ private def initMoments (dtype : DType) (shape : Shape) : AdamMoments :=
     param = param - lr * m_hat / (sqrt(v_hat) + eps)
 -/
 def buildUpdateUOps (param grad mBuf vBuf : UOp) (cfg : AdamConfig)
-    (beta1_t beta2_t : Float) : TensorM (UOp × UOp × UOp) := do
+    (beta1_t beta2_t : Float64) : TensorM (UOp × UOp × UOp) := do
   let dtype := param.dtype
   let shape := param.shape
 
@@ -222,10 +223,10 @@ def adamStep {s : List Nat} {d : DType}
   pure (updates, currentOpt)
 
 /-- Convenience: Adam optimizer -/
-def adam (lr : Float := 0.001) : Adam := Adam.create lr
+def adam (lr : Float64 := 0.001) : Adam := Adam.create lr
 
 /-- Convenience: AdamW optimizer -/
-def adamW (lr : Float := 0.001) (weightDecay : Float := 0.01) : Adam :=
+def adamW (lr : Float64 := 0.001) (weightDecay : Float64 := 0.01) : Adam :=
   Adam.createW lr (weightDecay := weightDecay)
 
 end TinyGrad4.Optim

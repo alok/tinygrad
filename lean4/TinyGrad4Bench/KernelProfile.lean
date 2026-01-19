@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import LeanBenchNew.Stats
 import Wandb.Json
@@ -10,7 +11,7 @@ open Std
 open Wandb.Json
 
 structure KernelAgg where
-  sumMs : Float
+  sumMs : Float64
   count : Nat
   deriving Repr
 
@@ -31,7 +32,7 @@ private def addKernelAggs (agg : HashMap String KernelAgg) (times : Array Interp
 
 def dumpKernelAgg (agg : HashMap String KernelAgg) : IO Unit := do
   for (key, v) in agg.toList do
-    let avg := if v.count == 0 then 0.0 else v.sumMs / (Float.ofNat v.count)
+    let avg := if v.count == 0 then 0.0 else v.sumMs / (Float64.ofNat v.count)
     IO.println s!"  kernel.agg {key} total_ms={v.sumMs} avg_ms={avg} runs={v.count}"
 
 def dumpKernelAggFromRuns (c : Interpreter.Compiled) (env : Env) (runs : Nat) : IO Unit := do

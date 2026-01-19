@@ -1,3 +1,4 @@
+import Float64
 namespace TinyGrad4.Backend.FusedEwiseExpr
 
 -- Placeholder for fused-ewise kernel expressions.

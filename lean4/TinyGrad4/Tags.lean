@@ -1,3 +1,4 @@
+import Float64
 namespace TinyGrad4
 
 structure Tagger (ι : Type) (α : Type) where

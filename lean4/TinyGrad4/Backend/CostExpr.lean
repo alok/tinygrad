@@ -1,3 +1,4 @@
+import Float64
 import Std.Data.HashMap
 
 /-!

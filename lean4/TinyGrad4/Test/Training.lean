@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -29,7 +30,7 @@ structure Program where
   compiled : Interpreter.Compiled
 
 /-- Build the training graph once (forward + backward), then lower it into `.KERNEL` nodes once. -/
-def buildProgram (lr : Float) : IO Program := do
+def buildProgram (lr : Float64) : IO Program := do
   let (w1Id, w2Id, xId, yId, predUop, lossUop, newW1Uop, newW2Uop) := runTensorM do
     let w1Buf ← Tensor.buffer [2, 4] .float32
     let w2Buf ← Tensor.buffer [4, 1] .float32
@@ -72,7 +73,7 @@ def initWeights : TrainState :=
 
 /-- Create training data: XOR pattern
     Input: [0,0] -> 0, [0,1] -> 1, [1,0] -> 1, [1,1] -> 0 -/
-def trainingData : Array Float × Array Float :=
+def trainingData : Array Float64 × Array Float64 :=
   -- 4 samples, 2 features each: [4, 2]
   let x := #[0.0, 0.0,   -- sample 0
              0.0, 1.0,   -- sample 1
@@ -83,7 +84,7 @@ def trainingData : Array Float × Array Float :=
   (x, y)
 
 /-- Run one training step, return (loss, updated state) -/
-def trainStep (p : Program) (state : TrainState) : IO (Float × TrainState) := do
+def trainStep (p : Program) (state : TrainState) : IO (Float64 × TrainState) := do
   let (xData, yData) := trainingData
 
   -- Set up environment with current values
@@ -108,7 +109,7 @@ def trainStep (p : Program) (state : TrainState) : IO (Float × TrainState) := d
   pure (lossVal, newState)
 
 /-- Train for multiple steps -/
-def train (numSteps : Nat) (lr : Float := 0.1) : IO Unit := do
+def train (numSteps : Nat) (lr : Float64 := 0.1) : IO Unit := do
   IO.println "=== Training Loop Demo ==="
   IO.println s!"Learning rate: {lr}, Steps: {numSteps}"
   IO.println ""

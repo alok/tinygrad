@@ -1,3 +1,4 @@
+import Float64
 /-!
 # Operations for TinyGrad4
 

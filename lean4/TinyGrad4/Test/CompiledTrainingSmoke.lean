@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -41,7 +42,7 @@ private def initW1 : RawBuffer :=
 private def initW2 : RawBuffer :=
   RawBuffer.ofF32 ⟨#[0.3, -0.2, 0.1, 0.25]⟩
 
-private def buildProgram (lr : Float) : IO Program := do
+private def buildProgram (lr : Float64) : IO Program := do
   let (w1Id, w2Id, xId, yId, lossUop, newW1Uop, newW2Uop) := runTensorM do
     let w1Buf ← Tensor.buffer [2, 4] .float32
     let w2Buf ← Tensor.buffer [4, 1] .float32
@@ -70,7 +71,7 @@ private def buildProgram (lr : Float) : IO Program := do
   let compiled ← Interpreter.compileManyCached roots
   pure { w1Id, w2Id, xId, yId, loss := lossUop, newW1 := newW1Uop, newW2 := newW2Uop, compiled }
 
-private def step (p : Program) (w1 w2 : RawBuffer) : Float × RawBuffer × RawBuffer :=
+private def step (p : Program) (w1 w2 : RawBuffer) : Float64 × RawBuffer × RawBuffer :=
   let (xData, yData) := trainingData
   let env : Env := (∅ : Env)
     |>.insert p.xId xData
@@ -86,7 +87,7 @@ private def step (p : Program) (w1 w2 : RawBuffer) : Float × RawBuffer × RawBu
   (lossVal, newW1, newW2)
 
 private def testCompiledTraining : IO Unit := do
-  let lr : Float := 0.5
+  let lr : Float64 := 0.5
   let p ← buildProgram lr
 
   match p.compiled.implMap[p.newW1.uid]? with

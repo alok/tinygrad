@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Backend.Pattern
@@ -61,7 +62,7 @@ def mapIds (p : Plan) (f : UOpId → UOpId) : Plan :=
 end Plan
 
 /-- Check if a float value is approximately equal to expected -/
-def approxEq (x expected : Float) (tol : Float := 0.01) : Bool :=
+def approxEq (x expected : Float64) (tol : Float64 := 0.01) : Bool :=
   (x - expected).abs < tol
 
 /-- Detect GELU sigmoid approximation: x * sigmoid(1.702 * x)

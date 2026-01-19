@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.Metal
 
@@ -31,7 +32,7 @@ private def testMatmul2D : IO Unit := do
 
   for i in [:arr.size] do
     let v := arr[i]!
-    let diff := Float.abs (v - 1.5)
+    let diff := Float64.abs (v - 1.5)
     if diff > 0.001 then
       throw (IO.userError s!"matmul2D: idx {i} value {v} expected 1.5 diff {diff}")
 
@@ -54,7 +55,7 @@ private def testMatmul64x64 : IO Unit := do
   -- Check a few elements
   for i in [0, 100, 2000, 4095] do
     let v := arr[i]!
-    let diff := Float.abs (v - 1.0)
+    let diff := Float64.abs (v - 1.0)
     if diff > 0.01 then
       throw (IO.userError s!"matmul64x64: idx {i} value {v} expected 1.0 diff {diff}")
 

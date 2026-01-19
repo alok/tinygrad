@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -31,7 +32,7 @@ private def testValidateAttentionLike : IO Unit := do
     let v ← Tensor.buffer [b, t, d] .float32
     let mask ← Tensor.buffer [t, t] .float32
 
-    let kT ← StaticTensor.permute k [0, 2, 1]
+    let kT ← StaticTensor.permuteUnsafe k [0, 2, 1]
     let scores ← UOp.contract2D q.uop kT.uop
     let scoresMasked ← UOp.add scores mask.uop
     let scoresMaskedT : StaticTensor [b, t, t] .float32 :=

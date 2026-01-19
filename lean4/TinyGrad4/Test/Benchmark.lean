@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -36,7 +37,7 @@ def timeIONs (action : IO Unit) : IO Nat := do
   pure (finish - start)
 
 /-- Run action N times and return average time in nanoseconds -/
-def benchmarkN (n : Nat) (action : IO Unit) : IO Float := do
+def benchmarkN (n : Nat) (action : IO Unit) : IO Float64 := do
   -- Warmup
   for _ in [:3] do
     action
@@ -54,7 +55,7 @@ def benchmarkN (n : Nat) (action : IO Unit) : IO Float := do
   pure ()
 
 /-- Format nanoseconds as human-readable string -/
-def formatTime (ns : Float) : String :=
+def formatTime (ns : Float64) : String :=
   if ns < 1000 then
     s!"{ns} ns"
   else if ns < 1000000 then
@@ -65,17 +66,17 @@ def formatTime (ns : Float) : String :=
     s!"{ns / 1000000000} s"
 
 /-- Compute MFLOP/s -/
-def mflops (flops : Nat) (ns : Float) : Float :=
+def mflops (flops : Nat) (ns : Float64) : Float64 :=
   let seconds := ns / 1e9
   flops.toFloat / seconds / 1e6
 
 /-- Compute GB/s -/
-def gbps (bytes : Nat) (ns : Float) : Float :=
+def gbps (bytes : Nat) (ns : Float64) : Float64 :=
   let seconds := ns / 1e9
   bytes.toFloat / seconds / 1e9
 
 /-- Print benchmark result -/
-def printBench (name : String) (ns : Float) (flops : Nat := 0) (bytes : Nat := 0) : IO Unit := do
+def printBench (name : String) (ns : Float64) (flops : Nat := 0) (bytes : Nat := 0) : IO Unit := do
   let timeStr := formatTime ns
   let mut extra := ""
   if flops > 0 then

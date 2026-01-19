@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Spec.Broadcast
 import TinyGrad4.Spec.Indexing
 

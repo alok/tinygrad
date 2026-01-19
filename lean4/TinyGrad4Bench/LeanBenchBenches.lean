@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Data.Buffer
 import TinyGrad4.Data.IndexTransform
 import LeanBench

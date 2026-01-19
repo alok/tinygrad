@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Device
 
 -- Disable RawBuffer linter: Engine returns FloatArray for polymorphic device execution
@@ -119,7 +120,7 @@ def runEwise [Allocator Buf] [Compiler Prog] [Runtime Prog Buf]
   | none => return none
 
 /-- Simple benchmark wrapper -/
-def benchmark (name : String) (iterations : Nat) (action : IO α) : IO (α × Float) := do
+def benchmark (name : String) (iterations : Nat) (action : IO α) : IO (α × Float64) := do
   -- Warmup
   for _ in [:3] do
     let _ ← action

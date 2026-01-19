@@ -1,3 +1,4 @@
+import Float64
 import Lean
 import Std.Time
 import LeanBenchNew
@@ -160,17 +161,17 @@ private def logValueToJson : LogValue → J
   | .float v => float v
   | .bool v => bool v
 
-private def currentTimestamp : IO Float := do
+private def currentTimestamp : IO Float64 := do
   let ts ← Std.Time.Timestamp.now
   let secs : Int := (Std.Time.Timestamp.toSecondsSinceUnixEpoch ts).val
-  pure (Float.ofInt secs)
+  pure (Float64.ofInt secs)
 
-private def runtimeSeconds (startMs : Nat) : IO Float := do
+private def runtimeSeconds (startMs : Nat) : IO Float64 := do
   let nowMs ← IO.monoMsNow
   let delta := nowMs - startMs
   pure (delta.toFloat / 1000.0)
 
-private def summaryWithMeta (summary : HashMap String LogValue) (timestamp runtime : Float) : J :=
+private def summaryWithMeta (summary : HashMap String LogValue) (timestamp runtime : Float64) : J :=
   let base := summary.toList.map (fun (k, v) => (k, logValueToJson v))
   let metaFields := [
     ("_timestamp", float timestamp),
@@ -180,7 +181,7 @@ private def summaryWithMeta (summary : HashMap String LogValue) (timestamp runti
   ]
   obj (base ++ metaFields)
 
-private def historyWithMeta (summary : HashMap String LogValue) (timestamp runtime : Float) : J :=
+private def historyWithMeta (summary : HashMap String LogValue) (timestamp runtime : Float64) : J :=
   let base := summary.toList.map (fun (k, v) => (k, logValueToJson v))
   let metaFields := [
     ("_timestamp", float timestamp),
@@ -189,7 +190,7 @@ private def historyWithMeta (summary : HashMap String LogValue) (timestamp runti
   ]
   obj (base ++ metaFields)
 
-private def addMetaToSummaryJson (summary : J) (timestamp runtime : Float) : J :=
+private def addMetaToSummaryJson (summary : J) (timestamp runtime : Float64) : J :=
   let metaFields := [
     ("_timestamp", float timestamp),
     ("_runtime", float runtime),
@@ -200,7 +201,7 @@ private def addMetaToSummaryJson (summary : J) (timestamp runtime : Float) : J :
   | .obj kv => obj (kv.toList ++ metaFields)
   | _ => obj metaFields
 
-private def addMetaToHistoryJson (summary : J) (timestamp runtime : Float) : J :=
+private def addMetaToHistoryJson (summary : J) (timestamp runtime : Float64) : J :=
   let metaFields := [
     ("_timestamp", float timestamp),
     ("_runtime", float runtime),
@@ -272,7 +273,7 @@ def logger : Logger :=
   { logFields := logFields, logResult := logResult }
 
 /-- Log a scalar metric. -/
-def logScalar (name : String) (value : Float) (unit? : Option String := none) : IO Unit := do
+def logScalar (name : String) (value : Float64) (unit? : Option String := none) : IO Unit := do
   let base := [
     ("benchmark/name", LogValue.str name),
     ("benchmark/value", LogValue.float value)
@@ -288,7 +289,7 @@ def logScalar (name : String) (value : Float) (unit? : Option String := none) : 
 def logMetric
     (group : String)
     (metric : String)
-    (value : Float)
+    (value : Float64)
     (unit? : Option String := none)
     (params : List (String × LogValue) := []) : IO Unit := do
   let base := [
@@ -316,7 +317,7 @@ def paramNat (key : String) (value : Nat) : String × LogValue :=
   (key, LogValue.nat value)
 
 /-- Build a float parameter for {name}`logMetric`. -/
-def paramFloat (key : String) (value : Float) : String × LogValue :=
+def paramFloat (key : String) (value : Float64) : String × LogValue :=
   (key, LogValue.float value)
 
 /-- Fetch the current run summary (remote) if available. -/
@@ -378,7 +379,7 @@ def finishRunByName (entity project runName : String) : IO Unit := do
           | .ok j => j
           | .error _ => obj []
     let timestamp ← currentTimestamp
-    let runtime : Float := 0.0
+    let runtime : Float64 := 0.0
     let summaryWithMeta := addMetaToSummaryJson summaryJson timestamp runtime
     let historyWithMeta := addMetaToHistoryJson summaryJson timestamp runtime
     Wandb.Api.finishRun cfg run summaryWithMeta (some historyWithMeta) 0

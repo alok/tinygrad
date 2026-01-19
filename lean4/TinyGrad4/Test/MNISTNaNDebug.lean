@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Data.MNIST
 import TinyGrad4.Backend.Metal

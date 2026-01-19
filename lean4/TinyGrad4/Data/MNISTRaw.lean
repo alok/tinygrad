@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Data.Slice
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Transform
@@ -18,7 +19,7 @@ def mnist():
 Key principles:
 1. Load raw bytes into ByteArray (once)
 2. Slice operations are zero-copy (just adjust offset)
-3. Data stays as uint8 until needed (no Float conversion overhead)
+3. Data stays as uint8 until needed (no Float64 conversion overhead)
 4. Tensor creation is lazy (reshape is just a UOp)
 
 ## Usage
@@ -303,10 +304,10 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
 
   -- 2. Normalize to float32 and sum - matches Python numpy + normalize
   let mut normalizeTimes : Array Nat := #[]
-  let mut normalizeTotal : Float := 0.0
+  let mut normalizeTotal : Float64 := 0.0
   for _ in [:iterations] do
     let start ← IO.monoNanosNow
-    let mut total : Float := 0.0
+    let mut total : Float64 := 0.0
     for i in [:numBatches] do
       let batch := mnist.getBatch i batchSize
       -- Normalize each byte to [0,1] and sum
@@ -356,7 +357,7 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
     for i in [:numBatches] do
       let batch := mnist.getBatch i batchSize
       -- Use Accelerate SIMD sum
-      checksum := checksum + TinyGrad4.Backend.Accel.sumSlice batch.images.parent batch.images.offset batch.images.length
+      checksum := checksum + TinyGrad4.Backend.Accel.sumSlice batch.images
     let stop ← IO.monoNanosNow
     accelChecksumTimes := accelChecksumTimes.push (stop - start)
     accelChecksum := checksum
@@ -367,14 +368,14 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
 
   -- 5. Accelerate SIMD normalize + sum (fused)
   let mut accelNormTimes : Array Nat := #[]
-  let mut accelNormTotal : Float := 0.0
+  let mut accelNormTotal : Float64 := 0.0
   for _ in [:iterations] do
     let start ← IO.monoNanosNow
-    let mut total : Float := 0.0
+    let mut total : Float64 := 0.0
     for i in [:numBatches] do
       let batch := mnist.getBatch i batchSize
       -- Use Accelerate fused normalize + sum
-      total := total + TinyGrad4.Backend.Accel.normalizeSumSlice batch.images.parent batch.images.offset batch.images.length
+      total := total + TinyGrad4.Backend.Accel.normalizeSumSlice batch.images
     let stop ← IO.monoNanosNow
     accelNormTimes := accelNormTimes.push (stop - start)
     accelNormTotal := total
@@ -456,8 +457,7 @@ def benchmarkComprehensive (dataDir : String := "data") (batchSize : Nat := 64)
     for i in [:numBatches] do
       let batch := mnist.getBatch i batchSize
       -- Create zero-copy Metal buffer from ByteSlice
-      let _buf ← TinyGrad4.Backend.Metal.metalFromByteSlice
-        batch.images.parent batch.images.offset batch.images.length
+      let _buf ← TinyGrad4.Backend.Metal.metalFromByteSlice batch.images
       pure ()
     let stop ← IO.monoNanosNow
     zeroCopyTimes := zeroCopyTimes.push (stop - start)

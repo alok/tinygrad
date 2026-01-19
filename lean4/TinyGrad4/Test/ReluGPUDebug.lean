@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.Metal
 
@@ -25,9 +26,9 @@ def testRelu (n : Nat) (name : String) : IO Unit := do
     pure (xBuf.uop.uid, reluResult.uop)
 
   -- Input data: alternating positive/negative
-  let mut xData : Array Float := #[]
+  let mut xData : Array Float64 := #[]
   for i in [:n] do
-    let v := if i % 2 == 0 then Float.ofNat (i % 100) else -(Float.ofNat (i % 100))
+    let v := if i % 2 == 0 then Float64.ofNat (i % 100) else -(Float64.ofNat (i % 100))
     xData := xData.push v
   let xBuf := RawBuffer.ofF32 ⟨xData⟩
 
@@ -50,14 +51,14 @@ def testRelu (n : Nat) (name : String) : IO Unit := do
   IO.println s!"  GPU first 10: {gpuData[:Nat.min 10 n]}"
 
   -- Expected: max(input, 0), so negative values become 0
-  let mut expectedData : Array Float := #[]
+  let mut expectedData : Array Float64 := #[]
   for v in xData do
     expectedData := expectedData.push (if v > 0 then v else 0)
   IO.println s!"  Expected first 10: {expectedData[:Nat.min 10 n]}"
 
   -- Compare
-  let mut maxDiffCPU : Float := 0.0
-  let mut maxDiffGPU : Float := 0.0
+  let mut maxDiffCPU : Float64 := 0.0
+  let mut maxDiffGPU : Float64 := 0.0
   let mut cpuNaN := 0
   let mut gpuNaN := 0
 
@@ -70,11 +71,11 @@ def testRelu (n : Nat) (name : String) : IO Unit := do
     if gpuV != gpuV then gpuNaN := gpuNaN + 1
 
     if cpuV == cpuV then
-      let diff := Float.abs (cpuV - exp)
+      let diff := Float64.abs (cpuV - exp)
       if diff > maxDiffCPU then maxDiffCPU := diff
 
     if gpuV == gpuV then
-      let diff := Float.abs (gpuV - exp)
+      let diff := Float64.abs (gpuV - exp)
       if diff > maxDiffGPU then maxDiffGPU := diff
 
   IO.println s!"  CPU NaN: {cpuNaN}, maxDiff from expected: {maxDiffCPU}"
@@ -119,7 +120,7 @@ def testReluAfterMatmul (batch m n : Nat) (name : String) : IO Unit := do
   IO.println s!"  GPU first 10: {gpuData[:Nat.min 10 gpuData.size]}"
 
   -- Compare
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   let mut cpuNaN := 0
   let mut gpuNaN := 0
 
@@ -131,7 +132,7 @@ def testReluAfterMatmul (batch m n : Nat) (name : String) : IO Unit := do
     if gpuV != gpuV then gpuNaN := gpuNaN + 1
 
     if cpuV == cpuV && gpuV == gpuV then
-      let diff := Float.abs (cpuV - gpuV)
+      let diff := Float64.abs (cpuV - gpuV)
       if diff > maxDiff then maxDiff := diff
 
   IO.println s!"  CPU NaN: {cpuNaN}, GPU NaN: {gpuNaN}, maxDiff: {maxDiff}"
@@ -142,7 +143,7 @@ def testReluAfterMatmul (batch m n : Nat) (name : String) : IO Unit := do
     for i in [:Nat.min 100 cpuData.size] do
       let cpuV := cpuData[i]!
       let gpuV := gpuData[i]!
-      let diff := Float.abs (cpuV - gpuV)
+      let diff := Float64.abs (cpuV - gpuV)
       if diff > 0.001 then
         IO.println s!"  First diff at i={i}: CPU={cpuV}, GPU={gpuV}"
         break

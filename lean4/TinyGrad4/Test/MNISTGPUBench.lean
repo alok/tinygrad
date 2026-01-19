@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Data.MNIST
 import TinyGrad4.Backend.Metal
@@ -74,13 +75,13 @@ private def fileExists (path : String) : IO Bool := do
     pure false
 
 /-- Run training on CPU path -/
-def runCPU (p : Program) (batches : Array (RawBuffer × RawBuffer)) (numBatches : Nat) : IO (Float × Nat) := do
+def runCPU (p : Program) (batches : Array (RawBuffer × RawBuffer)) (numBatches : Nat) : IO (Float64 × Nat) := do
   let (w1Init, w2Init) := initWeights (p.newW1.shape[1]!)
   let w1Ref ← IO.mkRef w1Init
   let w2Ref ← IO.mkRef w2Init
 
   let startTime ← IO.monoNanosNow
-  let mut totalLoss : Float := 0.0
+  let mut totalLoss : Float64 := 0.0
 
   for bi in [:numBatches] do
     let (xBuf, yBuf) := batches[bi]!
@@ -102,17 +103,17 @@ def runCPU (p : Program) (batches : Array (RawBuffer × RawBuffer)) (numBatches 
 
   let endTime ← IO.monoNanosNow
   let elapsedNs := endTime - startTime
-  let avgLoss := totalLoss / (Float.ofNat numBatches)
+  let avgLoss := totalLoss / (Float64.ofNat numBatches)
   pure (avgLoss, elapsedNs)
 
 /-- Run training on GPU path -/
-def runGPU (p : Program) (batches : Array (RawBuffer × RawBuffer)) (numBatches : Nat) : IO (Float × Nat) := do
+def runGPU (p : Program) (batches : Array (RawBuffer × RawBuffer)) (numBatches : Nat) : IO (Float64 × Nat) := do
   let (w1Init, w2Init) := initWeights (p.newW1.shape[1]!)
   let w1Ref ← IO.mkRef w1Init
   let w2Ref ← IO.mkRef w2Init
 
   let startTime ← IO.monoNanosNow
-  let mut totalLoss : Float := 0.0
+  let mut totalLoss : Float64 := 0.0
 
   for bi in [:numBatches] do
     let (xBuf, yBuf) := batches[bi]!
@@ -134,7 +135,7 @@ def runGPU (p : Program) (batches : Array (RawBuffer × RawBuffer)) (numBatches 
 
   let endTime ← IO.monoNanosNow
   let elapsedNs := endTime - startTime
-  let avgLoss := totalLoss / (Float.ofNat numBatches)
+  let avgLoss := totalLoss / (Float64.ofNat numBatches)
   pure (avgLoss, elapsedNs)
 
 def run (batchSize : Nat := 64) (hidden : Nat := 256) (numBatches : Nat := 20) (lr : Float32 := 0.01) : IO Unit := do
@@ -175,14 +176,14 @@ def run (batchSize : Nat := 64) (hidden : Nat := 256) (numBatches : Nat := 20) (
   -- CPU benchmark
   IO.println "\nRunning CPU benchmark..."
   let (cpuLoss, cpuNs) ← runCPU p batches numBatches
-  let cpuMs := Float.ofNat cpuNs / 1000000.0
-  let cpuPerBatch := cpuMs / Float.ofNat numBatches
+  let cpuMs := Float64.ofNat cpuNs / 1000000.0
+  let cpuPerBatch := cpuMs / Float64.ofNat numBatches
 
   -- GPU benchmark
   IO.println "Running GPU benchmark..."
   let (gpuLoss, gpuNs) ← runGPU p batches numBatches
-  let gpuMs := Float.ofNat gpuNs / 1000000.0
-  let gpuPerBatch := gpuMs / Float.ofNat numBatches
+  let gpuMs := Float64.ofNat gpuNs / 1000000.0
+  let gpuPerBatch := gpuMs / Float64.ofNat numBatches
 
   -- Results
   IO.println "\n=== Results ==="
@@ -196,7 +197,7 @@ def run (batchSize : Nat := 64) (hidden : Nat := 256) (numBatches : Nat := 20) (
     IO.println s!"CPU faster by: {1.0 / speedup}x (GPU overhead dominates at this size)"
 
   -- Verify correctness (losses should be similar)
-  let lossDiff := Float.abs (cpuLoss - gpuLoss)
+  let lossDiff := Float64.abs (cpuLoss - gpuLoss)
   if lossDiff > 0.1 then
     IO.println s!"WARNING: Loss mismatch! CPU={cpuLoss} GPU={gpuLoss} diff={lossDiff}"
   else

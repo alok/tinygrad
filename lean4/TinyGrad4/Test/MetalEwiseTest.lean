@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.MetalEwise
 import TinyGrad4.Backend.DeviceBuffer
@@ -19,7 +20,7 @@ open TinyGrad4.Backend
 open TinyGrad4.Backend.MetalEwise
 
 /-- Pack float64 array to float32 bytes -/
-private def packF32 (data : Array Float) : ByteArray :=
+private def packF32 (data : Array Float64) : ByteArray :=
   Native.packF32FromF64 ⟨data⟩
 
 /-- Test direct GPU kernel dispatch -/
@@ -61,9 +62,9 @@ kernel void test_double(
 
   -- Verify: should be [2.0, 4.0, 6.0, 8.0]
   let expected := #[2.0, 4.0, 6.0, 8.0]
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   for i in [:decoded.data.size] do
-    let diff := Float.abs (decoded.data[i]! - expected[i]!)
+    let diff := Float64.abs (decoded.data[i]! - expected[i]!)
     if diff > maxDiff then
       maxDiff := diff
 
@@ -117,9 +118,9 @@ def testFusedEwiseGPU : IO Unit := do
   IO.println s!"  Output: {decoded.data}"
 
   let expected := #[2.0, 4.0, 6.0, 8.0]
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   for i in [:decoded.data.size] do
-    let diff := Float.abs (decoded.data[i]! - expected[i]!)
+    let diff := Float64.abs (decoded.data[i]! - expected[i]!)
     if diff > maxDiff then
       maxDiff := diff
 
@@ -139,9 +140,9 @@ def testLargeTensor : IO Unit := do
 
   -- Create a large tensor (100K elements)
   let numel := 100000
-  let mut inputData : Array Float := #[]
+  let mut inputData : Array Float64 := #[]
   for i in [:numel] do
-    inputData := inputData.push (Float.ofNat (i % 100))
+    inputData := inputData.push (Float64.ofNat (i % 100))
 
   let input : RawBuffer := { dtype := .float32, data := packF32 inputData }
 
@@ -163,14 +164,14 @@ kernel void {kernelName}(
   let startTime ← IO.monoNanosNow
   let result ← runEwiseKernel kernelName shader #[input] numel
   let endTime ← IO.monoNanosNow
-  let gpuTimeMs := Float.ofNat (endTime - startTime) / 1000000.0
+  let gpuTimeMs := Float64.ofNat (endTime - startTime) / 1000000.0
 
   -- Verify result
   let decoded := result.decode
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   for i in [:min 100 decoded.data.size] do
-    let expected := Float.ofNat ((i % 100) * 2)
-    let diff := Float.abs (decoded.data[i]! - expected)
+    let expected := Float64.ofNat ((i % 100) * 2)
+    let diff := Float64.abs (decoded.data[i]! - expected)
     if diff > maxDiff then
       maxDiff := diff
 
@@ -193,9 +194,9 @@ def testPersistentGPU : IO Unit := do
 
   -- Test DeviceBuffer.fromCPU and ensureGPU
   let numel := 10000
-  let mut inputData : Array Float := #[]
+  let mut inputData : Array Float64 := #[]
   for i in [:numel] do
-    inputData := inputData.push (Float.ofNat (i % 10))
+    inputData := inputData.push (Float64.ofNat (i % 10))
 
   let cpuBuf : RawBuffer := { dtype := .float32, data := packF32 inputData }
 
@@ -206,7 +207,7 @@ def testPersistentGPU : IO Unit := do
   let startUpload ← IO.monoNanosNow
   let (dbufOnGPU, _) ← DeviceBuffer.DeviceBuffer.toGPU dbuf
   let endUpload ← IO.monoNanosNow
-  let uploadMs := Float.ofNat (endUpload - startUpload) / 1000000.0
+  let uploadMs := Float64.ofNat (endUpload - startUpload) / 1000000.0
 
   IO.println s!"  Upload time: {uploadMs} ms"
   IO.println s!"  Buffer on GPU: {DeviceBuffer.DeviceBuffer.isOnGPU dbufOnGPU}"
@@ -245,7 +246,7 @@ def testPersistentGPU : IO Unit := do
   let result3 ← runEwiseKernelDevice "chain_mul05" shader3 #[result2] numel
 
   let endChain ← IO.monoNanosNow
-  let chainMs := Float.ofNat (endChain - startChain) / 1000000.0
+  let chainMs := Float64.ofNat (endChain - startChain) / 1000000.0
 
   IO.println s!"  Chain of 3 ops (no CPU copies): {chainMs} ms"
 
@@ -253,17 +254,17 @@ def testPersistentGPU : IO Unit := do
   let startDownload ← IO.monoNanosNow
   let finalCPU ← DeviceBuffer.DeviceBuffer.toCPU result3
   let endDownload ← IO.monoNanosNow
-  let downloadMs := Float.ofNat (endDownload - startDownload) / 1000000.0
+  let downloadMs := Float64.ofNat (endDownload - startDownload) / 1000000.0
 
   IO.println s!"  Download time: {downloadMs} ms"
 
   -- Verify result: ((x * 2) + 1) * 0.5 = x + 0.5
   let decoded := finalCPU.decode
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   for i in [:min 100 decoded.data.size] do
-    let x := Float.ofNat (i % 10)
+    let x := Float64.ofNat (i % 10)
     let expected := x + 0.5
-    let diff := Float.abs (decoded.data[i]! - expected)
+    let diff := Float64.abs (decoded.data[i]! - expected)
     if diff > maxDiff then
       maxDiff := diff
 
@@ -295,8 +296,8 @@ def testMatmulDevice : IO Unit := do
   -- C = [[1*1+2*3+3*5, 1*2+2*4+3*6], [4*1+5*3+6*5, 4*2+5*4+6*6]]
   --   = [[22, 28], [49, 64]]
 
-  let aData : Array Float := #[1,2,3, 4,5,6]
-  let bData : Array Float := #[1,2, 3,4, 5,6]
+  let aData : Array Float64 := #[1,2,3, 4,5,6]
+  let bData : Array Float64 := #[1,2, 3,4, 5,6]
 
   let aBuf : RawBuffer := { dtype := .float32, data := packF32 aData }
   let bBuf : RawBuffer := { dtype := .float32, data := packF32 bData }
@@ -312,7 +313,7 @@ def testMatmulDevice : IO Unit := do
   let startTime ← IO.monoNanosNow
   let cDevice ← MetalMatmul.matmul2DDevice aDevice bDevice 2 3 2
   let endTime ← IO.monoNanosNow
-  let matmulMs := Float.ofNat (endTime - startTime) / 1000000.0
+  let matmulMs := Float64.ofNat (endTime - startTime) / 1000000.0
 
   IO.println s!"  Matmul time: {matmulMs} ms"
   IO.println s!"  Result on GPU: {DeviceBuffer.DeviceBuffer.isOnGPU cDevice}"
@@ -325,9 +326,9 @@ def testMatmulDevice : IO Unit := do
 
   -- Verify: [[22, 28], [49, 64]]
   let expected := #[22.0, 28.0, 49.0, 64.0]
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   for i in [:decoded.data.size] do
-    let diff := Float.abs (decoded.data[i]! - expected[i]!)
+    let diff := Float64.abs (decoded.data[i]! - expected[i]!)
     if diff > maxDiff then
       maxDiff := diff
 

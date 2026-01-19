@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.Metal
 
@@ -70,7 +71,7 @@ def main : IO Unit := do
   -- Find first difference
   let mut firstDiff : Option Nat := none
   for i in [:cpuData.size] do
-    if Float.abs (cpuData[i]! - gpuData[i]!) > 0.01 then
+    if Float64.abs (cpuData[i]! - gpuData[i]!) > 0.01 then
       firstDiff := some i
       break
 

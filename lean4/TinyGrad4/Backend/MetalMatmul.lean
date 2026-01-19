@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.MetalRenderer
 import TinyGrad4.Backend.Buffer

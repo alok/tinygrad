@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Gradient.Adjoint

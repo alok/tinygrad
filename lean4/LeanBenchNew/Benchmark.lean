@@ -1,3 +1,4 @@
+import Float64
 import Lean
 import LeanBenchNew.LogValue
 import LeanBenchNew.Stats
@@ -108,8 +109,8 @@ def printComparison (results : Array Result) : IO Unit := do
     let speedup := if r.avgTimeNs > 0 then baseline.toFloat / r.avgTimeNs.toFloat else 0
     let nameStr := padRight (r.name.take 34).toString 34
     let timeStr := padRight (formatTime r.avgTimeNs) 14
-    let speedupStr := if speedup >= 1.05 then s!"{Float.round (speedup * 10) / 10}x faster"
-                      else if speedup <= 0.95 then s!"{Float.round (10 / speedup) / 10}x slower"
+    let speedupStr := if speedup >= 1.05 then s!"{Float64.round (speedup * 10) / 10}x faster"
+                      else if speedup <= 0.95 then s!"{Float64.round (10 / speedup) / 10}x slower"
                       else "baseline"
     IO.println s!"│ {nameStr} │ {timeStr} │ {padRight (speedupStr.take 16).toString 16} │"
 

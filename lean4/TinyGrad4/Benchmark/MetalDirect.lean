@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Benchmark.Framework
 import TinyGrad4.Benchmark.Kernels
@@ -29,7 +30,7 @@ open TinyGrad4.Benchmark
 open TinyGrad4.Benchmark.Kernels
 
 /-- Timing helper: returns elapsed microseconds -/
-def timeKernel (_iterations : Nat) (action : IO Unit) : IO Float := do
+def timeKernel (_iterations : Nat) (action : IO Unit) : IO Float64 := do
   -- Warmup run
   action
   metalSync
@@ -40,8 +41,8 @@ def timeKernel (_iterations : Nat) (action : IO Unit) : IO Float := do
   metalSync
   let stop ← IO.monoNanosNow
 
-  let elapsed : Float := (stop - start).toFloat
-  let perIter : Float := elapsed / 1000.0  -- ns to μs
+  let elapsed : Float64 := (stop - start).toFloat
+  let perIter : Float64 := elapsed / 1000.0  -- ns to μs
   return perIter
 
 /-- Run a direct Metal FFI benchmark -/
@@ -154,7 +155,7 @@ def testFFI : IO Unit := do
   IO.println s!"  Allocated buffer"
 
   -- Test copy in/out
-  let arr := (List.replicate 1000 (1.5 : Float)).toArray
+  let arr := (List.replicate 1000 (1.5 : Float64)).toArray
   let data := FloatArray.mk arr
   metalCopyIn buf data
   let output ← metalCopyOut buf

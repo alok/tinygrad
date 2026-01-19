@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Backend.Pattern
@@ -45,7 +46,7 @@ structure Plan where
   /-- Beta (bias) parameter ID, if present -/
   beta : Option UOpId
   /-- Epsilon value (default 1e-5) -/
-  eps : Float := 1e-5
+  eps : Float64 := 1e-5
   /-- Axes to normalize over (typically last axis) -/
   axes : List Nat
   /-- Shape of the input -/

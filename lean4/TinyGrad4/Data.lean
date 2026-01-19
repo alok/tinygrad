@@ -1,3 +1,4 @@
+import Float64
 -- Core types
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.ArrayN

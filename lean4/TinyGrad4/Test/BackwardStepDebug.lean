@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Data.MNIST
 import TinyGrad4.Backend.Metal
@@ -22,8 +23,8 @@ open Std
 def checkNaN (name : String) (buf : RawBuffer) : IO Bool := do
   let decoded := buf.decode.data
   let mut nanCount := 0
-  let mut minVal : Float := 1e30
-  let mut maxVal : Float := -1e30
+  let mut minVal : Float64 := 1e30
+  let mut maxVal : Float64 := -1e30
   for v in decoded do
     if v != v then
       nanCount := nanCount + 1
@@ -51,7 +52,7 @@ def compareCPUGPU (name : String) (cpuCache gpuCache : HashMap UOpId RawBuffer) 
 
   let mut cpuNaN := 0
   let mut gpuNaN := 0
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
 
   for i in [:Nat.min cpuDecoded.size gpuDecoded.size] do
     let cv := cpuDecoded[i]!
@@ -59,7 +60,7 @@ def compareCPUGPU (name : String) (cpuCache gpuCache : HashMap UOpId RawBuffer) 
     if cv != cv then cpuNaN := cpuNaN + 1
     if gv != gv then gpuNaN := gpuNaN + 1
     if cv == cv && gv == gv then
-      let diff := Float.abs (cv - gv)
+      let diff := Float64.abs (cv - gv)
       if diff > maxDiff then maxDiff := diff
 
   if cpuNaN > 0 || gpuNaN > 0 then

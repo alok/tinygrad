@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 import TinyGrad4.Backend.Interpreter
@@ -25,18 +26,18 @@ structure Parameter (shape : List Nat) (dtype : DType) where
 
 /-- SGD optimizer state -/
 structure SGD where
-  learningRate : Float := 0.01
-  momentum : Float := 0.0
+  learningRate : Float64 := 0.01
+  momentum : Float64 := 0.0
 
 namespace SGD
 
 /-- Create SGD optimizer -/
-def create (lr : Float := 0.01) (momentum : Float := 0.0) : SGD :=
+def create (lr : Float64 := 0.01) (momentum : Float64 := 0.0) : SGD :=
   { learningRate := lr, momentum := momentum }
 
 /-- Build UOps for SGD update formula.
     Returns new_param as UOp: param - lr * grad -/
-def buildUpdateUOp (param grad : UOp) (lr : Float) : TensorM UOp := do
+def buildUpdateUOp (param grad : UOp) (lr : Float64) : TensorM UOp := do
   let dtype := param.dtype
   let shape := param.shape
 
@@ -52,13 +53,13 @@ def buildUpdateUOp (param grad : UOp) (lr : Float) : TensorM UOp := do
 
 /-- Single step update using UOps.
     Returns: updated param RawBuffer -/
-def stepOneUOp (paramUop gradUop : UOp) (lr : Float) (env : Env) : TensorM RawBuffer := do
+def stepOneUOp (paramUop gradUop : UOp) (lr : Float64) (env : Env) : TensorM RawBuffer := do
   let paramNew ← buildUpdateUOp paramUop gradUop lr
   pure (eval paramNew env)
 
 /-- ByteArray-level update for float32 buffers (fast native path).
     Uses native float32 math for maximum performance. -/
-def updateRawF32 (data grad : RawBuffer) (lr : Float) : RawBuffer :=
+def updateRawF32 (data grad : RawBuffer) (lr : Float64) : RawBuffer :=
   if data.dtype != .float32 || grad.dtype != .float32 then
     data
   else
@@ -69,13 +70,13 @@ def updateRawF32 (data grad : RawBuffer) (lr : Float) : RawBuffer :=
       { dtype := .float32, data := out }
 
 /-- Single step update that stays in RawBuffers (native fast path). -/
-def stepOneRaw (paramUop gradUop : UOp) (lr : Float) (env : Env) : RawBuffer :=
+def stepOneRaw (paramUop gradUop : UOp) (lr : Float64) (env : Env) : RawBuffer :=
   let paramData := eval paramUop env
   let gradData := eval gradUop env
   updateRawF32 paramData gradData lr
 
 /-- Cached eval + raw update (IO). -/
-def stepOneRawCached (paramUop gradUop : UOp) (lr : Float) (env : Env) : IO RawBuffer := do
+def stepOneRawCached (paramUop gradUop : UOp) (lr : Float64) (env : Env) : IO RawBuffer := do
   let vals ← evalManyCached [paramUop, gradUop] env
   let paramData := vals.getD paramUop.uid (RawBuffer.zeros paramUop.dtype (listProd paramUop.shape))
   let gradData := vals.getD gradUop.uid (RawBuffer.zeros gradUop.dtype (listProd gradUop.shape))
@@ -88,7 +89,7 @@ end SGD
 def sgdStep {s : List Nat} {d : DType}
     (loss : Scalar d)
     (params : List (StaticTensor s d))
-    (lr : Float)
+    (lr : Float64)
     (env : Env := ∅)
     : TensorM (List RawBuffer) := do
   -- Compute gradients
@@ -113,7 +114,7 @@ def sgdStep {s : List Nat} {d : DType}
 def sgdStepRaw {s : List Nat} {d : DType}
     (loss : Scalar d)
     (params : List (StaticTensor s d))
-    (lr : Float)
+    (lr : Float64)
     (env : Env := ∅)
     : TensorM (List RawBuffer) := do
   let paramUops := params.map (·.uop)

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 

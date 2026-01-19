@@ -1,7 +1,8 @@
+import Float64
 import TinyGrad4.Backend.Device
 import TinyGrad4.Backend.Cuda
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -44,7 +45,7 @@ def testBufferRoundtrip : IO Unit := do
   IO.println s!"Output: {result.data.toList}"
 
   -- Verify
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   for i in [:testData.size] do
     if _h : i < testData.size ∧ i < result.size then
       let diff := (testData.data[i]! - result.data[i]!).abs
@@ -104,7 +105,7 @@ def testAddKernel : IO Unit := do
   IO.println s!"a + b = {result.data.toList}"
 
   -- Verify
-  let expected : List Float := [11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0]
+  let expected : List Float64 := [11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0]
   let mut passed := true
   for i in [:size] do
     if _h : i < result.size then
@@ -158,7 +159,7 @@ def testMulKernel : IO Unit := do
 
   IO.println s!"a * b = {result.data.toList}"
 
-  let expected : List Float := [20.0, 30.0, 40.0, 50.0]
+  let expected : List Float64 := [20.0, 30.0, 40.0, 50.0]
   let mut passed := true
   for i in [:size] do
     if _h : i < result.size then
@@ -192,8 +193,8 @@ def benchmarkVectorAdd : IO Unit := do
 "
 
   -- Create data
-  let mut aData : Array Float := #[]
-  let mut bData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
+  let mut bData : Array Float64 := #[]
   for i in [:size] do
     aData := aData.push ((i % 1000).toFloat / 1000.0)
     bData := bData.push (((i + 500) % 1000).toFloat / 1000.0)

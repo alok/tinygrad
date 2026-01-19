@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Transform
 import TinyGrad4.Data.Shuffle
@@ -31,7 +32,7 @@ set_option linter.useRawBuffer false
 /-- A single MNIST sample (image pixels + label) -/
 structure MNISTSample where
   /-- Flattened 28x28 = 784 pixel values normalized to [0, 1] -/
-  pixels : Array Float
+  pixels : Array Float64
   /-- Label 0-9 -/
   label : Nat
   deriving Repr, Inhabited
@@ -66,11 +67,11 @@ instance : Dataset MNISTDataset MNISTSample where
 /-- A batch of MNIST samples -/
 structure MNISTBatch where
   /-- Stacked pixels [batchSize, 784] as flat array -/
-  pixels : Array Float
-  /-- Labels as Float for compatibility -/
-  labels : Array Float
+  pixels : Array Float64
+  /-- Labels as Float64 for compatibility -/
+  labels : Array Float64
   /-- One-hot encoded labels [batchSize, 10] -/
-  oneHotLabels : Array Float
+  oneHotLabels : Array Float64
   /-- Actual batch size (may be smaller for last batch) -/
   size : Nat
   deriving Repr, Inhabited

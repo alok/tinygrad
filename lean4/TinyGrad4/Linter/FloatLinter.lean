@@ -3,6 +3,7 @@ Copyright (c) 2024 TinyGrad4. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: TinyGrad4 Contributors
 -/
+import Float64
 import Lean
 
 /-!
@@ -68,7 +69,8 @@ def floatWarningMessage : MessageData :=
   m!"⚠️ Use `Float64` instead of `Float` for clarity.\n\n" ++
   m!"**Why?** `Float` is an alias for `Float64`, but the implicit naming causes confusion " ++
   m!"in mixed-precision code (Float32/Float16/Float64).\n\n" ++
-  m!"**Fix:** Replace `Float` with `Float64` to make the 64-bit precision explicit.\n\n" ++
+  m!"**Fix:** Replace `Float` with `Float64` to make the 64-bit precision explicit.\n" ++
+  m!"If `Float64` is not in scope, add `import Float64`.\n\n" ++
   m!"**Example:**\n" ++
   m!"  ❌  `def f (x : Float) : Float := x * 2.0`\n" ++
   m!"  ✅  `def f (x : Float64) : Float64 := x * 2.0`\n\n" ++

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Basic
 import TinyGrad4.Shape
 
@@ -39,7 +40,7 @@ def Ty.denote : Ty → Type
   | .f32 => Float32
   | .bool => Bool
 
-abbrev Index (shape : Shape) : Type := List Nat
+abbrev Index (shape : Shape) : Type := Shape.Index shape
 
 inductive ReduceOp where
   | sum
@@ -85,11 +86,9 @@ def evalExpr (ops : ScalarOps Float32) (read : (t : Ty) → Nat → Ty.denote t)
   | .where_ c x y => ops.where_ (evalExpr ops read c) (evalExpr ops read x) (evalExpr ops read y)
   | .truthy x => (evalExpr ops read x).toBits != 0
 
-private def setAt (xs : List Nat) (i v : Nat) : List Nat :=
-  match xs, i with
-  | [], _ => []
-  | _ :: rest, 0 => v :: rest
-  | x :: rest, i + 1 => x :: setAt rest i v
+private def finRange : (n : Nat) → List (Fin n)
+  | 0 => []
+  | n + 1 => (finRange n).map Fin.castSucc ++ [Fin.last n]
 
 def mapExprF32 {shape : Shape} (ops : ScalarOps Float32) (expr : Expr .f32)
     (read : (t : Ty) → Nat → Index shape → Ty.denote t) : Index shape → Float32 :=
@@ -106,30 +105,32 @@ private def reduceStep (op : ReduceOp) (ops : ScalarOps Float32) (a b : Float32)
   | .max => ops.max a b
 
 partial def mapReduceKeepdimF32 {shape : Shape} (ops : ScalarOps Float32) (op : ReduceOp) (expr : Expr .f32)
-    (axes : List Nat) (read : (t : Ty) → Nat → Index shape → Ty.denote t) : Index shape → Float32 :=
+    (axes : List (Shape.Axis shape)) (read : (t : Ty) → Nat → Index shape → Ty.denote t) : Index shape → Float32 :=
   let mapFn := mapExprF32 ops expr read
   let shapeList := shape
-  let rec go (axs : List Nat) (idx : List Nat) : Float32 :=
+  let rec go (axs : List (Shape.Axis shape)) (idx : Index shape) : Float32 :=
     match axs with
     | [] => mapFn idx
     | ax :: rest =>
-      let size := listGetD shapeList ax 1
+      let size := Shape.dimF shapeList ax
       Id.run do
         let mut acc := reduceInit op ops
-        for i in [:size] do
-          let idx' := setAt idx ax i
+        for i in finRange size do
+          let idx' := Shape.Index.setAt idx ax i
           let v := go rest idx'
           acc := reduceStep op ops acc v
         return acc
   fun outIdx => go axes outIdx
 
 /-- Broadcast an index from a smaller shape into a larger one. -/
-def broadcastIndex (small big : Shape) (idx : Index big) : Index small :=
+def broadcastIndex (small big : Shape) (idx : Index big) : Option (Index small) :=
   let len := Nat.max small.length big.length
   let small' := List.replicate (len - small.length) 1 ++ small
-  let idx' := List.replicate (len - idx.length) 0 ++ idx
+  let idxList := Shape.Index.toList idx
+  let idx' := List.replicate (len - idxList.length) 0 ++ idxList
   let mapped := (small'.zip idx').map (fun (s, i) => if s == 1 then 0 else i)
-  mapped.drop (len - small.length)
+  let outList := mapped.drop (len - small.length)
+  Shape.Index.ofList? small outList
 
 namespace Spec
 

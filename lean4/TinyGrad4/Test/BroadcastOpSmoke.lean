@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -11,14 +12,14 @@ while the runtime still checks broadcastability.
 
 namespace TinyGrad4.Test.BroadcastOpSmoke
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
 open TinyGrad4.Interpreter
 open TinyGrad4.StaticTensor
 
-private def assertEqList (got expected : List Float) (msg : String) : IO Unit := do
+private def assertEqList (got expected : List Float64) (msg : String) : IO Unit := do
   if got != expected then
     throw (IO.userError s!"{msg}: got={got} expected={expected}")
 
@@ -30,8 +31,8 @@ private def testScalarBroadcastAdd : IO Unit := do
       let z ← x +. y
       pure (x.uop.uid, y.uop.uid, z.uop)
 
-  let xVals : Array Float := #[1.0, 2.0, 3.0,  4.0, 5.0, 6.0]
-  let yVal : Array Float := #[10.0]
+  let xVals : Array Float64 := #[1.0, 2.0, 3.0,  4.0, 5.0, 6.0]
+  let yVal : Array Float64 := #[10.0]
   let env : Env := (∅ : Env)
     |>.insert xId (RawBuffer.ofFloats xVals)
     |>.insert yId (RawBuffer.ofFloats yVal)
@@ -47,8 +48,8 @@ private def testRankBroadcastAdd : IO Unit := do
       let z ← x +. y
       pure (x.uop.uid, y.uop.uid, z.uop)
 
-  let xVals : Array Float := #[1.0, 2.0, 3.0]
-  let yVals : Array Float := #[10.0, 20.0]
+  let xVals : Array Float64 := #[1.0, 2.0, 3.0]
+  let yVals : Array Float64 := #[10.0, 20.0]
   let env : Env := (∅ : Env)
     |>.insert xId (RawBuffer.ofFloats xVals)
     |>.insert yId (RawBuffer.ofFloats yVals)

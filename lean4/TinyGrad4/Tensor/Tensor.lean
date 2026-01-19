@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Graph
 
@@ -82,21 +83,21 @@ private def fromArrayF32 (shape : Shape) (vals : Array Float32) : TensorM (Stati
   let reshaped ← UOp.reshape base.uop shape
   pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
 
-private def intToFloat (v : Int) : Float :=
+private def intToFloat (v : Int) : Float64 :=
   if v >= 0 then
-    Float.ofNat v.toNat
+    Float64.ofNat v.toNat
   else
-    -Float.ofNat (-v).toNat
+    -Float64.ofNat (-v).toNat
 
-private def twoPow64 : Float :=
-  Float.ofNat ((2 : Nat) ^ 64)
+private def twoPow64 : Float64 :=
+  Float64.ofNat ((2 : Nat) ^ 64)
 
 private def lcgStep (s : UInt64) : UInt64 :=
   s * 6364136223846793005 + 1
 
-private def nextUniform (s : UInt64) : UInt64 × Float :=
+private def nextUniform (s : UInt64) : UInt64 × Float64 :=
   let s' := lcgStep s
-  let f := (Float.ofNat s'.toNat) / twoPow64
+  let f := (Float64.ofNat s'.toNat) / twoPow64
   (s', f)
 
 private def randArray (n : Nat) (seed : Nat) : Array Float32 := Id.run do
@@ -112,7 +113,7 @@ private def randnArray (n : Nat) (seed : Nat) : Array Float32 := Id.run do
   let mut out := Array.emptyWithCapacity n
   let mut s := UInt64.ofNat seed
   for _ in [:n] do
-    let mut acc : Float := 0.0
+    let mut acc : Float64 := 0.0
     for _ in [:12] do
       let (s', u) := nextUniform s
       s := s'
@@ -136,7 +137,7 @@ def arange (n : Nat) (dtype : DType := .float32) : TensorM (StaticTensor [n] dty
   let vals : Array Float32 := Id.run do
     let mut out := Array.emptyWithCapacity n
     for i in [:n] do
-      out := out.push (Float.ofNat i).toFloat32
+      out := out.push (Float64.ofNat i).toFloat32
     return out
   let base ← fromArrayF32 [n] vals
   if dtype == .float32 then
@@ -151,11 +152,11 @@ def linspace (start stop : Float32) (steps : Nat) (dtype : DType := .float32)
   let stopF := stop.toFloat
   let step :=
     if steps <= 1 then 0.0
-    else (stopF - startF) / (Float.ofNat (steps - 1))
+    else (stopF - startF) / (Float64.ofNat (steps - 1))
   let vals : Array Float32 := Id.run do
     let mut out := Array.emptyWithCapacity steps
     for i in [:steps] do
-      let v := startF + step * (Float.ofNat i)
+      let v := startF + step * (Float64.ofNat i)
       out := out.push v.toFloat32
     return out
   let base ← fromArrayF32 [steps] vals

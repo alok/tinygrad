@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -6,31 +7,31 @@ import TinyGrad4
 Smoke tests for movement ops that are performance-critical:
 - `EXPAND` for non-scalar broadcasting
 - `PERMUTE` for rank > 2 tensors
-- bool expand/permute (sanity)
+- bool expandUnsafe/permuteUnsafe (sanity)
 -/
 
 namespace TinyGrad4.Test.ExpandPermute
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
 open Interpreter
 
-private def assertAllClose (arr : Array Float) (expected : Array Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : Array Float64) (expected : Array Float64) (tol : Float64) (label : String) : IO Unit := do
   if arr.size != expected.size then
     throw (IO.userError s!"{label}: size {arr.size} != {expected.size}")
   for i in [:arr.size] do
     let v := arr[i]!
     let e := expected[i]!
-    let diff := Float.abs (v - e)
+    let diff := Float64.abs (v - e)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {e} diff {diff} > {tol}")
 
-private def mkRange (n : Nat) : Array Float := Id.run do
+private def mkRange (n : Nat) : Array Float64 := Id.run do
   let mut out := Array.emptyWithCapacity n
   for i in [:n] do
-    out := out.push (Float.ofNat i)
+    out := out.push (Float64.ofNat i)
   return out
 
 def testExpandRow : IO Unit := do
@@ -39,7 +40,7 @@ def testExpandRow : IO Unit := do
     let e ← UOp.expand b [2, 3]
     pure (b, e)
 
-  let inp : Array Float := #[10.0, 11.0, 12.0]
+  let inp : Array Float64 := #[10.0, 11.0, 12.0]
   let env := Interpreter.setBuffer (∅ : Env) buf (RawBuffer.ofFloats inp)
   let out := (Interpreter.eval expanded env).toFloatArray.data
   assertAllClose out #[10.0, 11.0, 12.0, 10.0, 11.0, 12.0] 0.0001 "expandRow"
@@ -59,14 +60,14 @@ def testPermute3D : IO Unit := do
   if out.size != 4 * 3 * 2 then
     throw (IO.userError s!"permute3D: size {out.size} != {4 * 3 * 2}")
 
-  -- Input values are v[idx] = idx (as Float), so expected output is just the mapped flat index.
+  -- Input values are v[idx] = idx (as Float64), so expected output is just the mapped flat index.
   for i in [:out.size] do
     let outIdx := Interpreter.unflattenIndex i permuted.shape
     let inIdx := [outIdx.getD 2 0, outIdx.getD 1 0, outIdx.getD 0 0]
     let expectedIdx := Interpreter.flattenIndex inIdx [2, 3, 4]
-    let expected : Float := Float.ofNat expectedIdx
+    let expected : Float64 := Float64.ofNat expectedIdx
     let v := out[i]!
-    let diff := Float.abs (v - expected)
+    let diff := Float64.abs (v - expected)
     if diff > 0.0001 then
       throw (IO.userError s!"permute3D: idx {i} value {v} expected {expected} diff {diff}")
 
@@ -89,7 +90,7 @@ def testPad2D : IO Unit := do
     let p ← UOp.pad b [(1, 1), (2, 0)]
     pure (b, p)
 
-  let inp : Array Float := #[1.0, 2.0]
+  let inp : Array Float64 := #[1.0, 2.0]
   let env := Interpreter.setBuffer (∅ : Env) buf (RawBuffer.ofFloats inp)
   let out := (Interpreter.eval padded env).toFloatArray.data
   if padded.shape != [3, 4] then
@@ -112,8 +113,8 @@ def testFlip2D : IO Unit := do
   let env := Interpreter.setBuffer (∅ : Env) buf (RawBuffer.ofFloats inp)
   let out1 := (Interpreter.eval flipped1 env).toFloatArray.data
   let out2 := (Interpreter.eval flipped2 env).toFloatArray.data
-  assertAllClose out1 #[2.0, 1.0, 0.0, 5.0, 4.0, 3.0] 0.0001 "flip axis1"
-  assertAllClose out2 #[5.0, 4.0, 3.0, 2.0, 1.0, 0.0] 0.0001 "flip axes0,1"
+  assertAllClose out1 #[2.0, 1.0, 0.0, 5.0, 4.0, 3.0] 0.0001 "flipUnsafe axis1"
+  assertAllClose out2 #[5.0, 4.0, 3.0, 2.0, 1.0, 0.0] 0.0001 "flipUnsafe axes0,1"
 
 def testBoolExpandPermute : IO Unit := do
   let (buf, expanded, permuted) := runTensorM do
@@ -137,7 +138,7 @@ def testBoolExpandPermute : IO Unit := do
   if outE.data != eExpected then
     throw (IO.userError s!"boolExpand: {outE.data.toList} != {eExpected.toList}")
 
-  -- permute [1,0] on [2,2]: [[1,0],[1,0]] -> [[1,1],[0,0]]
+  -- permuteUnsafe [1,0] on [2,2]: [[1,0],[1,0]] -> [[1,1],[0,0]]
   let pExpected := ByteArray.mk #[1, 1, 0, 0]
   if outP.data != pExpected then
     throw (IO.userError s!"boolPermute: {outP.data.toList} != {pExpected.toList}")
@@ -145,17 +146,17 @@ def testBoolExpandPermute : IO Unit := do
 def runAll : IO Unit := do
   IO.println "=== Expand/Permute Tests ==="
   testExpandRow
-  IO.println "✓ expand non-scalar"
+  IO.println "✓ expandUnsafe non-scalar"
   testPermute3D
-  IO.println "✓ permute 3D"
+  IO.println "✓ permuteUnsafe 3D"
   testShrink2D
-  IO.println "✓ shrink 2D"
+  IO.println "✓ shrinkUnsafe 2D"
   testPad2D
-  IO.println "✓ pad 2D"
+  IO.println "✓ padUnsafe 2D"
   testFlip2D
-  IO.println "✓ flip 2D"
+  IO.println "✓ flipUnsafe 2D"
   testBoolExpandPermute
-  IO.println "✓ bool expand+permute"
+  IO.println "✓ bool expandUnsafe+permuteUnsafe"
   IO.println "=== Expand/Permute OK ==="
 
 end TinyGrad4.Test.ExpandPermute

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Data.MNISTRaw
 import TinyGrad4.Data.MNISTDataset
 import TinyGrad4.Data.Prefetch

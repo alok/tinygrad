@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Transform
 import TinyGrad4.Data.Shuffle

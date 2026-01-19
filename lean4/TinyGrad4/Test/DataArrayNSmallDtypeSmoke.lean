@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -58,19 +59,19 @@ def testReshape : IO Unit := do
   let vals : Array UInt8 := #[1, 2, 3, 4]
   match DataArrayN.ofArrayU8? [2, 2] vals with
   | some arr =>
-    match DataArrayN.reshape? arr [4] with
+    match DataArrayN.reshapeUnsafe? arr [4] with
     | some reshaped =>
       let decoded := DataArrayN.decodeU8 reshaped
-      assertEqArray decoded vals "reshape u8"
+      assertEqArray decoded vals "reshapeUnsafe u8"
     | none =>
-      throw (IO.userError "reshape u8: reshape? returned none")
-    match DataArrayN.reshape? arr [3] with
+      throw (IO.userError "reshapeUnsafe u8: reshapeUnsafe? returned none")
+    match DataArrayN.reshapeUnsafe? arr [3] with
     | some _ =>
-      throw (IO.userError "reshape u8: expected reshape? to fail on mismatched numel")
+      throw (IO.userError "reshapeUnsafe u8: expected reshapeUnsafe? to fail on mismatched numel")
     | none =>
       pure ()
   | none =>
-    throw (IO.userError "reshape u8: ofArrayU8? returned none")
+    throw (IO.userError "reshapeUnsafe u8: ofArrayU8? returned none")
 
 def runAll : IO Unit := do
   IO.println "=== DataArrayNSmallDtypeSmoke Tests ==="
@@ -83,7 +84,7 @@ def runAll : IO Unit := do
   testI16
   IO.println "✓ int16 pack/unpack"
   testReshape
-  IO.println "✓ reshape"
+  IO.println "✓ reshapeUnsafe"
   IO.println "=== DataArrayNSmallDtypeSmoke OK ==="
 
 end TinyGrad4.Test.DataArrayNSmallDtypeSmoke

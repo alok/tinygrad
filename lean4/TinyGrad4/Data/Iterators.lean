@@ -1,3 +1,4 @@
+import Float64
 import Std.Data.Iterators
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Prefetch

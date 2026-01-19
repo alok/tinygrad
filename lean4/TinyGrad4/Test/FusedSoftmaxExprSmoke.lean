@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -36,13 +37,13 @@ private def f32OpsTest : ScalarOps Float32 :=
     zero := (Float32.ofBits 0)
     negInf := (Float32.ofBits 0xFF800000) }
 
-private def assertAllCloseF32 (got expected : Float32) (tol : Float) (msg : String) : IO Unit := do
-  let diff := Float.abs (got.toFloat - expected.toFloat)
+private def assertAllCloseF32 (got expected : Float32) (tol : Float64) (msg : String) : IO Unit := do
+  let diff := Float64.abs (got.toFloat - expected.toFloat)
   if diff > tol then
     throw (IO.userError s!"{msg}: got={got.toFloat} expected={expected.toFloat} diff={diff}")
 
-private def getF32At (vals : FloatArray) (shape : Shape) (idx : List Nat) : Float32 :=
-  let flat := Interpreter.flattenIndex idx shape
+private def getF32At (vals : FloatArray) (shape : Shape) (idx : Shape.Index shape) : Float32 :=
+  let flat := Interpreter.flattenIndex idx.toList shape
   (vals[flat]!).toFloat32
 
 private def testSoftmax : IO Unit := do
@@ -71,8 +72,12 @@ private def testSoftmax : IO Unit := do
   let outArr := outBuf.decode
 
   let fullShape := xShape
-  let axis := planExpr.axis
-  let reduceShape := Shape.reduce fullShape [axis] true
+  let axisNat := planExpr.axis
+  let reduceShape := Shape.reduce fullShape [axisNat] true
+  let axis :=
+    match Shape.axis? fullShape axisNat with
+    | some a => a
+    | none => throw (IO.userError s!"invalid axis {axisNat} for shape {fullShape}")
 
   let readAtMax : (t : Ty) → Nat → Index fullShape → Ty.denote t
     | .f32, i, outIdx =>
@@ -86,7 +91,9 @@ private def testSoftmax : IO Unit := do
       if i == 0 then
         getF32At xVals fullShape outIdx
       else if i == 1 then
-        maxVal (broadcastIndex reduceShape fullShape outIdx)
+        match broadcastIndex reduceShape fullShape outIdx with
+        | some redIdx => maxVal redIdx
+        | none => (Float32.ofBits 0)
       else
         (Float32.ofBits 0)
     | .bool, _i, _outIdx => false
@@ -98,9 +105,13 @@ private def testSoftmax : IO Unit := do
       if i == 0 then
         getF32At xVals fullShape outIdx
       else if i == 1 then
-        maxVal (broadcastIndex reduceShape fullShape outIdx)
+        match broadcastIndex reduceShape fullShape outIdx with
+        | some redIdx => maxVal redIdx
+        | none => (Float32.ofBits 0)
       else if i == 2 then
-        sumExp (broadcastIndex reduceShape fullShape outIdx)
+        match broadcastIndex reduceShape fullShape outIdx with
+        | some redIdx => sumExp redIdx
+        | none => (Float32.ofBits 0)
       else
         (Float32.ofBits 0)
     | .bool, _i, _outIdx => false
@@ -112,7 +123,11 @@ private def testSoftmax : IO Unit := do
     throw (IO.userError s!"softmax: expected out size {n}, got {outArr.size}")
 
   for i in [:n] do
-    let idx := Interpreter.unflattenIndex i fullShape
+    let idxList := Interpreter.unflattenIndex i fullShape
+    let idx :=
+      match Shape.Index.ofList? fullShape idxList with
+      | some v => v
+      | none => panic! "unflattenIndex produced invalid index"
     let got := (outArr[i]!).toFloat32
     let expected := sem idx
     assertAllCloseF32 got expected 1.0e-4 s!"out[{i}]"

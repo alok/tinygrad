@@ -1,3 +1,4 @@
+import Float64
 /-!
 # TimeM (trusted time-cost annotations)
 

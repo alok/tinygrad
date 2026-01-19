@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Basic
 
 namespace TinyGrad4
@@ -21,6 +22,66 @@ def rank (s : Shape) : Nat := s.length
 
 /-- Get dimension at index (0 if out of bounds) -/
 def dim (s : Shape) (i : Nat) : Nat := listGetD s i 0
+
+/-- A valid axis for a shape. -/
+abbrev Axis (s : Shape) := Fin s.length
+
+/-- Get dimension at a valid axis. -/
+def dimF (s : Shape) (axis : Axis s) : Nat := dim s axis.val
+
+/-- Convert a Nat axis to a valid axis (if in range). -/
+def axis? (s : Shape) (axis : Nat) : Option (Axis s) :=
+  if h : axis < s.length then some ⟨axis, h⟩ else none
+
+/-- Convert a list of Nat axes to valid axes (fails if any are out of range). -/
+def axes? (s : Shape) (axes : List Nat) : Option (List (Axis s)) :=
+  match axes with
+  | [] => some []
+  | a :: rest =>
+    match axis? s a, axes? s rest with
+    | some a', some rest' => some (a' :: rest')
+    | _, _ => none
+
+/-- Index into a shape, with per-dimension bounds tracked at the type level. -/
+inductive Index : Shape → Type
+  | nil : Index []
+  | cons {d : Nat} {ds : Shape} : Fin d → Index ds → Index (d :: ds)
+  deriving Repr
+
+namespace Index
+
+def toList : Index shape → List Nat
+  | .nil => []
+  | .cons i rest => i.val :: toList rest
+
+def ofList? : (shape : Shape) → (idx : List Nat) → Option (Index shape)
+  | [], [] => some .nil
+  | d :: ds, i :: is =>
+    if h : i < d then
+      match ofList? ds is with
+      | some rest => some (.cons ⟨i, h⟩ rest)
+      | none => none
+    else
+      none
+  | _, _ => none
+
+def get {shape : Shape} (idx : Index shape) (axis : Axis shape) : Fin (dimF shape axis) :=
+  match shape, idx, axis with
+  | [], _, ax => nomatch ax
+  | _ :: _, .cons i _, ⟨0, _⟩ => i
+  | _ :: ds, .cons _ rest, ⟨Nat.succ k, hk⟩ =>
+    have hk' : k < ds.length := Nat.lt_of_succ_lt_succ hk
+    get rest ⟨k, hk'⟩
+
+def setAt {shape : Shape} (idx : Index shape) (axis : Axis shape) (val : Fin (dimF shape axis)) : Index shape :=
+  match shape, idx, axis with
+  | [], _, ax => nomatch ax
+  | _ :: _, .cons _ rest, ⟨0, _⟩ => .cons val rest
+  | _ :: ds, .cons i rest, ⟨Nat.succ k, hk⟩ =>
+    have hk' : k < ds.length := Nat.lt_of_succ_lt_succ hk
+    .cons i (setAt rest ⟨k, hk'⟩ val)
+
+end Index
 
 /-- Check if two shapes are broadcastable -/
 def broadcastable (s1 s2 : Shape) : Bool :=
@@ -146,6 +207,26 @@ def expandValid (from_ to : Shape) : Bool :=
 def permuteValid (s : Shape) (perm : List Nat) : Bool :=
   perm.length == s.length &&
   listAll (fun i => perm.contains i) (listRange s.length)
+
+/-- Check if insertDim axis is valid (axis in [0, rank]). -/
+def insertDimValid (s : Shape) (axis : Nat) : Bool :=
+  axis <= s.length
+
+/-- Check if pad is valid (padding length matches rank). -/
+def padValid (s : Shape) (padding : List (Nat × Nat)) : Bool :=
+  s.length == padding.length
+
+/-- Check if flip axes are valid. -/
+def flipValid (s : Shape) (axes : List Nat) : Bool :=
+  listAll (fun a => a < s.length) axes
+
+/-- Check if stacking is valid (nonempty, same rank, axis in [0, rank]). -/
+def stackValid (shapes : List Shape) (axis : Nat) : Bool :=
+  match shapes with
+  | [] => false
+  | s :: ss =>
+    axis <= s.length &&
+    listAll (fun s' => s'.length == s.length) ss
 
 /-- Apply permutation to shape -/
 def permute (s : Shape) (perm : List Nat) : Shape :=

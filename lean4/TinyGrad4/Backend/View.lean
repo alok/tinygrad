@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Shape
 import TinyGrad4.UOp.UOp
 

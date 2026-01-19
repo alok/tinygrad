@@ -1,71 +1,110 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 
 namespace TinyGrad4
 
 namespace StaticTensor
 
-def reshape {s : List Nat} {d : DType} (t : StaticTensor s d)
+def reshapeUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (newShape : List Nat)
     : TensorM (StaticTensor newShape d) := do
   let reshaped ← UOp.reshape t.uop newShape
   pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
+def reshape {s : List Nat} {d : DType} (t : StaticTensor s d)
+    (newShape : List Nat) (h : Shape.reshapeValid s newShape = true)
+    : TensorM (StaticTensor newShape d) := do
+  let _ := h
+  reshapeUnsafe t newShape
+
 def flatten {s : List Nat} {d : DType} (t : StaticTensor s d)
     : TensorM (StaticTensor [listProd s] d) := do
-  -- Use actual UOp shape in case type parameter doesn't match (e.g. after sorry_proof cast)
-  let actualShape := t.uop.shape
-  let reshaped ← UOp.reshape t.uop [listProd actualShape]
+  let reshaped ← UOp.reshape t.uop [listProd s]
   pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
-def expand {s : List Nat} {d : DType} (t : StaticTensor s d)
+def expandUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (newShape : List Nat)
     : TensorM (StaticTensor newShape d) := do
   let expanded ← UOp.expand t.uop newShape
   pure { uop := expanded, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
-def unsqueeze {s : List Nat} {d : DType} (t : StaticTensor s d)
+def expand {s : List Nat} {d : DType} (t : StaticTensor s d)
+    (newShape : List Nat) (h : Shape.expandValid s newShape = true)
+    : TensorM (StaticTensor newShape d) := do
+  let _ := h
+  expandUnsafe t newShape
+
+def unsqueezeUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (axis : Nat)
     : TensorM (StaticTensor (Shape.insertDim s axis 1) d) := do
-  -- Use actual UOp shape in case type parameter doesn't match (e.g. after sorry_proof cast)
-  let actualShape := t.uop.shape
-  let newShape := Shape.insertDim actualShape axis 1
+  let newShape := Shape.insertDim s axis 1
   let reshaped ← UOp.reshape t.uop newShape
   pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
-def permute {s : List Nat} {d : DType} (t : StaticTensor s d)
+def unsqueeze {s : List Nat} {d : DType} (t : StaticTensor s d)
+    (axis : Nat) (h : Shape.insertDimValid s axis = true)
+    : TensorM (StaticTensor (Shape.insertDim s axis 1) d) := do
+  let _ := h
+  unsqueezeUnsafe t axis
+
+def permuteUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (perm : List Nat)
     : TensorM (StaticTensor (Shape.permute s perm) d) := do
   let permuted ← UOp.permute t.uop perm
   pure { uop := permuted, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
-def T {m n : Nat} {d : DType} (t : Matrix m n d) : TensorM (Matrix n m d) :=
-  permute t [1, 0]
+def permute {s : List Nat} {d : DType} (t : StaticTensor s d)
+    (perm : List Nat) (h : Shape.permuteValid s perm = true)
+    : TensorM (StaticTensor (Shape.permute s perm) d) := do
+  let _ := h
+  permuteUnsafe t perm
 
-def pad {s : List Nat} {d : DType} (t : StaticTensor s d)
+def T {m n : Nat} {d : DType} (t : Matrix m n d) : TensorM (Matrix n m d) :=
+  permute t [1, 0] (by simp [Shape.permuteValid, listAll, listRange])
+
+def padUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (padding : List (Nat × Nat))
     : TensorM (StaticTensor (Shape.pad s padding) d) := do
   let padded ← UOp.pad t.uop padding
   pure { uop := padded, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
-def shrink {s : List Nat} {d : DType} (t : StaticTensor s d)
+def pad {s : List Nat} {d : DType} (t : StaticTensor s d)
+    (padding : List (Nat × Nat)) (h : Shape.padValid s padding = true)
+    : TensorM (StaticTensor (Shape.pad s padding) d) := do
+  let _ := h
+  padUnsafe t padding
+
+def shrinkUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (bounds : List (Nat × Nat))
     : TensorM (StaticTensor (Shape.shrink s bounds) d) := do
   let shrunk ← UOp.shrink t.uop bounds
   pure { uop := shrunk, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
-def flip {s : List Nat} {d : DType} (t : StaticTensor s d)
+def shrink {s : List Nat} {d : DType} (t : StaticTensor s d)
+    (bounds : List (Nat × Nat)) (h : Shape.shrinkValid s bounds = true)
+    : TensorM (StaticTensor (Shape.shrink s bounds) d) := do
+  let _ := h
+  shrinkUnsafe t bounds
+
+def flipUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (axes : List Nat)
     : TensorM (StaticTensor s d) := do
   let flipped ← UOp.flip t.uop axes
   pure { uop := flipped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
-def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
+def flip {s : List Nat} {d : DType} (t : StaticTensor s d)
+    (axes : List Nat) (h : Shape.flipValid s axes = true)
+    : TensorM (StaticTensor s d) := do
+  let _ := h
+  flipUnsafe t axes
+
+def stackUnsafe {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
     : TensorM (StaticTensor (Shape.stackOut shapes axis) d) := do
   let rec go {shapes : List Shape} (ts : TensorList d shapes) : TensorM (List UOp) := do
     match ts with
     | .nil => pure []
     | .cons t rest =>
-      let t' ← unsqueeze t axis
+      let t' ← unsqueezeUnsafe t axis
       let rest' ← go rest
       pure (t'.uop :: rest')
   match ts with
@@ -75,6 +114,12 @@ def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : N
     let out ← UOp.cat uops axis
     let reqGrad := TensorList.anyRequiresGrad ts
     pure { uop := out, requiresGrad := reqGrad, h_shape := sorry_proof }
+
+def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
+    (h : Shape.stackValid shapes axis = true)
+    : TensorM (StaticTensor (Shape.stackOut shapes axis) d) := do
+  let _ := h
+  stackUnsafe ts axis
 
 /-- Repeat tensor along each dimension.
     repeats[i] specifies how many times to repeat dimension i.
@@ -86,11 +131,9 @@ def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : N
 def tile {s : List Nat} {d : DType} (t : StaticTensor s d)
     (repeats : List Nat)
     : TensorM (StaticTensor (Shape.repeatOut s repeats) d) := do
-  -- Use actual UOp shape in case type parameter doesn't match (e.g. after sorry_proof cast)
-  let actualShape := t.uop.shape
   -- Align repeats with shape (pad with 1s on left)
-  let len := max actualShape.length repeats.length
-  let s' := List.replicate (len - actualShape.length) 1 ++ actualShape
+  let len := max s.length repeats.length
+  let s' := List.replicate (len - s.length) 1 ++ s
   let r' := List.replicate (len - repeats.length) 1 ++ repeats
 
   -- Build interleaved shapes
@@ -108,9 +151,9 @@ def tile {s : List Nat} {d : DType} (t : StaticTensor s d)
   let finalShape := listZipWith (· * ·) s' r'
 
   -- Apply transforms
-  let t1 ← reshape t unsqueezedShape
-  let t2 ← expand t1 expandedShape
-  let t3 ← reshape t2 finalShape
+  let t1 ← reshapeUnsafe t unsqueezedShape
+  let t2 ← expandUnsafe t1 expandedShape
+  let t3 ← reshapeUnsafe t2 finalShape
   pure { uop := t3.uop, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
 /-- Shrink tensor to target shape (each dim becomes min of current and target).
@@ -118,11 +161,9 @@ def tile {s : List Nat} {d : DType} (t : StaticTensor s d)
 def shrinkTo {s : List Nat} {d : DType} (t : StaticTensor s d)
     (targetShape : List Nat)
     : TensorM (StaticTensor targetShape d) := do
-  -- Use actual UOp shape in case type parameter doesn't match (e.g. after sorry_proof cast)
-  let actualShape := t.uop.shape
   -- Compute bounds: (0, min(s[i], target[i]))
-  let bounds := listZipWith (fun si ti => (0, min si ti)) actualShape targetShape
-  let shrunk ← shrink t bounds
+  let bounds := listZipWith (fun si ti => (0, min si ti)) s targetShape
+  let shrunk ← shrinkUnsafe t bounds
   pure { uop := shrunk.uop, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
 /-- Ceiling division -/
@@ -182,7 +223,7 @@ def pool {s : List Nat} {d : DType} (t : StaticTensor s d)
   -- [..., k0*(i0*f0+d0)] → [..., k0, (i0*f0+d0)]
   let reshapeShape := noop ++
     (listZipWith4 (fun ki ii di fi => [ki, ii * fi + di]) kernelSize i_ dilation f_).flatten
-  let x ← reshape x reshapeShape
+  let x ← reshapeUnsafe x reshapeShape
 
   -- Step 4: Handle stride - shrink and reshape
   let strideShape1 := noop ++
@@ -191,7 +232,7 @@ def pool {s : List Nat} {d : DType} (t : StaticTensor s d)
 
   let strideShape2 := noop ++
     (listZipWith3 (fun ki oi si => [ki, oi, si]) kernelSize o_ stride).flatten
-  let x ← reshape x strideShape2
+  let x ← reshapeUnsafe x strideShape2
 
   -- Step 5: Shrink stride dim to 1 and flatten
   let finalShrinkShape := noop ++
@@ -200,7 +241,7 @@ def pool {s : List Nat} {d : DType} (t : StaticTensor s d)
 
   let flatShape := noop ++
     (listZipWith (fun ki oi => [ki, oi]) kernelSize o_).flatten
-  let x ← reshape x flatShape
+  let x ← reshapeUnsafe x flatShape
 
   -- Step 6: Permute to move spatial output dims before kernel dims
   -- Current: [..., k0, o0, k1, o1, ...]
@@ -210,7 +251,7 @@ def pool {s : List Nat} {d : DType} (t : StaticTensor s d)
   let kernelPerm := (listRange k).map (fun i => noop.length + i * 2)  -- k0, k1, ...
   let perm := noopPerm ++ outPerm ++ kernelPerm
 
-  let result ← permute x perm
+  let result ← permuteUnsafe x perm
   pure { uop := result.uop, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
 end StaticTensor

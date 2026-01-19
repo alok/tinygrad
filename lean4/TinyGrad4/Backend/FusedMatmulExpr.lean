@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.FusedMatmul
 
 namespace TinyGrad4.Backend.FusedMatmulExpr

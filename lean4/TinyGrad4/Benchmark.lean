@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Benchmark.Framework
 import TinyGrad4.Benchmark.Kernels
 -- Backend-specific imports are conditional on availability

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.Metal
 
@@ -39,7 +40,7 @@ def testTransposeMatmul (batch m n : Nat) (desc : String) : IO Unit := do
     let yBuf ← Tensor.buffer [batch, n] .float32
 
     -- Transpose X: [batch, m] -> [m, batch]
-    let xT ← permute xBuf [1, 0]
+    let xT ← permuteUnsafe xBuf [1, 0]
 
     -- Matmul: [m, batch] @ [batch, n] = [m, n]
     let result ← matmul xT yBuf
@@ -74,16 +75,16 @@ def testTransposeMatmul (batch m n : Nat) (desc : String) : IO Unit := do
   IO.println s!"  GPU first {sz}: {gpuData[:sz]}"
 
   -- Expected value
-  let expected := Float.ofNat batch * 0.01 * 0.01
+  let expected := Float64.ofNat batch * 0.01 * 0.01
   IO.println s!"  Expected per element: batch * 0.01 * 0.01 = {expected}"
 
   if cpuNaN || gpuNaN then
     IO.println s!"  ⚠️ NaN detected!"
   else
     -- Check accuracy
-    let mut maxDiff : Float := 0.0
+    let mut maxDiff : Float64 := 0.0
     for i in [:Nat.min 100 cpuData.size] do
-      let diff := Float.abs (gpuData[i]! - cpuData[i]!)
+      let diff := Float64.abs (gpuData[i]! - cpuData[i]!)
       if diff > maxDiff then maxDiff := diff
     IO.println s!"  Max diff (first 100): {maxDiff}"
     if maxDiff < 0.001 then

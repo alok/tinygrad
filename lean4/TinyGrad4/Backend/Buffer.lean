@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.DType
 
 namespace TinyGrad4
@@ -30,7 +31,7 @@ def toFloatArray (b : RawBuffer) : FloatArray :=
   if b.dtype != .float32 then FloatArray.empty
   else
     let numElems := b.data.size / 4
-    let readF32 (i : Nat) : Float :=
+    let readF32 (i : Nat) : Float64 :=
       let off := i * 4
       let b0 := b.data[off]!.toUInt32
       let b1 := b.data[off + 1]!.toUInt32

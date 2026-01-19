@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 import TinyGrad4.Tensor.Movement
@@ -48,7 +49,7 @@ def create (inChannels outChannels : Nat) (kernelSize : Nat := 3)
     (seed : Nat := 42) : TensorM (Conv2dParams inChannels outChannels kernelSize kernelSize dt) := do
   -- Fan-in = in_channels * kernel_h * kernel_w
   let fanIn := inChannels * kernelSize * kernelSize
-  let bound := (1.0 / Float.sqrt (Float.ofNat fanIn)).toFloat32
+  let bound := (1.0 / Float64.sqrt (Float64.ofNat fanIn)).toFloat32
 
   -- Weight: uniform(-bound, bound) shaped [outChannels, inChannels, kernelSize, kernelSize]
   let weight ← uniformInit [outChannels, inChannels, kernelSize, kernelSize] dt (-bound) bound seed
@@ -68,7 +69,7 @@ def createAsym (inChannels outChannels kernelH kernelW : Nat)
     (padding : Nat := 0) (stride : Nat := 1) (dilation : Nat := 1)
     (seed : Nat := 42) : TensorM (Conv2dParams inChannels outChannels kernelH kernelW dt) := do
   let fanIn := inChannels * kernelH * kernelW
-  let bound := (1.0 / Float.sqrt (Float.ofNat fanIn)).toFloat32
+  let bound := (1.0 / Float64.sqrt (Float64.ofNat fanIn)).toFloat32
 
   let weight ← uniformInit [outChannels, inChannels, kernelH, kernelW] dt (-bound) bound seed
 

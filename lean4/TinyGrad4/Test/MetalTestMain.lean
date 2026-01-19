@@ -1,10 +1,11 @@
+import Float64
 import TinyGrad4.Backend.Device
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.Engine
 import TinyGrad4.Backend.MetalRenderer
 import TinyGrad4.UOp.UOp
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -47,7 +48,7 @@ def testBufferRoundtrip : IO Unit := do
   IO.println s!"Output: {result.data.toList}"
 
   -- Verify
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   for i in [:testData.size] do
     if _h : i < testData.size ∧ i < result.size then
       let diff := (testData.data[i]! - result.data[i]!).abs
@@ -110,7 +111,7 @@ kernel void test_add(
   IO.println s!"a + b = {result.data.toList}"
 
   -- Verify
-  let expected : List Float := [11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0]
+  let expected : List Float64 := [11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0]
   let mut passed := true
   for i in [:size] do
     if _h : i < result.size then
@@ -167,7 +168,7 @@ kernel void test_mul(
 
   IO.println s!"a * b = {result.data.toList}"
 
-  let expected : List Float := [20.0, 30.0, 40.0, 50.0]
+  let expected : List Float64 := [20.0, 30.0, 40.0, 50.0]
   let mut passed := true
   for i in [:size] do
     if _h : i < result.size then
@@ -231,7 +232,7 @@ kernel void fused_add_mul(
   IO.println s!"(a + b) * c = {result.data.toList}"
 
   -- Expected: (1+1)*2=4, (2+1)*2=6, (3+1)*2=8, (4+1)*2=10
-  let expected : List Float := [4.0, 6.0, 8.0, 10.0]
+  let expected : List Float64 := [4.0, 6.0, 8.0, 10.0]
   let mut passed := true
   for i in [:size] do
     if _h : i < result.size then
@@ -266,8 +267,8 @@ kernel void bench_add(
 "
 
   -- Create data
-  let mut aData : Array Float := #[]
-  let mut bData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
+  let mut bData : Array Float64 := #[]
   for i in [:size] do
     aData := aData.push ((i % 1000).toFloat / 1000.0)
     bData := bData.push (((i + 500) % 1000).toFloat / 1000.0)
@@ -334,8 +335,8 @@ kernel void bench_add_float4(
 }
 "
 
-  let mut aData : Array Float := #[]
-  let mut bData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
+  let mut bData : Array Float64 := #[]
   for i in [:size] do
     aData := aData.push ((i % 1000).toFloat / 1000.0)
     bData := bData.push (((i + 500) % 1000).toFloat / 1000.0)
@@ -409,7 +410,7 @@ kernel void reduce_sum(
 }
 "
 
-  let mut data : Array Float := #[]
+  let mut data : Array Float64 := #[]
   for i in [:size] do
     data := data.push ((i % 100).toFloat / 100.0)
 
@@ -469,11 +470,11 @@ kernel void fused_relu_mul_add(
 }
 "
 
-  let mut aData : Array Float := #[]
-  let mut bData : Array Float := #[]
-  let mut cData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
+  let mut bData : Array Float64 := #[]
+  let mut cData : Array Float64 := #[]
   for i in [:size] do
-    aData := aData.push (Float.ofInt ((i : Int) - (size / 2 : Int)) / 1000.0)
+    aData := aData.push (Float64.ofInt ((i : Int) - (size / 2 : Int)) / 1000.0)
     bData := bData.push 2.0
     cData := cData.push 1.0
 

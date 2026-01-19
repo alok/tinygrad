@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -18,13 +19,13 @@ open Interpreter
 open StaticTensor
 open Backend
 
-private def assertClose (got expected : Float) (tol : Float) (label : String) : IO Unit := do
-  let diff := Float.abs (got - expected)
+private def assertClose (got expected : Float64) (tol : Float64) (label : String) : IO Unit := do
+  let diff := Float64.abs (got - expected)
   if diff > tol then
     throw (IO.userError s!"{label}: got {got} expected {expected} diff {diff} > {tol}")
 
 private def shrink3d (data : FloatArray) (shape : Shape) (bounds : List (Nat × Nat)) : FloatArray := Id.run do
-  let newShape := Shape.shrink shape bounds
+  let newShape := Shape.shrinkUnsafe shape bounds
   let numel := listProd newShape
   let mut out := FloatArray.emptyWithCapacity numel
   for i in [:numel] do
@@ -34,7 +35,7 @@ private def shrink3d (data : FloatArray) (shape : Shape) (bounds : List (Nat × 
     out := out.push data[flat]!
   return out
 
-private def maxOf (arr : FloatArray) : Float := Id.run do
+private def maxOf (arr : FloatArray) : Float64 := Id.run do
   if arr.size == 0 then
     return 0.0
   let mut m := arr[0]!
@@ -52,8 +53,8 @@ private def testPermutePadIntoFusedReduceMaxAll : IO Unit := do
 
   let (xU, outU) := runTensorM do
     let x ← Tensor.buffer [2, 3] .float32
-    let xp ← StaticTensor.permute x [1, 0]
-    let xpad ← StaticTensor.pad xp [(1, 1), (0, 0)]
+    let xp ← StaticTensor.permuteUnsafe x [1, 0]
+    let xpad ← StaticTensor.padUnsafe xp [(1, 1), (0, 0)]
     let c ← UOp.const .float32 1.0
     let y ← UOp.add xpad.uop c
     let out ← UOp.max_ y [] false
@@ -89,8 +90,8 @@ private def testShrinkReshapeFoldIntoFusedReduceMaxAll : IO Unit := do
 
   let (xU, outU) := runTensorM do
     let x ← Tensor.buffer [2, 3, 4] .float32
-    let xs ← StaticTensor.shrink x [(0, 2), (0, 2), (0, 4)]
-    let xr ← StaticTensor.reshape xs [2, 8]
+    let xs ← StaticTensor.shrinkUnsafe x [(0, 2), (0, 2), (0, 4)]
+    let xr ← StaticTensor.reshapeUnsafe xs [2, 8]
     let c ← UOp.const .float32 1.0
     let y ← UOp.add xr.uop c
     let out ← UOp.max_ y [] false
@@ -103,7 +104,7 @@ private def testShrinkReshapeFoldIntoFusedReduceMaxAll : IO Unit := do
   match compiled.implMap[outU.uid]? with
   | some (.fusedReduce plan) =>
     if plan.ewise.needsStack then
-      throw (IO.userError "expected shrink→reshape fold to avoid a view stack")
+      throw (IO.userError "expected shrinkUnsafe→reshapeUnsafe fold to avoid a view stackUnsafe")
   | _ => throw (IO.userError "expected root to select fusedReduce")
 
   let bad := compiled.nodes.filter fun u =>
@@ -128,8 +129,8 @@ private def testPadReshapeFoldIntoFusedReduceMaxAll : IO Unit := do
 
   let (xU, outU) := runTensorM do
     let x ← Tensor.buffer [2, 3, 4] .float32
-    let xp ← StaticTensor.pad x [(1, 1), (0, 0), (0, 0)]
-    let xr ← StaticTensor.reshape xp [4, 12]
+    let xp ← StaticTensor.padUnsafe x [(1, 1), (0, 0), (0, 0)]
+    let xr ← StaticTensor.reshapeUnsafe xp [4, 12]
     let c ← UOp.const .float32 1.0
     let y ← UOp.add xr.uop c
     let out ← UOp.max_ y [] false
@@ -142,7 +143,7 @@ private def testPadReshapeFoldIntoFusedReduceMaxAll : IO Unit := do
   match compiled.implMap[outU.uid]? with
   | some (.fusedReduce plan) =>
     if plan.ewise.needsStack then
-      throw (IO.userError "expected pad→reshape fold to avoid a view stack")
+      throw (IO.userError "expected padUnsafe→reshapeUnsafe fold to avoid a view stackUnsafe")
   | _ => throw (IO.userError "expected root to select fusedReduce")
 
   let bad := compiled.nodes.filter fun u =>
@@ -157,7 +158,7 @@ private def testPadReshapeFoldIntoFusedReduceMaxAll : IO Unit := do
   let outArr := (outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))).decode
   if outArr.size != 1 then
     throw (IO.userError s!"expected scalar output, got size {outArr.size}")
-  assertClose outArr[0]! expected 1.0e-6 "view fusion reduce max(all) pad/reshape fold"
+  assertClose outArr[0]! expected 1.0e-6 "view fusion reduce max(all) padUnsafe/reshapeUnsafe fold"
 
 private def testShrinkReshapeGapIntoFusedReduceMaxAll : IO Unit := do
   let xData : FloatArray := ⟨#[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0,
@@ -165,8 +166,8 @@ private def testShrinkReshapeGapIntoFusedReduceMaxAll : IO Unit := do
 
   let (xU, outU) := runTensorM do
     let x ← Tensor.buffer [2, 3, 4] .float32
-    let xs ← StaticTensor.shrink x [(0, 2), (0, 2), (0, 4)]
-    let xr ← StaticTensor.reshape xs [4, 4]
+    let xs ← StaticTensor.shrinkUnsafe x [(0, 2), (0, 2), (0, 4)]
+    let xr ← StaticTensor.reshapeUnsafe xs [4, 4]
     let c ← UOp.const .float32 1.0
     let y ← UOp.add xr.uop c
     let out ← UOp.max_ y [] false
@@ -179,7 +180,7 @@ private def testShrinkReshapeGapIntoFusedReduceMaxAll : IO Unit := do
   match compiled.implMap[outU.uid]? with
   | some (.fusedReduce plan) =>
     if !plan.ewise.needsStack then
-      throw (IO.userError "expected shrink→reshape gap to require a view stack")
+      throw (IO.userError "expected shrinkUnsafe→reshapeUnsafe gap to require a view stackUnsafe")
   | _ => throw (IO.userError "expected root to select fusedReduce")
 
   let bad := compiled.nodes.filter fun u =>
@@ -201,13 +202,13 @@ private def testShrinkReshapeGapIntoFusedReduceMaxAll : IO Unit := do
 def runAll : IO Unit := do
   IO.println "=== ViewFusionSmoke Tests ==="
   testPermutePadIntoFusedReduceMaxAll
-  IO.println "✓ permute/pad virtualized in fused reduce"
+  IO.println "✓ permuteUnsafe/padUnsafe virtualized in fused reduce"
   testShrinkReshapeFoldIntoFusedReduceMaxAll
-  IO.println "✓ shrink→reshape fold in fused reduce"
+  IO.println "✓ shrinkUnsafe→reshapeUnsafe fold in fused reduce"
   testPadReshapeFoldIntoFusedReduceMaxAll
-  IO.println "✓ pad→reshape fold in fused reduce"
+  IO.println "✓ padUnsafe→reshapeUnsafe fold in fused reduce"
   testShrinkReshapeGapIntoFusedReduceMaxAll
-  IO.println "✓ shrink→reshape gap in fused reduce"
+  IO.println "✓ shrinkUnsafe→reshapeUnsafe gap in fused reduce"
   IO.println "=== ViewFusionSmoke OK ==="
 
 end TinyGrad4.Test.ViewFusionSmoke

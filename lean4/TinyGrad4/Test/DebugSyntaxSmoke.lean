@@ -1,9 +1,10 @@
+import Float64
 import TinyGrad4
 
 /-!
 # DebugSyntaxSmoke
 
-Ensures the `tg.debug.*` macros expand and type-check.
+Ensures the `tg.debug.*` macros expandUnsafe and type-check.
 -/
 
 namespace TinyGrad4.Test.DebugSyntaxSmoke

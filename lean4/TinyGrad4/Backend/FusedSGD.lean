@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Graph
 import Std.Data.HashMap
@@ -25,7 +26,7 @@ The lr can be on either side of the MUL.
 structure Plan where
   w : UOpId
   grad : UOpId
-  lr : Float
+  lr : Float64
   deriving Repr
 
 namespace Plan
@@ -45,7 +46,7 @@ private partial def findInputBuffer (u : UOp) : Option UOpId :=
     | [] => none
 
 /-- Check if u is a scalar float32 constant and return its value -/
-private def getScalarF32 (u : UOp) : Option Float :=
+private def getScalarF32 (u : UOp) : Option Float64 :=
   if u.op == .CONST && u.shape == [] && u.dtype == .float32 then
     match u.arg with
     | .constF32Bits bits => some (Float32.ofBits bits |>.toFloat)
@@ -75,7 +76,7 @@ def compile (u : UOp) (keep : UOpIdSet) (refCnt : HashMap UOpId Nat) : Option Pl
   let [a, b] := mulNode.src | return none
 
   -- One of a/b is scalar constant (lr), other is grad
-  let lrGrad? : Option (Float × UOp) :=
+  let lrGrad? : Option (Float64 × UOp) :=
     match getScalarF32 a with
     | some lr => some (lr, b)
     | none => match getScalarF32 b with

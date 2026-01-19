@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Benchmark.CudaBenchmark
 import TinyGrad4.Benchmark.Framework
 

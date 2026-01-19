@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter: MNIST data loader uses Array Float for parsed image/label data
+-- Disable RawBuffer linter: MNIST data loader uses Array Float64 for parsed image/label data
 set_option linter.useRawBuffer false
 
 /-!
@@ -24,12 +25,12 @@ structure ImageData where
   numImages : Nat
   rows : Nat
   cols : Nat
-  pixels : Array Float  -- flattened [numImages * rows * cols]
+  pixels : Array Float64  -- flattened [numImages * rows * cols]
 
-/-- MNIST label data: [numLabels] as Float for compatibility -/
+/-- MNIST label data: [numLabels] as Float64 for compatibility -/
 structure LabelData where
   numLabels : Nat
-  labels : Array Float  -- one-hot encoding would be [numLabels, 10]
+  labels : Array Float64  -- one-hot encoding would be [numLabels, 10]
 
 /-- Parse IDX3 image file. Optionally limit to first `maxImages?` images. -/
 def parseImages (bytes : ByteArray) (maxImages? : Option Nat := none) : IO ImageData := do
@@ -132,18 +133,18 @@ def loadTest (dataDir : String := "data") (maxImages? : Option Nat := none) : IO
   pure (images, labels)
 
 /-- Get a batch of images as flat array [batchSize * 784] -/
-def getBatch (images : ImageData) (startIdx batchSize : Nat) : Array Float :=
+def getBatch (images : ImageData) (startIdx batchSize : Nat) : Array Float64 :=
   let pixelsPerImage := images.rows * images.cols
   let startPixel := startIdx * pixelsPerImage
   let endPixel := min ((startIdx + batchSize) * pixelsPerImage) images.pixels.size
   images.pixels.extract startPixel endPixel
 
 /-- Get a batch of labels -/
-def getBatchLabels (labels : LabelData) (startIdx batchSize : Nat) : Array Float :=
+def getBatchLabels (labels : LabelData) (startIdx batchSize : Nat) : Array Float64 :=
   labels.labels.extract startIdx (min (startIdx + batchSize) labels.labels.size)
 
 /-- Convert labels to one-hot encoding [batchSize, 10] -/
-def toOneHot (labels : Array Float) (numClasses : Nat := 10) : Array Float := Id.run do
+def toOneHot (labels : Array Float64) (numClasses : Nat := 10) : Array Float64 := Id.run do
   let batchSize := labels.size
   let mut oneHot := Array.mkEmpty (batchSize * numClasses)
   for i in [:batchSize] do
@@ -168,7 +169,7 @@ def Loader.numBatches (l : Loader batch) : Nat :=
   if l.dropLast then numFullBatches l.images batch
   else if batch == 0 then 0 else (l.images.numImages + batch - 1) / batch
 
-private def padTo (arr : Array Float) (target : Nat) : Array Float :=
+private def padTo (arr : Array Float64) (target : Nat) : Array Float64 :=
   if arr.size >= target then arr else arr ++ Array.replicate (target - arr.size) 0.0
 
 /-- Fetch a batch and pack it as float32 bytes. -/

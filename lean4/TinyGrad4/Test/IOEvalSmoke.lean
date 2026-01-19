@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -48,9 +49,9 @@ def testMatmulIOvsPure : IO Unit := do
   if pure_decoded.size != io_decoded.size then
     throw (IO.userError s!"Size mismatch: pure={pure_decoded.size}, io={io_decoded.size}")
 
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   for i in [:pure_decoded.size] do
-    let diff := Float.abs (pure_decoded[i]! - io_decoded[i]!)
+    let diff := Float64.abs (pure_decoded[i]! - io_decoded[i]!)
     if diff > maxDiff then
       maxDiff := diff
 
@@ -60,9 +61,9 @@ def testMatmulIOvsPure : IO Unit := do
     throw (IO.userError s!"Results differ by {maxDiff} > 0.001")
 
   -- Also verify the actual value is correct (should be 6.0)
-  let expectedValue : Float := 6.0
+  let expectedValue : Float64 := 6.0
   let actualValue := pure_decoded[0]!
-  if Float.abs (actualValue - expectedValue) > 0.001 then
+  if Float64.abs (actualValue - expectedValue) > 0.001 then
     throw (IO.userError s!"Expected {expectedValue}, got {actualValue}")
 
   IO.println "✓ IO evaluator matches pure evaluator"

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Data.Dataset
 
 /-!
@@ -163,7 +164,7 @@ def iteratePrefetched [Dataset D T] (ds : D) (bufferSize : Nat := 8) (f : T → 
 /-! ## Benchmarking Utilities -/
 
 /-- Benchmark prefetcher throughput -/
-def benchmarkPrefetcher [Dataset D T] (ds : D) (bufferSize : Nat := 8) : IO Float := do
+def benchmarkPrefetcher [Dataset D T] (ds : D) (bufferSize : Nat := 8) : IO Float64 := do
   let n := Dataset.len ds
   if n == 0 then return 0.0
 
@@ -181,7 +182,7 @@ def benchmarkPrefetcher [Dataset D T] (ds : D) (bufferSize : Nat := 8) : IO Floa
   pure (count.toFloat / seconds)
 
 /-- Compare prefetched vs non-prefetched throughput -/
-def benchmarkComparison [Dataset D T] (ds : D) (bufferSize : Nat := 8) : IO (Float × Float) := do
+def benchmarkComparison [Dataset D T] (ds : D) (bufferSize : Nat := 8) : IO (Float64 × Float64) := do
   -- Non-prefetched baseline
   let baselineRate ← benchmarkThroughput ds 1
 

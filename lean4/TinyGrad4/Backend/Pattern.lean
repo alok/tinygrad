@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Ops
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Graph
@@ -127,7 +128,7 @@ partial def UOp.findInputBuffer (u : UOp) : Option UOpId :=
 /-! ### Constant Matching -/
 
 /-- Get float32 constant value if present -/
-def UOp.asConstF32? (u : UOp) : Option Float :=
+def UOp.asConstF32? (u : UOp) : Option Float64 :=
   if u.op == .CONST then
     match u.arg with
     | .constF32Bits bits => some (Float32.ofBits bits).toFloat
@@ -135,7 +136,7 @@ def UOp.asConstF32? (u : UOp) : Option Float :=
   else none
 
 /-- Check if constant is approximately a value -/
-def UOp.isConstApprox? (u : UOp) (target : Float) (tol : Float := 0.001) : Bool :=
+def UOp.isConstApprox? (u : UOp) (target : Float64) (tol : Float64 := 0.001) : Bool :=
   match UOp.asConstF32? u with
   | some f => (f - target).abs < tol
   | none => false
@@ -325,7 +326,7 @@ structure LayerNormInfo where
   axes : List Nat
   gamma : Option UOp := none
   beta : Option UOp := none
-  eps : Float := 1e-5
+  eps : Float64 := 1e-5
   deriving Repr
 
 /--

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Benchmark.Framework
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.Vectorization
@@ -107,7 +108,7 @@ def makeVectorAddKernel (size : Nat) : IO BenchmarkKernel := do
       | some s =>
         let result ← metalCopyOut s.bufOut
         -- Check a few samples
-        let mut maxDiff : Float := 0.0
+        let mut maxDiff : Float64 := 0.0
         for i in [:min 1000 s.size] do
           let expected := s.hostA.get! i + s.hostB.get! i
           let actual := result.get! i
@@ -174,7 +175,7 @@ def makeVectorAddFloat4Kernel (size : Nat)
       | none => return false
       | some s =>
         let result ← metalCopyOut s.bufOut
-        let mut maxDiff : Float := 0.0
+        let mut maxDiff : Float64 := 0.0
         for i in [:min 1000 s.size] do
           let expected := s.hostA.get! i + s.hostB.get! i
           let actual := result.get! i

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 import TinyGrad4.Tensor.Movement
@@ -46,7 +47,7 @@ def create (inChannels outChannels : Nat) (kernelSize : Nat := 3)
     (padding : Nat := 0) (stride : Nat := 1) (dilation : Nat := 1)
     (seed : Nat := 42) : TensorM (Conv1dParams inChannels outChannels kernelSize dt) := do
   let fanIn := inChannels * kernelSize
-  let bound := (1.0 / Float.sqrt (Float.ofNat fanIn)).toFloat32
+  let bound := (1.0 / Float64.sqrt (Float64.ofNat fanIn)).toFloat32
 
   let weight ← uniformInit [outChannels, inChannels, kernelSize] dt (-bound) bound seed
 

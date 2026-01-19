@@ -1,9 +1,10 @@
+import Float64
 import TinyGrad4
 
 /-!
 # ShapeTrackerSmoke
 
-Checks view-stack construction for a permute→reshape chain.
+Checks view-stackUnsafe construction for a permuteUnsafe→reshapeUnsafe chain.
 -/
 
 namespace TinyGrad4.Test.ShapeTrackerSmoke
@@ -27,18 +28,18 @@ private def testPermuteReshapeStack : IO Unit := do
     throw (IO.userError "ShapeTracker.ofUOp? failed")
   | some (base, st) =>
     assertEq base baseId "base id mismatch"
-    assertEq st.views.size 2 "expected view stack size 2"
+    assertEq st.views.size 2 "expected view stackUnsafe size 2"
     let info := Backend.ShapeTracker.stackInfo st
-    assertEq info.shapes.size 2 "expected stack shape size 2"
-    assertEq info.shapes[0]! #[3, 2, 4] "permute view shape"
-    assertEq info.shapes[1]! #[6, 4] "reshape view shape"
+    assertEq info.shapes.size 2 "expected stackUnsafe shape size 2"
+    assertEq info.shapes[0]! #[3, 2, 4] "permuteUnsafe view shape"
+    assertEq info.shapes[1]! #[6, 4] "reshapeUnsafe view shape"
     assertEq (Backend.ShapeTracker.kernelShape st) #[6, 4] "kernel shape"
     assertEq (Backend.ShapeTracker.needsStack st) true "needsStack"
     assertEq (Backend.ShapeTracker.indexOps st) 8 "indexOps"
 
 private def testContiguousStack : IO Unit := do
   let st := Backend.ShapeTracker.contiguous [2, 3]
-  assertEq st.views.size 1 "contiguous stack size"
+  assertEq st.views.size 1 "contiguous stackUnsafe size"
   assertEq (Backend.ShapeTracker.needsStack st) false "contiguous needsStack"
   assertEq (Backend.ShapeTracker.indexOps st) 0 "contiguous indexOps"
 
@@ -51,12 +52,12 @@ private def testUnitDimReshapeNoStack : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (unit-dim reshape)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (unit-dim reshapeUnsafe)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (unit-dim reshape)"
-    assertEq st.views.size 1 "expected unit-dim reshape to stay in one view"
-    assertEq (Backend.ShapeTracker.top st).shape #[3, 2] "unit-dim reshape shape"
-    assertEq (Backend.ShapeTracker.needsStack st) false "unit-dim reshape should not need stack"
+    assertEq base baseId "base id mismatch (unit-dim reshapeUnsafe)"
+    assertEq st.views.size 1 "expected unit-dim reshapeUnsafe to stay in one view"
+    assertEq (Backend.ShapeTracker.top st).shape #[3, 2] "unit-dim reshapeUnsafe shape"
+    assertEq (Backend.ShapeTracker.needsStack st) false "unit-dim reshapeUnsafe should not need stackUnsafe"
 
 private def testUnitDimUnsqueezeNoStack : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -72,7 +73,7 @@ private def testUnitDimUnsqueezeNoStack : IO Unit := do
     assertEq base baseId "base id mismatch (unit-dim unsqueeze)"
     assertEq st.views.size 1 "expected unit-dim unsqueeze to stay in one view"
     assertEq (Backend.ShapeTracker.top st).shape #[1, 3, 2] "unit-dim unsqueeze shape"
-    assertEq (Backend.ShapeTracker.needsStack st) false "unit-dim unsqueeze should not need stack"
+    assertEq (Backend.ShapeTracker.needsStack st) false "unit-dim unsqueeze should not need stackUnsafe"
 
 private def testReshapeFoldNonContig : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -83,12 +84,12 @@ private def testReshapeFoldNonContig : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (reshape fold non-contig)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (reshapeUnsafe fold non-contig)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (reshape fold non-contig)"
-    assertEq st.views.size 1 "expected reshape fold to stay in one view"
-    assertEq (Backend.ShapeTracker.top st).shape #[2, 8] "reshape fold shape"
-    assertEq (Backend.ShapeTracker.top st).strides #[(12 : Int64), (1 : Int64)] "reshape fold strides"
+    assertEq base baseId "base id mismatch (reshapeUnsafe fold non-contig)"
+    assertEq st.views.size 1 "expected reshapeUnsafe fold to stay in one view"
+    assertEq (Backend.ShapeTracker.top st).shape #[2, 8] "reshapeUnsafe fold shape"
+    assertEq (Backend.ShapeTracker.top st).strides #[(12 : Int64), (1 : Int64)] "reshapeUnsafe fold strides"
 
 private def testReshapeNeedsStackForGap : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -99,12 +100,12 @@ private def testReshapeNeedsStackForGap : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (reshape gap)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (reshapeUnsafe gap)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (reshape gap)"
-    assertEq st.views.size 2 "expected reshape gap to require stack"
-    assertEq (Backend.ShapeTracker.top st).shape #[4, 4] "reshape gap shape"
-    assertEq (Backend.ShapeTracker.needsStack st) true "reshape gap needsStack"
+    assertEq base baseId "base id mismatch (reshapeUnsafe gap)"
+    assertEq st.views.size 2 "expected reshapeUnsafe gap to require stackUnsafe"
+    assertEq (Backend.ShapeTracker.top st).shape #[4, 4] "reshapeUnsafe gap shape"
+    assertEq (Backend.ShapeTracker.needsStack st) true "reshapeUnsafe gap needsStack"
 
 private def testReshapeSimplifyBack : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -116,12 +117,12 @@ private def testReshapeSimplifyBack : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r1)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (reshape simplify back)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (reshapeUnsafe simplify back)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (reshape simplify back)"
-    assertEq st.views.size 1 "expected reshape simplify to collapse stack"
-    assertEq (Backend.ShapeTracker.top st).shape #[3, 2, 4] "reshape simplify shape"
-    assertEq (Backend.ShapeTracker.top st).strides #[(4 : Int64), (12 : Int64), (1 : Int64)] "reshape simplify strides"
+    assertEq base baseId "base id mismatch (reshapeUnsafe simplify back)"
+    assertEq st.views.size 1 "expected reshapeUnsafe simplify to collapse stackUnsafe"
+    assertEq (Backend.ShapeTracker.top st).shape #[3, 2, 4] "reshapeUnsafe simplify shape"
+    assertEq (Backend.ShapeTracker.top st).strides #[(4 : Int64), (12 : Int64), (1 : Int64)] "reshapeUnsafe simplify strides"
 
 private def testPadReshapeNeedsStack : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -132,12 +133,12 @@ private def testPadReshapeNeedsStack : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (pad→reshape)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (padUnsafe→reshapeUnsafe)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (pad→reshape)"
-    assertEq st.views.size 2 "expected pad→reshape to require stack"
-    assertEq (Backend.ShapeTracker.top st).shape #[2, 6] "pad→reshape shape"
-    assertEq (Backend.ShapeTracker.needsStack st) true "pad→reshape needsStack"
+    assertEq base baseId "base id mismatch (padUnsafe→reshapeUnsafe)"
+    assertEq st.views.size 2 "expected padUnsafe→reshapeUnsafe to require stackUnsafe"
+    assertEq (Backend.ShapeTracker.top st).shape #[2, 6] "padUnsafe→reshapeUnsafe shape"
+    assertEq (Backend.ShapeTracker.needsStack st) true "padUnsafe→reshapeUnsafe needsStack"
 
 private def testPadReshapeFoldInnerDims : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -148,14 +149,14 @@ private def testPadReshapeFoldInnerDims : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (pad→reshape fold inner dims)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (padUnsafe→reshapeUnsafe fold inner dims)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (pad→reshape fold inner dims)"
-    assertEq st.views.size 1 "expected pad→reshape (inner dims) to fold"
-    assertEq (Backend.ShapeTracker.top st).shape #[4, 12] "pad→reshape fold shape"
-    assertEq (Backend.ShapeTracker.top st).strides #[(12 : Int64), (1 : Int64)] "pad→reshape fold strides"
-    assertEq (Backend.ShapeTracker.top st).maskStart #[1, 0] "pad→reshape fold maskStart"
-    assertEq (Backend.ShapeTracker.top st).maskEnd #[3, 12] "pad→reshape fold maskEnd"
+    assertEq base baseId "base id mismatch (padUnsafe→reshapeUnsafe fold inner dims)"
+    assertEq st.views.size 1 "expected padUnsafe→reshapeUnsafe (inner dims) to fold"
+    assertEq (Backend.ShapeTracker.top st).shape #[4, 12] "padUnsafe→reshapeUnsafe fold shape"
+    assertEq (Backend.ShapeTracker.top st).strides #[(12 : Int64), (1 : Int64)] "padUnsafe→reshapeUnsafe fold strides"
+    assertEq (Backend.ShapeTracker.top st).maskStart #[1, 0] "padUnsafe→reshapeUnsafe fold maskStart"
+    assertEq (Backend.ShapeTracker.top st).maskEnd #[3, 12] "padUnsafe→reshapeUnsafe fold maskEnd"
 
 private def testExpandReshapeNeedsStack : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -166,12 +167,12 @@ private def testExpandReshapeNeedsStack : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (expand→reshape)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (expandUnsafe→reshapeUnsafe)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (expand→reshape)"
-    assertEq st.views.size 2 "expected expand→reshape to require stack"
-    assertEq (Backend.ShapeTracker.top st).shape #[6] "expand→reshape shape"
-    assertEq (Backend.ShapeTracker.needsStack st) true "expand→reshape needsStack"
+    assertEq base baseId "base id mismatch (expandUnsafe→reshapeUnsafe)"
+    assertEq st.views.size 2 "expected expandUnsafe→reshapeUnsafe to require stackUnsafe"
+    assertEq (Backend.ShapeTracker.top st).shape #[6] "expandUnsafe→reshapeUnsafe shape"
+    assertEq (Backend.ShapeTracker.needsStack st) true "expandUnsafe→reshapeUnsafe needsStack"
 
 private def testFlipReshapeNeedsStack : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -182,12 +183,12 @@ private def testFlipReshapeNeedsStack : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (flip→reshape)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (flipUnsafe→reshapeUnsafe)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (flip→reshape)"
-    assertEq st.views.size 2 "expected flip→reshape to require stack"
-    assertEq (Backend.ShapeTracker.top st).shape #[3, 2] "flip→reshape shape"
-    assertEq (Backend.ShapeTracker.needsStack st) true "flip→reshape needsStack"
+    assertEq base baseId "base id mismatch (flipUnsafe→reshapeUnsafe)"
+    assertEq st.views.size 2 "expected flipUnsafe→reshapeUnsafe to require stackUnsafe"
+    assertEq (Backend.ShapeTracker.top st).shape #[3, 2] "flipUnsafe→reshapeUnsafe shape"
+    assertEq (Backend.ShapeTracker.needsStack st) true "flipUnsafe→reshapeUnsafe needsStack"
 
 private def testNoopReshapeAfterPad : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -198,11 +199,11 @@ private def testNoopReshapeAfterPad : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (pad→reshape noop)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (padUnsafe→reshapeUnsafe noop)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (pad→reshape noop)"
-    assertEq st.views.size 1 "expected pad→reshape noop to drop extra layer"
-    assertEq (Backend.ShapeTracker.top st).shape #[4, 3] "pad→reshape noop shape"
+    assertEq base baseId "base id mismatch (padUnsafe→reshapeUnsafe noop)"
+    assertEq st.views.size 1 "expected padUnsafe→reshapeUnsafe noop to drop extra layer"
+    assertEq (Backend.ShapeTracker.top st).shape #[4, 3] "padUnsafe→reshapeUnsafe noop shape"
 
 private def testNoopReshapeAfterFlip : IO Unit := do
   let (baseId, st?) := Id.run do
@@ -213,41 +214,41 @@ private def testNoopReshapeAfterFlip : IO Unit := do
       pure (x.uid, Backend.ShapeTracker.ofUOp? r)
   match st? with
   | none =>
-    throw (IO.userError "ShapeTracker.ofUOp? failed (flip→reshape noop)")
+    throw (IO.userError "ShapeTracker.ofUOp? failed (flipUnsafe→reshapeUnsafe noop)")
   | some (base, st) =>
-    assertEq base baseId "base id mismatch (flip→reshape noop)"
-    assertEq st.views.size 1 "expected flip→reshape noop to drop extra layer"
-    assertEq (Backend.ShapeTracker.top st).shape #[2, 3] "flip→reshape noop shape"
+    assertEq base baseId "base id mismatch (flipUnsafe→reshapeUnsafe noop)"
+    assertEq st.views.size 1 "expected flipUnsafe→reshapeUnsafe noop to drop extra layer"
+    assertEq (Backend.ShapeTracker.top st).shape #[2, 3] "flipUnsafe→reshapeUnsafe noop shape"
 
 
 def runAll : IO Unit := do
   IO.println "=== ShapeTrackerSmoke Tests ==="
   testPermuteReshapeStack
-  IO.println "✓ permute→reshape stack"
+  IO.println "✓ permuteUnsafe→reshapeUnsafe stackUnsafe"
   testContiguousStack
-  IO.println "✓ contiguous stack"
+  IO.println "✓ contiguous stackUnsafe"
   testUnitDimReshapeNoStack
-  IO.println "✓ unit-dim reshape no stack"
+  IO.println "✓ unit-dim reshapeUnsafe no stackUnsafe"
   testUnitDimUnsqueezeNoStack
-  IO.println "✓ unit-dim unsqueeze no stack"
+  IO.println "✓ unit-dim unsqueeze no stackUnsafe"
   testReshapeFoldNonContig
-  IO.println "✓ reshape fold non-contig"
+  IO.println "✓ reshapeUnsafe fold non-contig"
   testReshapeNeedsStackForGap
-  IO.println "✓ reshape gap needs stack"
+  IO.println "✓ reshapeUnsafe gap needs stackUnsafe"
   testReshapeSimplifyBack
-  IO.println "✓ reshape simplify back"
+  IO.println "✓ reshapeUnsafe simplify back"
   testPadReshapeNeedsStack
-  IO.println "✓ pad→reshape needs stack"
+  IO.println "✓ padUnsafe→reshapeUnsafe needs stackUnsafe"
   testPadReshapeFoldInnerDims
-  IO.println "✓ pad→reshape fold inner dims"
+  IO.println "✓ padUnsafe→reshapeUnsafe fold inner dims"
   testExpandReshapeNeedsStack
-  IO.println "✓ expand→reshape needs stack"
+  IO.println "✓ expandUnsafe→reshapeUnsafe needs stackUnsafe"
   testFlipReshapeNeedsStack
-  IO.println "✓ flip→reshape needs stack"
+  IO.println "✓ flipUnsafe→reshapeUnsafe needs stackUnsafe"
   testNoopReshapeAfterPad
-  IO.println "✓ pad→reshape noop simplifies"
+  IO.println "✓ padUnsafe→reshapeUnsafe noop simplifies"
   testNoopReshapeAfterFlip
-  IO.println "✓ flip→reshape noop simplifies"
+  IO.println "✓ flipUnsafe→reshapeUnsafe noop simplifies"
   IO.println "=== ShapeTrackerSmoke OK ==="
 
 end TinyGrad4.Test.ShapeTrackerSmoke

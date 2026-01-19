@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -8,7 +9,7 @@ Smoke tests for new activations, norms, and losses.
 
 namespace TinyGrad4.Test.MathOpsSmoke
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
@@ -32,14 +33,14 @@ private def expectI16Bytes (shape : Shape) (vals : Array Int16) (label : String)
   | some arr => pure arr.data
   | none => throw (IO.userError s!"{label}: ofArrayI16? returned none")
 
-private def assertAllBetween (raw : RawBuffer) (lo hi : Float) (label : String) : IO Unit := do
+private def assertAllBetween (raw : RawBuffer) (lo hi : Float64) (label : String) : IO Unit := do
   let vals := raw.toFloatArray
   for i in [:vals.size] do
     let v := vals[i]!
     if v < lo || v >= hi then
       throw (IO.userError s!"{label}: idx {i} {v} not in [{lo}, {hi})")
 
-private def assertEqF32 (raw : RawBuffer) (expected : Array Float) (label : String) : IO Unit := do
+private def assertEqF32 (raw : RawBuffer) (expected : Array Float64) (label : String) : IO Unit := do
   let got := raw.toFloatArray
   if got.size != expected.size then
     throw (IO.userError s!"{label}: size {got.size} != {expected.size}")
@@ -168,16 +169,16 @@ def testStackEval : IO Unit := do
     let a ← Tensor.full [2] .float32 1.0
     let b ← Tensor.full [2] .float32 2.0
     let ts : TensorList .float32 [[2], [2]] := .cons a (.cons b .nil)
-    stack ts 0
+    stackUnsafe ts 0
   let vals0 := evalTensor stacked0
-  assertEqF32 vals0 #[1.0, 1.0, 2.0, 2.0] "stack axis0"
+  assertEqF32 vals0 #[1.0, 1.0, 2.0, 2.0] "stackUnsafe axis0"
   let stacked1 := runTensorM do
     let a ← Tensor.full [2] .float32 1.0
     let b ← Tensor.full [2] .float32 2.0
     let ts : TensorList .float32 [[2], [2]] := .cons a (.cons b .nil)
-    stack ts 1
+    stackUnsafe ts 1
   let vals1 := evalTensor stacked1
-  assertEqF32 vals1 #[1.0, 2.0, 1.0, 2.0] "stack axis1"
+  assertEqF32 vals1 #[1.0, 2.0, 1.0, 2.0] "stackUnsafe axis1"
 
 def testWhereInt16 : IO Unit := do
   let t := runTensorM do
@@ -195,40 +196,40 @@ def testWhereInt16 : IO Unit := do
 def testMovementInt16 : IO Unit := do
   let (base, permT, shrinkT, padT) := runTensorM do
     let t ← Tensor.buffer [2, 2] .int16
-    let permT ← permute t [1, 0]
-    let shrinkT ← shrink t [(0, 2), (0, 1)]
-    let padT ← pad t [(1, 1), (1, 1)]
+    let permT ← permuteUnsafe t [1, 0]
+    let shrinkT ← shrinkUnsafe t [(0, 2), (0, 1)]
+    let padT ← padUnsafe t [(1, 1), (1, 1)]
     pure (t, permT, shrinkT, padT)
   let vals : Array Int16 := #[Int16.ofInt 1, Int16.ofInt 2, Int16.ofInt 3, Int16.ofInt 4]
   let baseBytes ← expectI16Bytes [2, 2] vals "movement base"
   let env := Interpreter.setBuffer (∅ : Env) base.uop { dtype := .int16, data := baseBytes }
 
   let permRaw := evalTensor permT env
-  assertDType permRaw.dtype .int16 "permute int16 dtype"
+  assertDType permRaw.dtype .int16 "permuteUnsafe int16 dtype"
   let expectedPerm : Array Int16 := #[Int16.ofInt 1, Int16.ofInt 3, Int16.ofInt 2, Int16.ofInt 4]
-  let expectedPermBytes ← expectI16Bytes [2, 2] expectedPerm "permute int16 data"
-  assertEqBytes permRaw.data expectedPermBytes "permute int16 data"
+  let expectedPermBytes ← expectI16Bytes [2, 2] expectedPerm "permuteUnsafe int16 data"
+  assertEqBytes permRaw.data expectedPermBytes "permuteUnsafe int16 data"
 
   let shrinkRaw := evalTensor shrinkT env
-  assertDType shrinkRaw.dtype .int16 "shrink int16 dtype"
+  assertDType shrinkRaw.dtype .int16 "shrinkUnsafe int16 dtype"
   let expectedShrink : Array Int16 := #[Int16.ofInt 1, Int16.ofInt 3]
-  let expectedShrinkBytes ← expectI16Bytes [2, 1] expectedShrink "shrink int16 data"
-  assertEqBytes shrinkRaw.data expectedShrinkBytes "shrink int16 data"
+  let expectedShrinkBytes ← expectI16Bytes [2, 1] expectedShrink "shrinkUnsafe int16 data"
+  assertEqBytes shrinkRaw.data expectedShrinkBytes "shrinkUnsafe int16 data"
 
   let padRaw := evalTensor padT env
-  assertDType padRaw.dtype .int16 "pad int16 dtype"
+  assertDType padRaw.dtype .int16 "padUnsafe int16 dtype"
   let expectedPad : Array Int16 :=
     #[Int16.ofInt 0, Int16.ofInt 0, Int16.ofInt 0, Int16.ofInt 0,
       Int16.ofInt 0, Int16.ofInt 1, Int16.ofInt 2, Int16.ofInt 0,
       Int16.ofInt 0, Int16.ofInt 3, Int16.ofInt 4, Int16.ofInt 0,
       Int16.ofInt 0, Int16.ofInt 0, Int16.ofInt 0, Int16.ofInt 0]
-  let expectedPadBytes ← expectI16Bytes [4, 4] expectedPad "pad int16 data"
-  assertEqBytes padRaw.data expectedPadBytes "pad int16 data"
+  let expectedPadBytes ← expectI16Bytes [4, 4] expectedPad "padUnsafe int16 data"
+  assertEqBytes padRaw.data expectedPadBytes "padUnsafe int16 data"
 
 def testGatherScatter : IO Unit := do
   let (gathered, scattered) := runTensorM do
     let base ← Tensor.arange 6
-    let base2 ← reshape base [2, 3]
+    let base2 ← reshapeUnsafe base [2, 3]
     let idxF ← Tensor.arange 2
     let idx ← cast idxF .int32
     let gathered ← gatherLast base2 idx
@@ -280,7 +281,7 @@ def testArangeLinspaceRand : IO Unit := do
 def testMaxMinArg : IO Unit := do
   let (maxAll, minAll, maxAxisT, minAxisT, argmaxT, argminT) := runTensorM do
     let base ← Tensor.arange 6
-    let t ← reshape base [2, 3]
+    let t ← reshapeUnsafe base [2, 3]
     let maxAll ← max base
     let minAll ← min base
     let maxAxisT ← maxAxis t 1 false
@@ -411,11 +412,11 @@ def testTrigOps : IO Unit := do
   let cVals := evalTensor cosVals
   -- sin(0) should be 0
   for i in [:sVals.size] do
-    if Float.abs sVals[i]! > 0.0001 then
+    if Float64.abs sVals[i]! > 0.0001 then
       throw (IO.userError s!"sin(0) = {sVals[i]!}, expected ~0")
   -- cos(0) should be 1
   for i in [:cVals.size] do
-    if Float.abs (cVals[i]! - 1.0) > 0.0001 then
+    if Float64.abs (cVals[i]! - 1.0) > 0.0001 then
       throw (IO.userError s!"cos(0) = {cVals[i]!}, expected ~1")
 
 def testPow : IO Unit := do
@@ -435,7 +436,7 @@ def testPow : IO Unit := do
   let pVals := evalTensor powVals
   -- 2^3 should be 8
   for i in [:pVals.size] do
-    if Float.abs (pVals[i]! - 8.0) > 0.0001 then
+    if Float64.abs (pVals[i]! - 8.0) > 0.0001 then
       throw (IO.userError s!"2^3 = {pVals[i]!}, expected 8")
 
 def testRecip : IO Unit := do
@@ -452,7 +453,7 @@ def testRecip : IO Unit := do
     recip x
   let rVals := evalTensor recipVals
   for i in [:rVals.size] do
-    if Float.abs (rVals[i]! - 0.5) > 0.0001 then
+    if Float64.abs (rVals[i]! - 0.5) > 0.0001 then
       throw (IO.userError s!"1/2 = {rVals[i]!}, expected 0.5")
 
 def testMeanVarAxis : IO Unit := do
@@ -552,7 +553,7 @@ def runAll : IO Unit := do
   testCatEvalInt16
   IO.println "✓ cat int16 eval"
   testStackEval
-  IO.println "✓ stack eval"
+  IO.println "✓ stackUnsafe eval"
   testWhereInt16
   IO.println "✓ where int16 eval"
   testMovementInt16

@@ -1,9 +1,10 @@
+import Float64
 import TinyGrad4.Backend.FusedSoftmax
 import TinyGrad4.Backend.Buffer
 
 namespace TinyGrad4.Backend.FusedSoftmaxExpr
 
--- Disable RawBuffer linter: uses Array Float for internal accumulator arrays
+-- Disable RawBuffer linter: uses Array Float64 for internal accumulator arrays
 set_option linter.useRawBuffer false
 
 /-!
@@ -18,7 +19,7 @@ Uses the online algorithm to minimize memory passes.
 -/
 
 /-- Read a Float32 from ByteArray at byte offset -/
-private def getF32 (data : ByteArray) (byteOffset : Nat) : Float :=
+private def getF32 (data : ByteArray) (byteOffset : Nat) : Float64 :=
   if byteOffset + 4 > data.size then 0.0
   else
     let b0 := data.get! byteOffset
@@ -32,7 +33,7 @@ private def getF32 (data : ByteArray) (byteOffset : Nat) : Float :=
     Float32.ofBits bits |>.toFloat
 
 /-- Write a Float32 to ByteArray at byte offset -/
-private def setF32 (data : ByteArray) (byteOffset : Nat) (v : Float) : ByteArray :=
+private def setF32 (data : ByteArray) (byteOffset : Nat) (v : Float64) : ByteArray :=
   let bits := v.toFloat32.toBits
   let b0 := (bits &&& 0xFF).toUInt8
   let b1 := ((bits >>> 8) &&& 0xFF).toUInt8
@@ -63,19 +64,19 @@ def evalSoftmax (plan : FusedSoftmax.Plan) (inputBuf : RawBuffer) : RawBuffer :=
     let baseIdx := batch * plan.inner
 
     -- Pass 1: Find max for numerical stability
-    let mut maxVal : Float := -1e38  -- Use a very small number instead of -inf
+    let mut maxVal : Float64 := -1e38  -- Use a very small number instead of -inf
     for i in [:plan.inner] do
       let byteOff := (baseIdx + i) * 4
       let x := getF32 inputBuf.data byteOff
       if x > maxVal then maxVal := x
 
     -- Pass 2: Compute exp(x - max) and accumulate sum
-    let mut expVals : Array Float := Array.mkEmpty plan.inner
+    let mut expVals : Array Float64 := Array.mkEmpty plan.inner
     let mut sumExp := 0.0
     for i in [:plan.inner] do
       let byteOff := (baseIdx + i) * 4
       let x := getF32 inputBuf.data byteOff
-      let e := Float.exp (x - maxVal)
+      let e := Float64.exp (x - maxVal)
       expVals := expVals.push e
       sumExp := sumExp + e
 
@@ -85,7 +86,7 @@ def evalSoftmax (plan : FusedSoftmax.Plan) (inputBuf : RawBuffer) : RawBuffer :=
       let val := if plan.log then
         -- log-softmax: log(exp(x - max) / sum) = (x - max) - log(sum)
         let x := getF32 inputBuf.data ((baseIdx + i) * 4)
-        (x - maxVal) - Float.log sumExp
+        (x - maxVal) - Float64.log sumExp
       else
         -- softmax: exp(x - max) / sum
         expVals[i]! / sumExp
@@ -126,7 +127,7 @@ def evalSoftmaxStrided (plan : FusedSoftmax.Plan) (inputBuf : RawBuffer) : RawBu
     let baseLinearIdx := softmaxIdx * axisSize
 
     -- Pass 1: Find max
-    let mut maxVal : Float := -1e38  -- Use a very small number instead of -inf
+    let mut maxVal : Float64 := -1e38  -- Use a very small number instead of -inf
     for i in [:axisSize] do
       let linearIdx := baseLinearIdx + i
       let byteOff := linearIdx * 4
@@ -135,14 +136,14 @@ def evalSoftmaxStrided (plan : FusedSoftmax.Plan) (inputBuf : RawBuffer) : RawBu
         if x > maxVal then maxVal := x
 
     -- Pass 2: Compute exp and sum
-    let mut expVals : Array Float := Array.mkEmpty axisSize
+    let mut expVals : Array Float64 := Array.mkEmpty axisSize
     let mut sumExp := 0.0
     for i in [:axisSize] do
       let linearIdx := baseLinearIdx + i
       let byteOff := linearIdx * 4
       if byteOff + 4 <= inputBuf.data.size then
         let x := getF32 inputBuf.data byteOff
-        let e := Float.exp (x - maxVal)
+        let e := Float64.exp (x - maxVal)
         expVals := expVals.push e
         sumExp := sumExp + e
 
@@ -153,7 +154,7 @@ def evalSoftmaxStrided (plan : FusedSoftmax.Plan) (inputBuf : RawBuffer) : RawBu
       if byteOff + 4 <= result.size then
         let val := if plan.log then
           let x := getF32 inputBuf.data byteOff
-          (x - maxVal) - Float.log sumExp
+          (x - maxVal) - Float64.log sumExp
         else
           expVals[i]! / sumExp
         result := setF32 result byteOff val

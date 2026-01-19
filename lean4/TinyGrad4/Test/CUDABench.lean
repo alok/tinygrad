@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Benchmark.CudaBenchmark
 import TinyGrad4.Benchmark.Framework
 
@@ -23,7 +24,7 @@ def main : IO UInt32 := do
   IO.println ""
 
   for result in results do
-    -- stddev is already a Float in nanoseconds, convert to microseconds
+    -- stddev is already a Float64 in nanoseconds, convert to microseconds
     let stddevUs := result.stats.stddev / 1000.0
     IO.println s!"  {result.spec.name}:"
     IO.println s!"    Time: {result.stats.mean.toMicros} μs (±{stddevUs} μs)"

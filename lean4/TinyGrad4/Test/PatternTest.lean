@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Pattern
 import TinyGrad4.UOp.UOp
 
@@ -12,7 +13,7 @@ namespace TinyGrad4.Test.PatternTest
 open TinyGrad4.Backend.Pattern
 
 -- Helper to make test UOps
-private def mkConst (id : Nat) (v : Float) : UOp :=
+private def mkConst (id : Nat) (v : Float64) : UOp :=
   { uid := ⟨id⟩
     op := .CONST
     dtype := .float32

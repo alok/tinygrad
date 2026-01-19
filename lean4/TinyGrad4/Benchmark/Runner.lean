@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Benchmark.Framework
 import TinyGrad4.Benchmark.Kernels
 import Lean.Data.Json
@@ -46,7 +47,7 @@ kernel void add(device const float* buf0 [[buffer(0)]],
 }"
 
 /-- Parse metal_runner output via shell awk to extract float values -/
-def parseMetalOutput (output : String) : IO (Float × Float × Float × String) := do
+def parseMetalOutput (output : String) : IO (Float64 × Float64 × Float64 × String) := do
   -- Use awk to extract values from metal_runner output
   -- Device: Apple M4 Max
   -- Time: 123.45 μs
@@ -71,8 +72,8 @@ def parseMetalOutput (output : String) : IO (Float × Float × Float × String) 
     args := #["-c", "echo " ++ output.quote ++ " | grep 'Bandwidth:' | awk " ++ awkPrint]
   }
 
-  -- Parse Float from the decimal string (Lean 4 Float.ofScientific trick)
-  let parseF (s : String) : Float := Id.run do
+  -- Parse Float64 from the decimal string (Lean 4 Float64.ofScientific trick)
+  let parseF (s : String) : Float64 := Id.run do
     let s' := s.trimAscii.toString
     -- Manual decimal parsing
     let parts := s'.splitOn "."
@@ -80,7 +81,7 @@ def parseMetalOutput (output : String) : IO (Float × Float × Float × String) 
     if parts.length > 1 then
       let fracStr := parts.getD 1 "0"
       let fracPart := fracStr.toNat!
-      let denom := (10 : Float) ^ fracStr.length.toFloat
+      let denom := (10 : Float64) ^ fracStr.length.toFloat
       intPart.toFloat + fracPart.toFloat / denom
     else
       intPart.toFloat
@@ -211,7 +212,7 @@ structure BenchmarkComparison where
   /-- Fastest backend name -/
   fastestBackend : String
   /-- Speedup vs slowest -/
-  maxSpeedup : Float
+  maxSpeedup : Float64
   deriving Repr
 
 namespace BenchmarkComparison

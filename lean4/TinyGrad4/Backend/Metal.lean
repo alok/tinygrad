@@ -1,5 +1,7 @@
+import Float64
 import TinyGrad4.Backend.Device
 import TinyGrad4.Backend.MetalRenderer
+import TinyGrad4.Data.Slice
 
 /-!
 # Metal Backend
@@ -134,7 +136,7 @@ def metalCacheStats : IO CacheStats := do
   return { hits, misses, size }
 
 /-- Get cache hit rate (0.0 to 1.0) -/
-def metalCacheHitRate : IO Float := do
+def metalCacheHitRate : IO Float64 := do
   let hits ← metalCacheHits
   let misses ← metalCacheMisses
   let total := hits + misses
@@ -197,16 +199,61 @@ def deviceInfo : IO String := do
     Uses Apple Silicon unified memory - GPU reads directly from CPU memory.
     WARNING: The ByteArray MUST outlive the Metal buffer! -/
 @[extern "tg4_metal_wrap_bytes_nocopy"]
-opaque metalWrapBytesNoCopy : @& ByteArray → @& Nat → @& Nat → IO MetalBuffer
+private opaque metalWrapBytesNoCopyImpl : @& ByteArray → @& Nat → @& Nat → IO MetalBuffer
+
+/-- Wrap ByteArray data in a Metal buffer without copying.
+    Fails if no-copy allocation is not possible. -/
+@[extern "tg4_metal_wrap_bytes_nocopy_strict"]
+private opaque metalWrapBytesNoCopyStrictImpl : @& ByteArray → @& Nat → @& Nat → IO MetalBuffer
 
 /-- Check if a ByteArray offset is page-aligned (required for zero-copy) -/
 @[extern "tg4_metal_is_aligned"]
-opaque metalIsAligned : @& ByteArray → @& Nat → IO Bool
+private opaque metalIsAlignedImpl : @& ByteArray → @& Nat → IO Bool
+
+private def ensureFitsUSize (name : String) (n : Nat) : IO Unit := do
+  if n.toUSize.toNat == n then
+    pure ()
+  else
+    throw (IO.userError s!"{name}: {n} exceeds USize")
+
+private def checkBounds (name : String) (size offset len : Nat) : IO Unit := do
+  ensureFitsUSize s!"{name}.size" size
+  ensureFitsUSize s!"{name}.offset" offset
+  ensureFitsUSize s!"{name}.len" len
+  if offset + len ≤ size then
+    pure ()
+  else
+    throw (IO.userError s!"{name}: offset+len out of bounds (size={size}, offset={offset}, len={len})")
+
+/-- Check if a ByteArray offset is page-aligned (required for zero-copy). -/
+def metalIsAligned (ba : ByteArray) (offset : Nat := 0) : IO Bool := do
+  ensureFitsUSize "metalIsAligned.offset" offset
+  ensureFitsUSize "metalIsAligned.size" ba.size
+  if offset ≤ ba.size then
+    metalIsAlignedImpl ba offset
+  else
+    throw (IO.userError s!"metalIsAligned: offset {offset} out of bounds (size={ba.size})")
+
+/-- Wrap ByteArray data in a Metal buffer without copying.
+    Performs bounds checks before calling the FFI. -/
+def metalWrapBytesNoCopy (ba : ByteArray) (offset len : Nat) : IO MetalBuffer := do
+  checkBounds "metalWrapBytesNoCopy" ba.size offset len
+  metalWrapBytesNoCopyImpl ba offset len
+
+/-- Wrap ByteArray data in a Metal buffer without copying.
+    Fails if no-copy allocation is not possible. -/
+def metalWrapBytesNoCopyStrict (ba : ByteArray) (offset len : Nat) : IO MetalBuffer := do
+  checkBounds "metalWrapBytesNoCopyStrict" ba.size offset len
+  metalWrapBytesNoCopyStrictImpl ba offset len
 
 /-- Create a zero-copy Metal buffer from ByteSlice.
     Falls back to copy if not page-aligned. -/
-def metalFromByteSlice (parent : ByteArray) (offset len : Nat) : IO MetalBuffer :=
-  metalWrapBytesNoCopy parent offset len
+def metalFromByteSlice (s : TinyGrad4.Data.ByteSlice) : IO MetalBuffer :=
+  metalWrapBytesNoCopy s.parent s.offset s.length
+
+/-- Check if a ByteSlice is page-aligned (required for zero-copy). -/
+def metalIsAlignedSlice (s : TinyGrad4.Data.ByteSlice) : IO Bool :=
+  metalIsAligned s.parent s.offset
 
 /-! ## Shared Memory Support (Multi-Process Data Loading) -/
 
@@ -215,31 +262,31 @@ abbrev ShmFd := UInt32
 
 /-- Create a new shared memory region with given name and size -/
 @[extern "tg4_shm_create"]
-opaque shmCreate : @& String → @& Nat → IO ShmFd
+private opaque shmCreateImpl : @& String → @& Nat → IO ShmFd
 
 /-- Open an existing shared memory region -/
 @[extern "tg4_shm_open"]
-opaque shmOpen : @& String → IO ShmFd
+private opaque shmOpenImpl : @& String → IO ShmFd
 
 /-- Map shared memory region to ByteArray (copies data) -/
 @[extern "tg4_shm_map"]
-opaque shmMap : @& ShmFd → @& Nat → IO ByteArray
+private opaque shmMapImpl : @& ShmFd → @& Nat → IO ByteArray
 
 /-- Write ByteArray to shared memory at offset -/
 @[extern "tg4_shm_write"]
-opaque shmWrite : @& ShmFd → @& ByteArray → @& Nat → IO Unit
+private opaque shmWriteImpl : @& ShmFd → @& ByteArray → @& Nat → IO Unit
 
 /-- Read from shared memory into ByteArray -/
 @[extern "tg4_shm_read"]
-opaque shmRead : @& ShmFd → @& Nat → @& Nat → IO ByteArray
+private opaque shmReadImpl : @& ShmFd → @& Nat → @& Nat → IO ByteArray
 
 /-- Close shared memory file descriptor -/
 @[extern "tg4_shm_close"]
-opaque shmClose : @& ShmFd → IO Unit
+private opaque shmCloseImpl : @& ShmFd → IO Unit
 
 /-- Delete shared memory region -/
 @[extern "tg4_shm_unlink"]
-opaque shmUnlink : @& String → IO Unit
+private opaque shmUnlinkImpl : @& String → IO Unit
 
 /-- High-level shared memory region manager -/
 structure SharedMemory where
@@ -252,34 +299,50 @@ namespace SharedMemory
 
 /-- Create a new shared memory region -/
 def create (name : String) (size : Nat) : IO SharedMemory := do
-  let fd ← shmCreate name size
+  ensureFitsUSize "SharedMemory.create.size" size
+  let fd ← shmCreateImpl name size
   return { name, fd, size }
 
 /-- Attach to an existing shared memory region -/
 def attach (name : String) (size : Nat) : IO SharedMemory := do
-  let fd ← shmOpen name
+  ensureFitsUSize "SharedMemory.attach.size" size
+  let fd ← shmOpenImpl name
   return { name, fd, size }
 
 /-- Write data to shared memory -/
-def write (shm : SharedMemory) (data : ByteArray) (offset : Nat := 0) : IO Unit :=
-  shmWrite shm.fd data offset
+def write (shm : SharedMemory) (data : ByteArray) (offset : Nat := 0) : IO Unit := do
+  ensureFitsUSize "SharedMemory.write.offset" offset
+  ensureFitsUSize "SharedMemory.write.size" data.size
+  ensureFitsUSize "SharedMemory.write.shmSize" shm.size
+  if offset + data.size ≤ shm.size then
+    shmWriteImpl shm.fd data offset
+  else
+    throw (IO.userError s!"SharedMemory.write: offset+size out of bounds (size={shm.size}, offset={offset}, data={data.size})")
 
 /-- Read data from shared memory -/
-def read (shm : SharedMemory) (offset : Nat := 0) (len : Nat := shm.size) : IO ByteArray :=
-  shmRead shm.fd offset len
+def read (shm : SharedMemory) (offset : Nat := 0) (len : Nat := shm.size) : IO ByteArray := do
+  ensureFitsUSize "SharedMemory.read.offset" offset
+  ensureFitsUSize "SharedMemory.read.len" len
+  ensureFitsUSize "SharedMemory.read.shmSize" shm.size
+  if offset + len ≤ shm.size then
+    shmReadImpl shm.fd offset len
+  else
+    throw (IO.userError s!"SharedMemory.read: offset+len out of bounds (size={shm.size}, offset={offset}, len={len})")
 
 /-- Close the shared memory handle -/
 def close (shm : SharedMemory) : IO Unit :=
-  shmClose shm.fd
+  shmCloseImpl shm.fd
 
 /-- Delete the shared memory region -/
 def unlink (shm : SharedMemory) : IO Unit :=
-  shmUnlink shm.name
+  shmUnlinkImpl shm.name
 
-/-- Create a Metal buffer from shared memory (for GPU access) -/
+/-- Create a Metal buffer from shared memory (copies into device buffer). -/
 def toMetalBuffer (shm : SharedMemory) : IO MetalBuffer := do
   let data ← shm.read
-  metalWrapBytesNoCopy data 0 data.size
+  let buf ← metalAllocBytes data.size
+  metalCopyInBytes buf data
+  pure buf
 
 end SharedMemory
 

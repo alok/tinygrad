@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -160,7 +161,7 @@ private def initState : TrainState :=
   { w1, w2, b1, b2, v1, v2, vb1, vb2 }
 
 private def step (p : Program) (state : TrainState)
-    (b : Batch BatchSize [InDim] [OutDim] .float32 .float32) : IO (Float × TrainState) := do
+    (b : Batch BatchSize [InDim] [OutDim] .float32 .float32) : IO (Float64 × TrainState) := do
   let env : Env := (∅ : Env)
     |>.insert p.xId b.x.toRawBuffer
     |>.insert p.yId b.y.toRawBuffer
@@ -222,8 +223,8 @@ def runAll : IO Unit := do
   }
 
   let mut state := initState
-  let mut firstLoss : Option Float := none
-  let mut lastLoss : Float := 0.0
+  let mut firstLoss : Option Float64 := none
+  let mut lastLoss : Float64 := 0.0
   for _ in [:10] do
     let numBatches :=
       DataLoader.numBatches (L := ToyLoader BatchSize) (batch := BatchSize) (xShape := [InDim]) (yShape := [OutDim])

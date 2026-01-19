@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.NN.Linear
 import TinyGrad4.NN.Conv1d
 import TinyGrad4.NN.Conv2d

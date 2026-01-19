@@ -1,3 +1,4 @@
+import Float64
 /-!
 # Data Types for TinyGrad4
 
@@ -117,7 +118,7 @@ def toPtr (dt : DType) (addrspace : AddrSpace := .global) : DType :=
 def promote (dt1 dt2 : DType) : DType :=
   -- Same type: no promotion needed
   if dt1 == dt2 then dt1
-  -- Float wins over int
+  -- Float64 wins over int
   else if dt1.isFloat && !dt2.isFloat then dt1
   else if dt2.isFloat && !dt1.isFloat then dt2
   -- Higher priority wins

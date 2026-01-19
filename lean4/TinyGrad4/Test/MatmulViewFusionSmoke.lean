@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -24,10 +25,10 @@ private def startsBytes (batch : Nat) (matNumel : Nat) : Array Nat := Id.run do
     out := out.push (i * matNumel * 4)
   return out
 
-private def shrink3d (data : Array Float) (shape : Shape) (bounds : List (Nat × Nat)) : Array Float := Id.run do
-  let newShape := Shape.shrink shape bounds
+private def shrink3d (data : Array Float64) (shape : Shape) (bounds : List (Nat × Nat)) : Array Float64 := Id.run do
+  let newShape := Shape.shrinkUnsafe shape bounds
   let numel := listProd newShape
-  let mut out : Array Float := Array.emptyWithCapacity numel
+  let mut out : Array Float64 := Array.emptyWithCapacity numel
   for i in [:numel] do
     let idx := Interpreter.unflattenIndex i newShape
     let idx' := (idx.zip bounds).map (fun (v, (s, _)) => v + s)
@@ -35,10 +36,10 @@ private def shrink3d (data : Array Float) (shape : Shape) (bounds : List (Nat ×
     out := out.push data[flat]!
   return out
 
-private def packF32 (data : Array Float) : ByteArray :=
+private def packF32 (data : Array Float64) : ByteArray :=
   Native.packF32FromF64 ⟨data⟩
 
-private def assertAllClose (arr : RawBuffer) (expected : RawBuffer) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : RawBuffer) (expected : RawBuffer) (tol : Float64) (label : String) : IO Unit := do
   let a := arr.decode
   let e := expected.decode
   if a.size != e.size then
@@ -46,7 +47,7 @@ private def assertAllClose (arr : RawBuffer) (expected : RawBuffer) (tol : Float
   for i in [:a.size] do
     let v := a[i]!
     let ev := e[i]!
-    let diff := Float.abs (v - ev)
+    let diff := Float64.abs (v - ev)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {ev} diff {diff} > {tol}")
 
@@ -60,15 +61,15 @@ private def testPermuteIntoFusedMatmul : IO Unit := do
   let t := 3
   let d := 2
 
-  let qData : Array Float := #[
+  let qData : Array Float64 := #[
     0.1, 0.2,  0.3, 0.4,  0.5, 0.6,
     0.7, 0.8,  0.9, 1.0,  1.1, 1.2
   ]
-  let kData : Array Float := #[
+  let kData : Array Float64 := #[
     1.0, 0.9,  0.8, 0.7,  0.6, 0.5,
     0.4, 0.3,  0.2, 0.1,  0.0, -0.1
   ]
-  let maskData : Array Float := #[
+  let maskData : Array Float64 := #[
     0.0, -0.1, -0.2,
     0.0, -0.1, -0.2,
     0.0, -0.1, -0.2
@@ -82,7 +83,7 @@ private def testPermuteIntoFusedMatmul : IO Unit := do
     let q ← Tensor.buffer [b, t, d] .float32
     let k ← Tensor.buffer [b, t, d] .float32
     let mask ← Tensor.buffer [t, t] .float32
-    let kT ← StaticTensor.permute k [0, 2, 1]
+    let kT ← StaticTensor.permuteUnsafe k [0, 2, 1]
     let scores ← UOp.contract2D q.uop kT.uop
     let scoresMasked ← UOp.add scores mask.uop
     pure (q.uop, k.uop, mask.uop, scoresMasked)
@@ -103,7 +104,7 @@ private def testPermuteIntoFusedMatmul : IO Unit := do
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected permute/contract to be virtualized into kernel, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected permuteUnsafe/contract to be virtualized into kernel, found {bad.length}\n{msg}")
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outBuf := outCache.getD scoresMaskedU.uid (RawBuffer.zeros scoresMaskedU.dtype (listProd scoresMaskedU.shape))
@@ -122,10 +123,10 @@ private def testShrinkReshapeFoldIntoFusedMatmul : IO Unit := do
   let k := 2
   let n := 8
 
-  let aData : Array Float := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
-  let bData : Array Float := #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+  let aData : Array Float64 := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+  let bData : Array Float64 := #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
     9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0]
-  let biasData : Array Float := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+  let biasData : Array Float64 := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
 
   let ab := packF32 aData
   let bb := packF32 bData
@@ -135,8 +136,8 @@ private def testShrinkReshapeFoldIntoFusedMatmul : IO Unit := do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 3, 4] .float32
     let bias ← Tensor.buffer [n] .float32
-    let bs ← StaticTensor.shrink b [(0, 2), (0, 2), (0, 4)]
-    let br ← StaticTensor.reshape bs [k, n]
+    let bs ← StaticTensor.shrinkUnsafe b [(0, 2), (0, 2), (0, 4)]
+    let br ← StaticTensor.reshapeUnsafe bs [k, n]
     let out0 ← UOp.contract2D a.uop br.uop
     let out ← UOp.add out0 bias.uop
     pure (a.uop, b.uop, br.uop, bias.uop, out)
@@ -150,14 +151,14 @@ private def testShrinkReshapeFoldIntoFusedMatmul : IO Unit := do
   let compiled := Interpreter.compile outU
   let plan ← getFusedMatmul compiled outU
   if plan.bBase != bU.uid then
-    throw (IO.userError "expected shrink→reshape fold to virtualize into base buffer")
+    throw (IO.userError "expected shrinkUnsafe→reshapeUnsafe fold to virtualize into base buffer")
 
   let bad := compiled.nodes.filter fun u =>
     u.op == .SHRINK || u.op == .RESHAPE || u.op == .CONTRACT
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected shrink/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected shrinkUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let bShr := shrink3d bData [2, 3, 4] [(0, 2), (0, 2), (0, 4)]
   let bShrBytes := packF32 bShr
@@ -167,17 +168,17 @@ private def testShrinkReshapeFoldIntoFusedMatmul : IO Unit := do
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outBuf := outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))
-  assertAllClose outBuf expected 0.001 "matmul shrink→reshape fold"
+  assertAllClose outBuf expected 0.001 "matmul shrinkUnsafe→reshapeUnsafe fold"
 
 private def testShrinkReshapeGapIntoFusedMatmul : IO Unit := do
   let m := 3
   let k := 4
   let n := 4
 
-  let aData : Array Float := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]
-  let bData : Array Float := #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+  let aData : Array Float64 := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]
+  let bData : Array Float64 := #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
     9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0]
-  let biasData : Array Float := #[0.1, 0.2, 0.3, 0.4]
+  let biasData : Array Float64 := #[0.1, 0.2, 0.3, 0.4]
 
   let ab := packF32 aData
   let bb := packF32 bData
@@ -187,8 +188,8 @@ private def testShrinkReshapeGapIntoFusedMatmul : IO Unit := do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 3, 4] .float32
     let bias ← Tensor.buffer [n] .float32
-    let bs ← StaticTensor.shrink b [(0, 2), (0, 2), (0, 4)]
-    let br ← StaticTensor.reshape bs [k, n]
+    let bs ← StaticTensor.shrinkUnsafe b [(0, 2), (0, 2), (0, 4)]
+    let br ← StaticTensor.reshapeUnsafe bs [k, n]
     let out0 ← UOp.contract2D a.uop br.uop
     let out ← UOp.add out0 bias.uop
     pure (a.uop, b.uop, br.uop, bias.uop, out)
@@ -202,14 +203,14 @@ private def testShrinkReshapeGapIntoFusedMatmul : IO Unit := do
   let compiled := Interpreter.compile outU
   let plan ← getFusedMatmul compiled outU
   if plan.bBase != bU.uid || !plan.needsStack then
-    throw (IO.userError "expected shrink→reshape gap to require view stack and virtualize into base buffer")
+    throw (IO.userError "expected shrinkUnsafe→reshapeUnsafe gap to require view stackUnsafe and virtualize into base buffer")
 
   let bad := compiled.nodes.filter fun u =>
     u.op == .SHRINK || u.op == .RESHAPE || u.op == .CONTRACT
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected shrink/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected shrinkUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let bShr := shrink3d bData [2, 3, 4] [(0, 2), (0, 2), (0, 4)]
   let bShrBytes := packF32 bShr
@@ -219,17 +220,17 @@ private def testShrinkReshapeGapIntoFusedMatmul : IO Unit := do
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outBuf := outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))
-  assertAllClose outBuf expected 0.001 "matmul shrink→reshape gap"
+  assertAllClose outBuf expected 0.001 "matmul shrinkUnsafe→reshapeUnsafe gap"
 
 private def testPadReshapeIntoFusedMatmul : IO Unit := do
   let m := 3
   let k := 4
   let n := 4
 
-  let aData : Array Float := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6,
+  let aData : Array Float64 := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6,
     0.7, 0.8, 0.9, 1.0, 1.1, 1.2]
-  let bData : Array Float := #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
-  let biasData : Array Float := #[0.1, 0.2, 0.3, 0.4]
+  let bData : Array Float64 := #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+  let biasData : Array Float64 := #[0.1, 0.2, 0.3, 0.4]
 
   let ab := packF32 aData
   let bb := packF32 bData
@@ -239,8 +240,8 @@ private def testPadReshapeIntoFusedMatmul : IO Unit := do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 2, 2] .float32
     let bias ← Tensor.buffer [n] .float32
-    let bp ← StaticTensor.pad b [(0, 0), (0, 0), (0, 2)]
-    let br ← StaticTensor.reshape bp [k, n]
+    let bp ← StaticTensor.padUnsafe b [(0, 0), (0, 0), (0, 2)]
+    let br ← StaticTensor.reshapeUnsafe bp [k, n]
     let out0 ← UOp.contract2D a.uop br.uop
     let out ← UOp.add out0 bias.uop
     pure (a.uop, b.uop, br.uop, bias.uop, out)
@@ -254,14 +255,14 @@ private def testPadReshapeIntoFusedMatmul : IO Unit := do
   let compiled := Interpreter.compile outU
   let plan ← getFusedMatmul compiled outU
   if plan.bBase != bU.uid then
-    throw (IO.userError "expected pad→reshape to virtualize into base buffer")
+    throw (IO.userError "expected padUnsafe→reshapeUnsafe to virtualize into base buffer")
 
   let bad := compiled.nodes.filter fun u =>
     u.op == .PAD || u.op == .RESHAPE || u.op == .CONTRACT
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected pad/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected padUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let bPadBytes := Native.padF32 bb #[2, 2, 2] #[0, 0, 0] #[0, 0, 2]
   let outBytes := Native.matmulF32 ab bPadBytes m k n
@@ -270,16 +271,16 @@ private def testPadReshapeIntoFusedMatmul : IO Unit := do
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outBuf := outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))
-  assertAllClose outBuf expected 0.001 "matmul pad→reshape"
+  assertAllClose outBuf expected 0.001 "matmul padUnsafe→reshapeUnsafe"
 
 private def testPadReshapeStackIntoFusedMatmul : IO Unit := do
   let m := 2
   let k := 2
   let n := 6
 
-  let aData : Array Float := #[0.1, 0.2, 0.3, 0.4]
-  let bData : Array Float := #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-  let biasData : Array Float := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+  let aData : Array Float64 := #[0.1, 0.2, 0.3, 0.4]
+  let bData : Array Float64 := #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+  let biasData : Array Float64 := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
   let ab := packF32 aData
   let bb := packF32 bData
@@ -289,8 +290,8 @@ private def testPadReshapeStackIntoFusedMatmul : IO Unit := do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 3] .float32
     let bias ← Tensor.buffer [n] .float32
-    let bp ← StaticTensor.pad b [(1, 1), (0, 0)]
-    let br ← StaticTensor.reshape bp [k, n]
+    let bp ← StaticTensor.padUnsafe b [(1, 1), (0, 0)]
+    let br ← StaticTensor.reshapeUnsafe bp [k, n]
     let out0 ← UOp.contract2D a.uop br.uop
     let out ← UOp.add out0 bias.uop
     pure (a.uop, b.uop, bias.uop, out)
@@ -304,14 +305,14 @@ private def testPadReshapeStackIntoFusedMatmul : IO Unit := do
   let compiled := Interpreter.compile outU
   let plan ← getFusedMatmul compiled outU
   if plan.bBase != bU.uid || !plan.needsStack then
-    throw (IO.userError "expected pad→reshape to require view stack and virtualize into base buffer")
+    throw (IO.userError "expected padUnsafe→reshapeUnsafe to require view stackUnsafe and virtualize into base buffer")
 
   let bad := compiled.nodes.filter fun u =>
     u.op == .PAD || u.op == .RESHAPE || u.op == .CONTRACT
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected pad/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected padUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let bPadBytes := Native.padF32 bb #[2, 3] #[1, 0] #[1, 0]
   let outBytes := Native.matmulF32 ab bPadBytes m k n
@@ -320,21 +321,21 @@ private def testPadReshapeStackIntoFusedMatmul : IO Unit := do
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outBuf := outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))
-  assertAllClose outBuf expected 0.001 "matmul pad→reshape stack"
+  assertAllClose outBuf expected 0.001 "matmul padUnsafe→reshapeUnsafe stackUnsafe"
 
 private def testFlipReshapeIntoFusedMatmul : IO Unit := do
   let m := 2
   let k := 4
   let n := 4
 
-  let aData : Array Float := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-  let bData : Array Float := #[
+  let aData : Array Float64 := #[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+  let bData : Array Float64 := #[
     1.0, 2.0, 3.0, 4.0,
     5.0, 6.0, 7.0, 8.0,
     9.0, 10.0, 11.0, 12.0,
     13.0, 14.0, 15.0, 16.0
   ]
-  let biasData : Array Float := #[0.05, 0.1, 0.15, 0.2]
+  let biasData : Array Float64 := #[0.05, 0.1, 0.15, 0.2]
 
   let ab := packF32 aData
   let bb := packF32 bData
@@ -344,8 +345,8 @@ private def testFlipReshapeIntoFusedMatmul : IO Unit := do
     let a ← Tensor.buffer [m, k] .float32
     let b ← Tensor.buffer [2, 2, 4] .float32
     let bias ← Tensor.buffer [n] .float32
-    let bf ← StaticTensor.flip b [2]
-    let br ← StaticTensor.reshape bf [k, n]
+    let bf ← StaticTensor.flipUnsafe b [2]
+    let br ← StaticTensor.reshapeUnsafe bf [k, n]
     let out0 ← UOp.contract2D a.uop br.uop
     let out ← UOp.add out0 bias.uop
     pure (a.uop, b.uop, br.uop, bias.uop, out)
@@ -359,14 +360,14 @@ private def testFlipReshapeIntoFusedMatmul : IO Unit := do
   let compiled := Interpreter.compile outU
   let plan ← getFusedMatmul compiled outU
   if plan.bBase != bU.uid then
-    throw (IO.userError "expected flip→reshape to virtualize into base buffer")
+    throw (IO.userError "expected flipUnsafe→reshapeUnsafe to virtualize into base buffer")
 
   let bad := compiled.nodes.filter fun u =>
     u.op == .FLIP || u.op == .RESHAPE || u.op == .CONTRACT
   if !bad.isEmpty then
     let shown := bad.take 10 |>.map (fun u => u.pretty)
     let msg := String.intercalate "\n" shown
-    throw (IO.userError s!"expected flip/reshape/contract to be virtualized, found {bad.length}\n{msg}")
+    throw (IO.userError s!"expected flipUnsafe/reshapeUnsafe/contract to be virtualized, found {bad.length}\n{msg}")
 
   let bFlipBytes := Native.flipF32 bb #[2, 2, 4] #[2]
   let outBytes := Native.matmulF32 ab bFlipBytes m k n
@@ -375,22 +376,22 @@ private def testFlipReshapeIntoFusedMatmul : IO Unit := do
 
   let outCache := Interpreter.evalCompiledRaw compiled env
   let outBuf := outCache.getD outU.uid (RawBuffer.zeros outU.dtype (listProd outU.shape))
-  assertAllClose outBuf expected 0.001 "matmul flip→reshape"
+  assertAllClose outBuf expected 0.001 "matmul flipUnsafe→reshapeUnsafe"
 
 def runAll : IO Unit := do
   IO.println "=== MatmulViewFusionSmoke Tests ==="
   testPermuteIntoFusedMatmul
-  IO.println "✓ permute virtualized in fused matmul"
+  IO.println "✓ permuteUnsafe virtualized in fused matmul"
   testShrinkReshapeFoldIntoFusedMatmul
-  IO.println "✓ shrink→reshape fold virtualized in fused matmul"
+  IO.println "✓ shrinkUnsafe→reshapeUnsafe fold virtualized in fused matmul"
   testShrinkReshapeGapIntoFusedMatmul
-  IO.println "✓ shrink→reshape gap handled in fused matmul"
+  IO.println "✓ shrinkUnsafe→reshapeUnsafe gap handled in fused matmul"
   testPadReshapeIntoFusedMatmul
-  IO.println "✓ pad→reshape virtualized in fused matmul"
+  IO.println "✓ padUnsafe→reshapeUnsafe virtualized in fused matmul"
   testPadReshapeStackIntoFusedMatmul
-  IO.println "✓ pad→reshape stack virtualized in fused matmul"
+  IO.println "✓ padUnsafe→reshapeUnsafe stackUnsafe virtualized in fused matmul"
   testFlipReshapeIntoFusedMatmul
-  IO.println "✓ flip→reshape virtualized in fused matmul"
+  IO.println "✓ flipUnsafe→reshapeUnsafe virtualized in fused matmul"
   IO.println "=== MatmulViewFusionSmoke OK ==="
 
 end TinyGrad4.Test.MatmulViewFusionSmoke

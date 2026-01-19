@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -32,8 +33,8 @@ private def f32OpsTest : ScalarOps Float32 :=
     max := fun a b => if a.toFloat <= b.toFloat then b else a
     cmplt := fun a b => a.toFloat < b.toFloat
     where_ := fun c x y => if c then x else y
-    zero := (0.0 : Float).toFloat32
-    negInf := (-1.0e30 : Float).toFloat32 }
+    zero := (0.0 : Float64).toFloat32
+    negInf := (-1.0e30 : Float64).toFloat32 }
 
 private def assertEqF32 (got expected : Float32) (msg : String) : IO Unit := do
   if got.toBits != expected.toBits then
@@ -50,7 +51,7 @@ private def readFromEnv (plan : Backend.FusedEwise.Plan) (env : Env) : (t : Ty) 
       let buf := env.getD uid (RawBuffer.zeros .float32 1)
       ((RawBuffer.decodeScalarF32 buf).toFloat32)
     else
-      (0.0 : Float).toFloat32
+      (0.0 : Float64).toFloat32
   | .bool, i =>
     if i < plan.leaves.size then
       let uid := plan.leaves[i]!
@@ -89,7 +90,7 @@ private def testScalarEwise : IO Unit := do
 
   let gotUop := (RawBuffer.decodeScalarF32 (← evalRawCached outU env)).toFloat32
   let gotExpr := evalExpr f32OpsTest (readFromEnv plan env) expr
-  let expected := (7.0 : Float).toFloat32
+  let expected := (7.0 : Float64).toFloat32
 
   assertEqF32 gotUop expected "uop eval"
   assertEqF32 gotExpr expected "expr eval"

@@ -1,7 +1,8 @@
+import Float64
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.MetalRenderer
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -24,9 +25,9 @@ open TinyGrad4.Backend.MetalRenderer
 structure BenchResult where
   name : String
   size : Nat
-  timeUs : Float
-  bandwidthGBs : Float
-  throughputGFlops : Float
+  timeUs : Float64
+  bandwidthGBs : Float64
+  throughputGFlops : Float64
   verified : Bool
   deriving Repr
 
@@ -51,8 +52,8 @@ kernel void vector_add(
 "
 
   -- Create data
-  let mut aData : Array Float := #[]
-  let mut bData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
+  let mut bData : Array Float64 := #[]
   for i in [:size] do
     aData := aData.push ((i % 1000).toFloat / 1000.0)
     bData := bData.push (((i + 500) % 1000).toFloat / 1000.0)
@@ -135,8 +136,8 @@ kernel void vector_add_float4(
   let vecSize := size / 4
 
   -- Create data
-  let mut aData : Array Float := #[]
-  let mut bData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
+  let mut bData : Array Float64 := #[]
   for i in [:size] do
     aData := aData.push ((i % 1000).toFloat / 1000.0)
     bData := bData.push (((i + 500) % 1000).toFloat / 1000.0)
@@ -230,8 +231,8 @@ kernel void reduce_sum(
 "
 
   -- Create data
-  let mut data : Array Float := #[]
-  let mut expectedSum : Float := 0.0
+  let mut data : Array Float64 := #[]
+  let mut expectedSum : Float64 := 0.0
   for i in [:size] do
     let v := ((i % 100).toFloat / 100.0)
     data := data.push v
@@ -263,7 +264,7 @@ kernel void reduce_sum(
 
   -- Verify (sum partial results on CPU)
   let partials ← metalCopyOut bufOut
-  let mut gpuSum : Float := 0.0
+  let mut gpuSum : Float64 := 0.0
   for i in [:partials.size] do
     gpuSum := gpuSum + partials.data[i]!
 
@@ -308,11 +309,11 @@ kernel void fused_relu_mul_add(
 "
 
   -- Create data
-  let mut aData : Array Float := #[]
-  let mut bData : Array Float := #[]
-  let mut cData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
+  let mut bData : Array Float64 := #[]
+  let mut cData : Array Float64 := #[]
   for i in [:size] do
-    let val : Float := Float.ofInt ((i : Int) - (size / 2 : Int)) / 1000.0
+    let val : Float64 := Float64.ofInt ((i : Int) - (size / 2 : Int)) / 1000.0
     aData := aData.push val  -- Mix of positive/negative
     bData := bData.push 2.0
     cData := cData.push 1.0
@@ -408,8 +409,8 @@ kernel void matmul(
   let bSize := k * n
   let cSize := m * n
 
-  let mut aData : Array Float := #[]
-  let mut bData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
+  let mut bData : Array Float64 := #[]
   for i in [:aSize] do
     aData := aData.push ((i % 10).toFloat / 10.0)
   for i in [:bSize] do

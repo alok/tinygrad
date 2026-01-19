@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -20,10 +21,10 @@ private def assertSize (arr : FloatArray) (expected : Nat) (label : String) : IO
   if arr.size != expected then
     throw (IO.userError s!"{label}: size {arr.size} != {expected}")
 
-private def assertAllClose (arr : FloatArray) (expected : Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : FloatArray) (expected : Float64) (tol : Float64) (label : String) : IO Unit := do
   for i in [:arr.size] do
     let v := arr[i]!
-    let diff := Float.abs (v - expected)
+    let diff := Float64.abs (v - expected)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {expected} diff {diff} > {tol}")
 

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Ops
 import TinyGrad4.Shape
 import TinyGrad4.UOp.UOp
@@ -48,9 +49,9 @@ structure Plan where
   /-- Axis along which softmax is computed -/
   axis : Nat
   /-- Scale factor bits (1.0 for softmax) for Native kernels -/
-  scaleBits : UInt32 := (1.0 : Float).toFloat32.toBits
+  scaleBits : UInt32 := (1.0 : Float64).toFloat32.toBits
   /-- ln(2) bits for log operations -/
-  ln2Bits : UInt32 := (Float.log 2.0).toFloat32.toBits
+  ln2Bits : UInt32 := (Float64.log 2.0).toFloat32.toBits
   /-- Whether this is log-softmax (true) or regular softmax (false) -/
   log : Bool
   deriving Repr

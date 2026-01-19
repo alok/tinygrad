@@ -1,3 +1,4 @@
+import Float64
 import Lean
 import TinyGrad4.Backend.Cost
 

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.NN
 import TinyGrad4.Backend.Native
@@ -10,7 +11,7 @@ Smoke tests for convolution operations and NN layers.
 
 namespace TinyGrad4.Test.Conv2dSmoke
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
@@ -166,20 +167,20 @@ def testPoolOutShape : IO Unit := do
 -- Value Verification Tests
 -- ============================================================================
 
-private def assertEqF32 (raw : RawBuffer) (expected : Array Float) (label : String) : IO Unit := do
+private def assertEqF32 (raw : RawBuffer) (expected : Array Float64) (label : String) : IO Unit := do
   let got := raw.toFloatArray
   if got.size != expected.size then
     throw (IO.userError s!"{label}: size {got.size} != {expected.size}")
   for i in [:expected.size] do
-    if Float.abs (got[i]! - expected[i]!) > 0.0001 then
+    if Float64.abs (got[i]! - expected[i]!) > 0.0001 then
       throw (IO.userError s!"{label}: idx {i} {got[i]!} != {expected[i]!}")
 
-private def assertApproxF32 (raw : RawBuffer) (expected : Array Float) (tol : Float) (label : String) : IO Unit := do
+private def assertApproxF32 (raw : RawBuffer) (expected : Array Float64) (tol : Float64) (label : String) : IO Unit := do
   let got := raw.toFloatArray
   if got.size != expected.size then
     throw (IO.userError s!"{label}: size {got.size} != {expected.size}")
   for i in [:expected.size] do
-    if Float.abs (got[i]! - expected[i]!) > tol then
+    if Float64.abs (got[i]! - expected[i]!) > tol then
       throw (IO.userError s!"{label}: idx {i} {got[i]!} != {expected[i]!} (tol={tol})")
 
 /-- Test maxPool2d with known values.
@@ -313,12 +314,12 @@ def testConv2d3x3SumKernel : IO Unit := do
   -- 3x3 conv with all-ones kernel on 3x3 all-ones input (no padding) = 1x1 output = [9]
   assertEqF32 resultRaw #[9.0] "conv2d 3x3 sum kernel"
 
-/-- Test 2D permute (transpose) with value verification.
+/-- Test 2D permuteUnsafe (transpose) with value verification.
     Input [[1,2,3],[4,5,6]] -> [[1,4],[2,5],[3,6]] -/
 def testPermute2D : IO Unit := do
   let (base, result) := runTensorM do
     let base ← Tensor.buffer [2, 3] .float32
-    let result ← permute base [1, 0]  -- transpose
+    let result ← permuteUnsafe base [1, 0]  -- transpose
     pure (base, result)
 
   let inputData := packF32FromF64 (FloatArray.mk #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
@@ -326,7 +327,7 @@ def testPermute2D : IO Unit := do
 
   let resultRaw := evalTensor result env
   -- Transpose [2,3] -> [3,2]: [[1,2,3],[4,5,6]] -> [[1,4],[2,5],[3,6]]
-  assertEqF32 resultRaw #[1.0, 4.0, 2.0, 5.0, 3.0, 6.0] "permute 2D values"
+  assertEqF32 resultRaw #[1.0, 4.0, 2.0, 5.0, 3.0, 6.0] "permuteUnsafe 2D values"
 
 /-- Test Native.permuteF32 directly at various ranks. -/
 def testPermuteNative : IO Unit := do
@@ -336,23 +337,23 @@ def testPermuteNative : IO Unit := do
   if ByteArray.size result2D != 24 then
     throw (IO.userError s!"Native permuteF32 2D size: {ByteArray.size result2D} != 24")
 
-  -- 3D permute
+  -- 3D permuteUnsafe
   let inputData3D := packF32FromF64 (FloatArray.mk (List.replicate 24 1.0 |>.toArray))
   let result3D := permuteF32 inputData3D #[2, 3, 4] #[2, 0, 1]
   if ByteArray.size result3D != 96 then
     throw (IO.userError s!"Native permuteF32 3D size: {ByteArray.size result3D} != 96")
 
-  -- 6D permute (like what pool produces)
+  -- 6D permuteUnsafe (like what pool produces)
   let inputData6D := packF32FromF64 (FloatArray.mk (List.replicate 9 1.0 |>.toArray))
   let result6D := permuteF32 inputData6D #[1, 1, 1, 3, 1, 3] #[0, 1, 3, 5, 2, 4]
   if ByteArray.size result6D != 36 then
     throw (IO.userError s!"Native permuteF32 6D size: {ByteArray.size result6D} != 36")
 
-/-- Test 3D permute [2, 3, 4] with perm [2, 0, 1] -> [4, 2, 3]. -/
+/-- Test 3D permuteUnsafe [2, 3, 4] with perm [2, 0, 1] -> [4, 2, 3]. -/
 def testPermute3D : IO Unit := do
   let (base, result) := runTensorM do
     let base ← Tensor.buffer [2, 3, 4] .float32
-    let result ← permute base [2, 0, 1]
+    let result ← permuteUnsafe base [2, 0, 1]
     pure (base, result)
 
   let inputData := packF32FromF64 (FloatArray.mk (List.replicate 24 1.0 |>.toArray))
@@ -360,14 +361,14 @@ def testPermute3D : IO Unit := do
 
   let resultRaw := evalTensor result env
   if resultRaw.data.size != 96 then  -- 24 floats * 4 bytes
-    throw (IO.userError s!"3D permute size: {resultRaw.data.size} != 96")
-  assertShape result.uop.shape [4, 2, 3] "permute 3D shape"
+    throw (IO.userError s!"3D permuteUnsafe size: {resultRaw.data.size} != 96")
+  assertShape result.uop.shape [4, 2, 3] "permuteUnsafe 3D shape"
 
-/-- Test 4D permute (full reverse). -/
+/-- Test 4D permuteUnsafe (full reverse). -/
 def testPermute4D : IO Unit := do
   let (base, result) := runTensorM do
     let base ← Tensor.buffer [2, 3, 4, 5] .float32
-    let result ← permute base [3, 2, 1, 0]
+    let result ← permuteUnsafe base [3, 2, 1, 0]
     pure (base, result)
 
   let inputData := packF32FromF64 (FloatArray.mk (List.replicate 120 1.0 |>.toArray))
@@ -375,14 +376,14 @@ def testPermute4D : IO Unit := do
 
   let resultRaw := evalTensor result env
   if resultRaw.data.size != 480 then  -- 120 floats * 4 bytes
-    throw (IO.userError s!"4D permute size: {resultRaw.data.size} != 480")
-  assertShape result.uop.shape [5, 4, 3, 2] "permute 4D shape"
+    throw (IO.userError s!"4D permuteUnsafe size: {resultRaw.data.size} != 480")
+  assertShape result.uop.shape [5, 4, 3, 2] "permuteUnsafe 4D shape"
 
-/-- Test 6D permute (like pool's intermediate tensor). -/
+/-- Test 6D permuteUnsafe (like pool's intermediate tensor). -/
 def testPermute6D : IO Unit := do
   let (base, result) := runTensorM do
     let base ← Tensor.buffer [1, 1, 1, 3, 1, 3] .float32
-    let result ← permute base [0, 1, 3, 5, 2, 4]
+    let result ← permuteUnsafe base [0, 1, 3, 5, 2, 4]
     pure (base, result)
 
   let inputData := packF32FromF64 (FloatArray.mk #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
@@ -390,8 +391,8 @@ def testPermute6D : IO Unit := do
 
   let resultRaw := evalTensor result env
   if resultRaw.data.size != 36 then  -- 9 floats * 4 bytes
-    throw (IO.userError s!"6D permute size: {resultRaw.data.size} != 36")
-  assertShape result.uop.shape [1, 1, 3, 3, 1, 1] "permute 6D shape"
+    throw (IO.userError s!"6D permuteUnsafe size: {resultRaw.data.size} != 36")
+  assertShape result.uop.shape [1, 1, 3, 3, 1, 1] "permuteUnsafe 6D shape"
 
 /-- Test conv2d 1x1 with bias. -/
 def testConv2d1x1WithBias : IO Unit := do
@@ -421,7 +422,7 @@ def testConv2d1x1WithBias : IO Unit := do
 def testPad2dIsolated : IO Unit := do
   let (base, result) := runTensorM do
     let base ← Tensor.buffer [1, 1, 2, 2] .float32
-    let result ← pad2d base 1 1  -- pad by 1 on each side -> [1, 1, 4, 4]
+    let result ← pad2d base 1 1  -- padUnsafe by 1 on each side -> [1, 1, 4, 4]
     pure (base, result)
 
   -- Input: [[1,2],[3,4]]
@@ -751,15 +752,15 @@ def runAll : IO Unit := do
   testConv1d1x1WithBias
   IO.println "  conv1d 1x1 with bias"
   testPermute2D
-  IO.println "  permute 2D"
+  IO.println "  permuteUnsafe 2D"
   testPermuteNative
-  IO.println "  permute native"
+  IO.println "  permuteUnsafe native"
   testPermute3D
-  IO.println "  permute 3D"
+  IO.println "  permuteUnsafe 3D"
   testPermute4D
-  IO.println "  permute 4D"
+  IO.println "  permuteUnsafe 4D"
   testPermute6D
-  IO.println "  permute 6D"
+  IO.println "  permuteUnsafe 6D"
   testConv2d1x1Kernel
   IO.println "  conv2d 1x1 kernel"
   testConv2d3x3SumKernel

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Benchmark.Framework
 import TinyGrad4.Backend.Cuda
 import TinyGrad4.Backend.Vectorization
@@ -63,7 +64,7 @@ def floatArrayToBytes (arr : FloatArray) : ByteArray := Id.run do
   let mut bytes := ByteArray.empty
   for i in [:arr.size] do
     let f := arr.get! i
-    -- Use Float.toUInt32 to get IEEE 754 bits
+    -- Use Float64.toUInt32 to get IEEE 754 bits
     let bits := f.toUInt32  -- This gives the bit pattern
     bytes := bytes.push bits.toUInt8
     bytes := bytes.push (bits >>> 8).toUInt8

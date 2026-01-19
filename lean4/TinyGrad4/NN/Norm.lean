@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 import TinyGrad4.Tensor.Movement
@@ -250,28 +251,28 @@ def forward2d {batch channels height width : Nat}
     let normalized : StaticTensor [batch, channels, height, width] dt := coerceShape normalized
 
     -- Apply affine: y = gamma * normalized + beta
-    let weightB ← reshape params.weight [1, channels, 1, 1]
-    let biasB ← reshape params.bias [1, channels, 1, 1]
+    let weightB ← reshapeUnsafe params.weight [1, channels, 1, 1]
+    let biasB ← reshapeUnsafe params.bias [1, channels, 1, 1]
     let scaled ← mulB normalized weightB
     let scaled : StaticTensor [batch, channels, height, width] dt := coerceShape scaled
     let result ← addB scaled biasB
     pure (coerceShape result)
   else
     -- Eval mode: use running statistics
-    let meanB ← reshape params.runningMean [1, channels, 1, 1]
+    let meanB ← reshapeUnsafe params.runningMean [1, channels, 1, 1]
     let diff ← subB x meanB
     let diff : StaticTensor [batch, channels, height, width] dt := coerceShape diff
 
     let epsT ← Tensor.full [1, channels, 1, 1] dt params.eps
-    let varB ← reshape params.runningVar [1, channels, 1, 1]
+    let varB ← reshapeUnsafe params.runningVar [1, channels, 1, 1]
     let varEps ← addB varB epsT
     let varEps : StaticTensor [1, channels, 1, 1] dt := coerceShape varEps
     let invStd ← rsqrt varEps
     let normalized ← mulB diff invStd
     let normalized : StaticTensor [batch, channels, height, width] dt := coerceShape normalized
 
-    let weightB ← reshape params.weight [1, channels, 1, 1]
-    let biasB ← reshape params.bias [1, channels, 1, 1]
+    let weightB ← reshapeUnsafe params.weight [1, channels, 1, 1]
+    let biasB ← reshapeUnsafe params.bias [1, channels, 1, 1]
     let scaled ← mulB normalized weightB
     let scaled : StaticTensor [batch, channels, height, width] dt := coerceShape scaled
     let result ← addB scaled biasB
@@ -302,28 +303,28 @@ def forward1d {batch channels : Nat}
     let normalized : StaticTensor [batch, channels] dt := coerceShape normalized
 
     -- Apply affine
-    let weightB ← reshape params.weight [1, channels]
-    let biasB ← reshape params.bias [1, channels]
+    let weightB ← reshapeUnsafe params.weight [1, channels]
+    let biasB ← reshapeUnsafe params.bias [1, channels]
     let scaled ← mulB normalized weightB
     let scaled : StaticTensor [batch, channels] dt := coerceShape scaled
     let result ← addB scaled biasB
     pure (coerceShape result)
   else
     -- Eval mode: use running statistics
-    let meanB ← reshape params.runningMean [1, channels]
+    let meanB ← reshapeUnsafe params.runningMean [1, channels]
     let diff ← subB x meanB
     let diff : StaticTensor [batch, channels] dt := coerceShape diff
 
     let epsT ← Tensor.full [1, channels] dt params.eps
-    let varB ← reshape params.runningVar [1, channels]
+    let varB ← reshapeUnsafe params.runningVar [1, channels]
     let varEps ← addB varB epsT
     let varEps : StaticTensor [1, channels] dt := coerceShape varEps
     let invStd ← rsqrt varEps
     let normalized ← mulB diff invStd
     let normalized : StaticTensor [batch, channels] dt := coerceShape normalized
 
-    let weightB ← reshape params.weight [1, channels]
-    let biasB ← reshape params.bias [1, channels]
+    let weightB ← reshapeUnsafe params.weight [1, channels]
+    let biasB ← reshapeUnsafe params.bias [1, channels]
     let scaled ← mulB normalized weightB
     let scaled : StaticTensor [batch, channels] dt := coerceShape scaled
     let result ← addB scaled biasB

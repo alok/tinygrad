@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.DType
 import TinyGrad4.Data.ArrayN
 
@@ -244,7 +245,7 @@ def timeNs (action : IO α) : IO (α × Nat) := do
   pure (result, stop - start)
 
 /-- Benchmark throughput: items per second -/
-def benchmarkThroughput [Dataset D T] (ds : D) (iterations : Nat := 1) : IO Float := do
+def benchmarkThroughput [Dataset D T] (ds : D) (iterations : Nat := 1) : IO Float64 := do
   let n := Dataset.len ds
   if n == 0 then return 0.0
 

@@ -1,3 +1,4 @@
+import Float64
 -- Import linters early so they run on all files that import Basic
 import TinyGrad4.Linter.FloatLinter
 import TinyGrad4.Linter.RawBufferLinter
@@ -9,12 +10,12 @@ namespace TinyGrad4
 
 ## sorry_proof axiom
 Following the pattern from Grassmann4 and SciLean, we use `sorry_proof` to defer
-proof obligations for Float operations. This allows:
+proof obligations for Float64 operations. This allows:
 - Computation to work via `#eval`
 - Type-checking to pass
 - Proofs to be filled in later (or left as axioms for practical use)
 
-The Float type doesn't satisfy ring axioms exactly (due to floating point semantics),
+The Float64 type doesn't satisfy ring axioms exactly (due to floating point semantics),
 but for practical deep learning this is acceptable.
 -/
 

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.Metal
 
@@ -56,22 +57,22 @@ def testMatmul (m k n : Nat) (name : String) : IO Unit := do
   IO.println s!"  GPU first 5: {gpuData[:Nat.min 5 gpuData.size]}"
 
   -- Expected: each element = k (sum of 1*1 k times)
-  let expected := Float.ofNat k
+  let expected := Float64.ofNat k
   let mut cpuOk := true
   let mut gpuOk := true
-  let mut maxDiff : Float := 0.0
+  let mut maxDiff : Float64 := 0.0
   let mut firstDiffIdx : Option Nat := none
 
   for i in [:cpuData.size] do
     let cpuV := cpuData[i]!
     let gpuV := gpuData[i]!
-    let diff := Float.abs (cpuV - gpuV)
+    let diff := Float64.abs (cpuV - gpuV)
     if diff > maxDiff then
       maxDiff := diff
       if firstDiffIdx.isNone && diff > 0.01 then
         firstDiffIdx := some i
-    if Float.abs (cpuV - expected) > 0.01 then cpuOk := false
-    if Float.abs (gpuV - expected) > 0.01 then gpuOk := false
+    if Float64.abs (cpuV - expected) > 0.01 then cpuOk := false
+    if Float64.abs (gpuV - expected) > 0.01 then gpuOk := false
 
   IO.println s!"  Max CPU-GPU diff: {maxDiff}"
   if let some idx := firstDiffIdx then
@@ -109,12 +110,12 @@ def benchMatmul (m k n : Nat) (name : String) (iterations : Nat := 5) : IO Unit 
     pure (aBuf.uop.uid, bBuf.uop.uid, result.uop)
 
   -- Use index-based values for reproducibility
-  let mut aData : Array Float := #[]
+  let mut aData : Array Float64 := #[]
   for i in [:m * k] do
-    aData := aData.push (Float.ofNat (i % 100) / 100.0)
-  let mut bData : Array Float := #[]
+    aData := aData.push (Float64.ofNat (i % 100) / 100.0)
+  let mut bData : Array Float64 := #[]
   for j in [:k * n] do
-    bData := bData.push (Float.ofNat ((j * 7) % 100) / 100.0)
+    bData := bData.push (Float64.ofNat ((j * 7) % 100) / 100.0)
 
   let aBuf := RawBuffer.ofF32 ⟨aData⟩
   let bBuf := RawBuffer.ofF32 ⟨bData⟩

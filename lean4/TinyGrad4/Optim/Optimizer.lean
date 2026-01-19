@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Backend.Interpreter
 import TinyGrad4.Gradient.Autodiff
@@ -39,22 +40,22 @@ class Optimizer (O : Type) where
 
 /-- Get learning rate from optimizer config -/
 class HasLearningRate (O : Type) where
-  getLr : O → Float
-  setLr : O → Float → O
+  getLr : O → Float64
+  setLr : O → Float64 → O
 
 /-- Optimizer with momentum support -/
 class HasMomentum (O : Type) where
-  getMomentum : O → Float
-  setMomentum : O → Float → O
+  getMomentum : O → Float64
+  setMomentum : O → Float64 → O
 
 /-- Parameter group for different learning rates per layer -/
 structure ParamGroup where
   /-- Parameter UIDs in this group -/
   params : List Nat
   /-- Learning rate multiplier for this group -/
-  lrMult : Float := 1.0
+  lrMult : Float64 := 1.0
   /-- Weight decay for this group -/
-  weightDecay : Float := 0.0
+  weightDecay : Float64 := 0.0
   deriving Repr
 
 /-- Helper: collect all parameters from a list of layers -/

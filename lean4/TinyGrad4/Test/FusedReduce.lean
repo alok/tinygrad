@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -11,7 +12,7 @@ Directly exercises the portable C fused reduce kernels:
 
 namespace TinyGrad4.Test.FusedReduce
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
@@ -19,21 +20,21 @@ open Interpreter
 open Backend
 
 /-- Pack float64 array to float32 bytes -/
-private def packF32 (data : Array Float) : ByteArray :=
+private def packF32 (data : Array Float64) : ByteArray :=
   Native.packF32FromF64 ⟨data⟩
 
-private def assertAllClose (arr : Array Float) (expected : Array Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : Array Float64) (expected : Array Float64) (tol : Float64) (label : String) : IO Unit := do
   if arr.size != expected.size then
     throw (IO.userError s!"{label}: size {arr.size} != {expected.size}")
   for i in [:arr.size] do
     let v := arr[i]!
     let e := expected[i]!
-    let diff := Float.abs (v - e)
+    let diff := Float64.abs (v - e)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {e} diff {diff} > {tol}")
 
 private def testSumVec : IO Unit := do
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0]
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0]
   let xb := packF32 x
 
   let inputs : Array ByteArray := #[xb]
@@ -47,8 +48,8 @@ private def testSumVec : IO Unit := do
   assertAllClose out #[10.0] 0.0001 "fused reduce sum vec"
 
 private def testSumVecPlusConst : IO Unit := do
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0]
-  let one : Array Float := #[1.0]  -- constant passed as input buffer (scalar)
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0]
+  let one : Array Float64 := #[1.0]  -- constant passed as input buffer (scalar)
   let xb := packF32 x
   let oneb := packF32 one
 
@@ -65,7 +66,7 @@ private def testSumVecPlusConst : IO Unit := do
   assertAllClose out #[14.0] 0.0001 "fused reduce sum (x+1)"
 
 private def testMaxLastAxis2x4 : IO Unit := do
-  let x : Array Float := #[1.0, -2.0, 3.0, 0.0,  5.0, 4.0, -1.0, 2.0]
+  let x : Array Float64 := #[1.0, -2.0, 3.0, 0.0,  5.0, 4.0, -1.0, 2.0]
   let xb := packF32 x
 
   let inputs : Array ByteArray := #[xb]
@@ -79,8 +80,8 @@ private def testMaxLastAxis2x4 : IO Unit := do
   assertAllClose out #[3.0, 5.0] 0.0001 "fused reduce max last axis"
 
 private def testSumBcast2x4PlusScalar : IO Unit := do
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0,  10.0, 20.0, 30.0, 40.0]
-  let y : Array Float := #[1.0]
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0,  10.0, 20.0, 30.0, 40.0]
+  let y : Array Float64 := #[1.0]
   let xb := packF32 x
   let yb := packF32 y
 
@@ -96,7 +97,7 @@ private def testSumBcast2x4PlusScalar : IO Unit := do
   assertAllClose out #[14.0, 104.0] 0.0001 "fused reduce sum (x + scalar)"
 
 private def testSumAxis0_2x4 : IO Unit := do
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0,  10.0, 20.0, 30.0, 40.0]
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0,  10.0, 20.0, 30.0, 40.0]
   let xb := packF32 x
 
   let inputs : Array ByteArray := #[xb]
@@ -110,7 +111,7 @@ private def testSumAxis0_2x4 : IO Unit := do
   assertAllClose out #[11.0, 22.0, 33.0, 44.0] 0.0001 "fused reduce sum axis0"
 
 private def testMaxAxis0_2x4 : IO Unit := do
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0,  10.0, 20.0, 30.0, 40.0]
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0,  10.0, 20.0, 30.0, 40.0]
   let xb := packF32 x
 
   let inputs : Array ByteArray := #[xb]
@@ -124,7 +125,7 @@ private def testMaxAxis0_2x4 : IO Unit := do
   assertAllClose out #[10.0, 20.0, 30.0, 40.0] 0.0001 "fused reduce max axis0"
 
 private def testSumAll2x2 : IO Unit := do
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0]
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0]
   let xb := packF32 x
 
   let inputs : Array ByteArray := #[xb]
@@ -138,7 +139,7 @@ private def testSumAll2x2 : IO Unit := do
   assertAllClose out #[10.0] 0.0001 "fused reduce sum all"
 
 private def testMaxAll2x2 : IO Unit := do
-  let x : Array Float := #[1.0, 2.0, 3.0, 4.0]
+  let x : Array Float64 := #[1.0, 2.0, 3.0, 4.0]
   let xb := packF32 x
 
   let inputs : Array ByteArray := #[xb]

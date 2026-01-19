@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.Metal
 
@@ -26,7 +27,7 @@ def testSumReduce (n : Nat) : IO Unit := do
     pure (xBuf.uop.uid, result)
 
   -- Input: values 1, 2, 3, ..., n
-  let xData := Array.range n |>.map (fun i => Float.ofNat (i + 1))
+  let xData := Array.range n |>.map (fun i => Float64.ofNat (i + 1))
   let xBuf := RawBuffer.ofF32 ⟨xData⟩
 
   let compiled ← Interpreter.compileManyCached [sumUop]
@@ -53,8 +54,8 @@ def testSumReduce (n : Nat) : IO Unit := do
   IO.println s!"  GPU result: {gpuData} ({gpuEnd - gpuStart} ms)"
   IO.println s!"  Expected: {expected}"
 
-  let cpuDiff := Float.abs (cpuData[0]! - expected)
-  let gpuDiff := Float.abs (gpuData[0]! - expected)
+  let cpuDiff := Float64.abs (cpuData[0]! - expected)
+  let gpuDiff := Float64.abs (gpuData[0]! - expected)
 
   if cpuDiff < 0.1 then
     IO.println "  ✓ CPU correct"
@@ -103,13 +104,13 @@ def testBatchSumReduce (batch k : Nat) : IO Unit := do
   IO.println s!"  GPU first 5: {gpuData[:Nat.min 5 gpuData.size]}"
 
   -- Each row should sum to k
-  let expected := Float.ofNat k
+  let expected := Float64.ofNat k
   let mut cpuOk := true
   let mut gpuOk := true
   for i in [:batch] do
-    if Float.abs (cpuData[i]! - expected) > 0.1 then
+    if Float64.abs (cpuData[i]! - expected) > 0.1 then
       cpuOk := false
-    if Float.abs (gpuData[i]! - expected) > 0.1 then
+    if Float64.abs (gpuData[i]! - expected) > 0.1 then
       gpuOk := false
 
   if cpuOk then
@@ -133,10 +134,10 @@ def testBatchMaxReduce (batch k : Nat) : IO Unit := do
     pure (xBuf.uop.uid, result)
 
   -- Input: column index as value (so max = k-1 for each row)
-  let mut xData : Array Float := #[]
+  let mut xData : Array Float64 := #[]
   for _ in [:batch] do
     for j in [:k] do
-      xData := xData.push (Float.ofNat j)
+      xData := xData.push (Float64.ofNat j)
   let xBuf := RawBuffer.ofF32 ⟨xData⟩
 
   let compiled ← Interpreter.compileManyCached [maxUop]
@@ -162,13 +163,13 @@ def testBatchMaxReduce (batch k : Nat) : IO Unit := do
   IO.println s!"  GPU first 5: {gpuData[:Nat.min 5 gpuData.size]}"
 
   -- Each row should have max = k-1
-  let expected := Float.ofNat (k - 1)
+  let expected := Float64.ofNat (k - 1)
   let mut cpuOk := true
   let mut gpuOk := true
   for i in [:batch] do
-    if Float.abs (cpuData[i]! - expected) > 0.1 then
+    if Float64.abs (cpuData[i]! - expected) > 0.1 then
       cpuOk := false
-    if Float.abs (gpuData[i]! - expected) > 0.1 then
+    if Float64.abs (gpuData[i]! - expected) > 0.1 then
       gpuOk := false
 
   if cpuOk then

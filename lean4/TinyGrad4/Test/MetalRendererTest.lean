@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.MetalRenderer
 import TinyGrad4.Backend.Device
 import TinyGrad4.UOp.UOp

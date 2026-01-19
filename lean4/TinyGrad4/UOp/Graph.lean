@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.UOp.UOp
 import Std.Data.HashMap
 import Std.Data.HashSet

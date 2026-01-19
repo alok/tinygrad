@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Spec
 
@@ -23,7 +24,7 @@ private def testBroadcastStrides : IO Unit := do
   assertEq (broadcastStrides [5] [8] [15, 10, 5]) (some ([0, 0, 8] : List Int)) "broadcastStrides multi"
   assertEq (broadcastStrides [1] [0] []) none "broadcastStrides rank mismatch"
   assertEq (broadcastStrides [1, 2, 3] [0, 2, 8] [2, 3]) none "broadcastStrides invalid dims"
-  assertEq (broadcastStrides [2, 2, 3] [0, 2, 8] [1, 2, 3]) none "broadcastStrides invalid expand"
+  assertEq (broadcastStrides [2, 2, 3] [0, 2, 8] [1, 2, 3]) none "broadcastStrides invalid expandUnsafe"
 
 private def testBasicIndexShape : IO Unit := do
   let shape : Shape := [10, 20, 30]

@@ -1,3 +1,4 @@
+import Float64
 namespace TinyGrad4
 
 /-- Debug helper: no-op placeholder until shared-structure tracing is implemented. -/

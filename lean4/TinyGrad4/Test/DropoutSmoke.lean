@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.NN
 
@@ -16,7 +17,7 @@ open TinyGrad4.NN
 open Interpreter
 open StaticTensor
 
-private def assertClose (got expected : Float) (tol : Float := 0.01) (label : String) : IO Unit := do
+private def assertClose (got expected : Float64) (tol : Float64 := 0.01) (label : String) : IO Unit := do
   let diff := (got - expected).abs
   if diff > tol then
     throw (IO.userError s!"{label}: {got} != {expected} (diff={diff})")

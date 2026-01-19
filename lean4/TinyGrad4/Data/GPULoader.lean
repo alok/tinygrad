@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Data.Slice
 import TinyGrad4.Data.Dataset
 import TinyGrad4.Data.Prefetch
@@ -58,6 +59,28 @@ def sync : DeviceId → IO Unit
   | .cuda _ => TinyGrad4.Backend.Cuda.cudaSync
 
 end DeviceId
+
+/-! ## Transfer Policy -/
+
+/-- Policy for host→device transfers. -/
+inductive TransferPolicy where
+  | copy
+  | allowZeroCopy
+  | forceZeroCopy
+  deriving BEq, Repr, Inhabited
+
+namespace TransferPolicy
+
+def allowsZeroCopy : TransferPolicy → Bool
+  | .allowZeroCopy => true
+  | .forceZeroCopy => true
+  | .copy => false
+
+def requiresZeroCopy : TransferPolicy → Bool
+  | .forceZeroCopy => true
+  | _ => false
+
+end TransferPolicy
 
 /-! ## GPU Buffer Handle (Multi-Backend) -/
 
@@ -132,19 +155,34 @@ def ByteSlice.toGPUBuffer (slice : ByteSlice) (device : DeviceId)
   buf.copyIn slice.toByteArray
   pure buf
 
+/-- Upload ByteSlice to GPU with a transfer policy. -/
+def ByteSlice.toGPUBufferWith (slice : ByteSlice) (device : DeviceId)
+    (dtype : DType := .uint8) (policy : TransferPolicy := .copy) : IO GPUBuffer := do
+  match device with
+  | .metal =>
+    if policy == .copy then
+      ByteSlice.toGPUBuffer slice device dtype
+    else if policy == .forceZeroCopy then
+      let aligned ← TinyGrad4.Backend.Metal.metalIsAlignedSlice slice
+      if !aligned then
+        throw (IO.userError "ByteSlice.toGPUBufferWith: force zero-copy requires page-aligned slice")
+      let buf ← TinyGrad4.Backend.Metal.metalWrapBytesNoCopyStrict slice.parent slice.offset slice.length
+      pure { handle := .metal buf, byteSize := slice.length, dtype, device }
+    else
+      let buf ← TinyGrad4.Backend.Metal.metalFromByteSlice slice
+      pure { handle := .metal buf, byteSize := slice.length, dtype, device }
+  | _ =>
+    if policy == .forceZeroCopy then
+      throw (IO.userError "ByteSlice.toGPUBufferWith: force zero-copy requires Metal")
+    else
+      ByteSlice.toGPUBuffer slice device dtype
+
 /-- Upload ByteSlice to GPU with zero-copy if possible.
     Zero-copy works on Apple Silicon Metal (unified memory).
     Falls back to copy on CUDA and other platforms. -/
 def ByteSlice.toGPUBufferZeroCopy (slice : ByteSlice) (device : DeviceId)
     (dtype : DType := .uint8) : IO GPUBuffer := do
-  match device with
-  | .metal =>
-    -- Use Metal zero-copy via unified memory
-    let buf ← TinyGrad4.Backend.Metal.metalWrapBytesNoCopy slice.parent slice.offset slice.length
-    pure { handle := .metal buf, byteSize := slice.length, dtype, device }
-  | _ =>
-    -- Fall back to copy
-    ByteSlice.toGPUBuffer slice device dtype
+  ByteSlice.toGPUBufferWith slice device dtype .allowZeroCopy
 
 /-- Upload ByteArray to GPU -/
 def ByteArray.toGPUBuffer (data : ByteArray) (device : DeviceId)
@@ -246,16 +284,16 @@ def create [Dataset D ByteArray] (ds : D) (device : DeviceId)
 
   pure { queue, worker, device, numBatches }
 
-/-- Create loader from array of ByteSlices (zero-copy if possible) -/
+/-- Create loader from array of ByteSlices (policy-controlled transfer) -/
 def fromSlices (slices : Array ByteSlice) (device : DeviceId)
     (bufferSize : Nat := 4) (dtype : DType := .float32)
-    : IO GPUDataLoader := do
+    (policy : TransferPolicy := .allowZeroCopy) : IO GPUDataLoader := do
   let queue ← GPUQueue.new bufferSize
 
   let worker ← IO.asTask (prio := .dedicated) do
     for slice in slices do
       if ← IO.checkCanceled then break
-      let gpuBuf ← ByteSlice.toGPUBufferZeroCopy slice device dtype
+      let gpuBuf ← ByteSlice.toGPUBufferWith slice device dtype policy
       queue.push gpuBuf
     queue.finish
 

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Kernel.Spec
 
 namespace TinyGrad4

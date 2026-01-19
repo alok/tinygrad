@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Metal
 
 /-!
@@ -43,16 +44,16 @@ namespace KernelTiming
 def totalNs (t : KernelTiming) : Nat := t.dispatchNs + t.kernelNs
 
 /-- Dispatch time in microseconds -/
-def dispatchUs (t : KernelTiming) : Float := t.dispatchNs.toFloat / 1000.0
+def dispatchUs (t : KernelTiming) : Float64 := t.dispatchNs.toFloat / 1000.0
 
 /-- Kernel time in microseconds -/
-def kernelUs (t : KernelTiming) : Float := t.kernelNs.toFloat / 1000.0
+def kernelUs (t : KernelTiming) : Float64 := t.kernelNs.toFloat / 1000.0
 
 /-- Sync time in microseconds -/
-def syncUs (t : KernelTiming) : Float := t.syncNs.toFloat / 1000.0
+def syncUs (t : KernelTiming) : Float64 := t.syncNs.toFloat / 1000.0
 
 /-- Total time in milliseconds -/
-def totalMs (t : KernelTiming) : Float := t.totalNs.toFloat / 1000000.0
+def totalMs (t : KernelTiming) : Float64 := t.totalNs.toFloat / 1000000.0
 
 /-- Format as human-readable string -/
 def format (t : KernelTiming) : String :=
@@ -74,18 +75,18 @@ namespace OpTiming
 def totalNs (t : OpTiming) : Nat := t.compileNs + t.kernel.totalNs
 
 /-- Compile time in milliseconds -/
-def compileMs (t : OpTiming) : Float := t.compileNs.toFloat / 1000000.0
+def compileMs (t : OpTiming) : Float64 := t.compileNs.toFloat / 1000000.0
 
 /-- Total time in milliseconds -/
-def totalMs (t : OpTiming) : Float := t.totalNs.toFloat / 1000000.0
+def totalMs (t : OpTiming) : Float64 := t.totalNs.toFloat / 1000000.0
 
 /-- Compile fraction (0-1) -/
-def compileFrac (t : OpTiming) : Float :=
+def compileFrac (t : OpTiming) : Float64 :=
   if t.totalNs == 0 then 0.0
   else t.compileNs.toFloat / t.totalNs.toFloat
 
 /-- Kernel fraction (0-1) -/
-def kernelFrac (t : OpTiming) : Float :=
+def kernelFrac (t : OpTiming) : Float64 :=
   if t.totalNs == 0 then 0.0
   else t.kernel.kernelNs.toFloat / t.totalNs.toFloat
 
@@ -112,7 +113,7 @@ def timed (action : IO α) : IO (α × Nat) := do
   pure (result, stop - start)
 
 /-- Measure execution time of an IO action in milliseconds -/
-def timedMs (action : IO α) : IO (α × Float) := do
+def timedMs (action : IO α) : IO (α × Float64) := do
   let (result, ns) ← timed action
   pure (result, ns.toFloat / 1000000.0)
 
@@ -166,7 +167,7 @@ structure MultiRunStats where
   /-- Maximum time in nanoseconds -/
   maxNs : Nat
   /-- Mean time in nanoseconds -/
-  meanNs : Float
+  meanNs : Float64
   /-- Number of samples -/
   count : Nat
   deriving Repr
@@ -185,13 +186,13 @@ def fromTimes (times : List Nat) : MultiRunStats :=
     { minNs := minT, maxNs := maxT, meanNs := mean, count := times.length }
 
 /-- Mean time in milliseconds -/
-def meanMs (s : MultiRunStats) : Float := s.meanNs / 1000000.0
+def meanMs (s : MultiRunStats) : Float64 := s.meanNs / 1000000.0
 
 /-- Min time in milliseconds -/
-def minMs (s : MultiRunStats) : Float := s.minNs.toFloat / 1000000.0
+def minMs (s : MultiRunStats) : Float64 := s.minNs.toFloat / 1000000.0
 
 /-- Max time in milliseconds -/
-def maxMs (s : MultiRunStats) : Float := s.maxNs.toFloat / 1000000.0
+def maxMs (s : MultiRunStats) : Float64 := s.maxNs.toFloat / 1000000.0
 
 /-- Format as human-readable string -/
 def format (s : MultiRunStats) : String :=

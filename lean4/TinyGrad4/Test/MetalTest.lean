@@ -1,8 +1,9 @@
+import Float64
 import TinyGrad4.Backend.Device
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.Engine
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!

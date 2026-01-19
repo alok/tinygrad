@@ -1,3 +1,4 @@
+import Float64
 import Lean.Data.Json
 
 /-!
@@ -36,9 +37,9 @@ structure Timing where
 
 namespace Timing
 
-def toMicros (t : Timing) : Float := t.nanos.toFloat / 1000.0
-def toMillis (t : Timing) : Float := t.nanos.toFloat / 1_000_000.0
-def toSeconds (t : Timing) : Float := t.nanos.toFloat / 1_000_000_000.0
+def toMicros (t : Timing) : Float64 := t.nanos.toFloat / 1000.0
+def toMillis (t : Timing) : Float64 := t.nanos.toFloat / 1_000_000.0
+def toSeconds (t : Timing) : Float64 := t.nanos.toFloat / 1_000_000_000.0
 
 end Timing
 
@@ -48,7 +49,7 @@ structure TimingStats where
   max : Timing
   mean : Timing
   median : Timing
-  stddev : Float
+  stddev : Float64
   samples : Nat
   deriving Repr, Inhabited
 
@@ -64,7 +65,7 @@ def compute (timings : Array Timing) : TimingStats :=
     let mean := sum / n
     let variance := sorted.foldl (fun acc t =>
       let diff := (t.nanos : Int) - (mean : Int)
-      let diffF := Float.ofInt diff
+      let diffF := Float64.ofInt diff
       acc + diffF * diffF) 0.0 / n.toFloat
     {
       min := sorted[0]!
@@ -102,8 +103,8 @@ structure BenchmarkResult where
   /-- Timing statistics -/
   stats : TimingStats
   /-- Computed metrics -/
-  bandwidth_gb_s : Float
-  throughput_gflops : Float
+  bandwidth_gb_s : Float64
+  throughput_gflops : Float64
   /-- Whether results were verified correct -/
   verified : Bool
   /-- Timestamp (Unix epoch seconds) -/
@@ -115,12 +116,12 @@ structure BenchmarkResult where
 namespace BenchmarkResult
 
 /-- Compute bandwidth for elementwise ops (read 2 + write 1 = 3 arrays) -/
-def computeBandwidth (size : Nat) (timeUs : Float) : Float :=
+def computeBandwidth (size : Nat) (timeUs : Float64) : Float64 :=
   let bytesTransferred := 3.0 * size.toFloat * 4.0  -- 3 arrays * size * sizeof(float)
   (bytesTransferred / timeUs) * 1e6 / 1e9  -- GB/s
 
 /-- Compute throughput for elementwise ops (1 FLOP per element) -/
-def computeThroughput (size : Nat) (timeUs : Float) : Float :=
+def computeThroughput (size : Nat) (timeUs : Float64) : Float64 :=
   (size.toFloat / timeUs) * 1e6 / 1e9  -- GFLOP/s
 
 end BenchmarkResult

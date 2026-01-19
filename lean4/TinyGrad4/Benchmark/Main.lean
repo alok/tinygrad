@@ -1,3 +1,4 @@
+import Float64
 import Cli
 import TinyGrad4.Benchmark.Framework
 import TinyGrad4.Benchmark.Runner

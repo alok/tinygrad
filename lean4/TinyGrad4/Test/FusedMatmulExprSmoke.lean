@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -10,7 +11,7 @@ Checks that the runtime fused matmul kernel matches the common semantic core:
 
 namespace TinyGrad4.Test.FusedMatmulExprSmoke
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open Std
@@ -37,16 +38,16 @@ private def f32OpsTest : ScalarOps Float32 :=
     zero := (Float32.ofBits 0)
     negInf := (Float32.ofBits 0xFF800000) }
 
-private def assertAllCloseF32 (got expected : Float32) (tol : Float) (msg : String) : IO Unit := do
-  let diff := Float.abs (got.toFloat - expected.toFloat)
+private def assertAllCloseF32 (got expected : Float32) (tol : Float64) (msg : String) : IO Unit := do
+  let diff := Float64.abs (got.toFloat - expected.toFloat)
   if diff > tol then
     throw (IO.userError s!"{msg}: got={got.toFloat} expected={expected.toFloat} diff={diff}")
 
 /-- Pack float64 array to float32 bytes -/
-private def packF32 (data : Array Float) : ByteArray :=
+private def packF32 (data : Array Float64) : ByteArray :=
   Native.packF32FromF64 ⟨data⟩
 
-private def getF32At (vals : Array Float) (shape : Shape) (idx : List Nat) : Float32 :=
+private def getF32At (vals : Array Float64) (shape : Shape) (idx : List Nat) : Float32 :=
   let flat := Interpreter.flattenIndex idx shape
   (vals[flat]!).toFloat32
 
@@ -56,13 +57,13 @@ private def startsBytes (batch : Nat) (matNumel : Nat) : Array Nat := Id.run do
     out := out.push (i * matNumel * 4)
   return out
 
-private def assertAllClose (arr : Array Float) (expected : Array Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : Array Float64) (expected : Array Float64) (tol : Float64) (label : String) : IO Unit := do
   if arr.size != expected.size then
     throw (IO.userError s!"{label}: size {arr.size} != {expected.size}")
   for i in [:arr.size] do
     let v := arr[i]!
     let e := expected[i]!
-    let diff := Float.abs (v - e)
+    let diff := Float64.abs (v - e)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {e} diff {diff} > {tol}")
 
@@ -88,13 +89,13 @@ private def testMatmulBiasRelu : IO Unit := do
 
   let _planExpr := Backend.FusedMatmulExpr.ofPlan plan
 
-  let aVals : Array Float := #[1.0, 2.0, 3.0,  4.0, 5.0, 6.0]  -- [2,3]
-  let bVals : Array Float := #[
+  let aVals : Array Float64 := #[1.0, 2.0, 3.0,  4.0, 5.0, 6.0]  -- [2,3]
+  let bVals : Array Float64 := #[
     1.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0,
     0.0, 0.0, 1.0, 0.0
   ]  -- [3,4]
-  let biasVals : Array Float := #[10.0, 20.0, 30.0, 40.0] -- [4]
+  let biasVals : Array Float64 := #[10.0, 20.0, 30.0, 40.0] -- [4]
 
   let env : Env := (∅ : Env)
     |>.insert aId (RawBuffer.ofFloats aVals)
@@ -140,17 +141,17 @@ private def testBatchedMatmulBiasBroadcastB : IO Unit := do
   if plan.bStarts.any (fun off => off != 0) then
     throw (IO.userError s!"expected broadcasted B starts (all zeros), got {plan.bStarts.toList}")
 
-  let xVals : Array Float := #[
+  let xVals : Array Float64 := #[
     0.0, 1.0, 2.0, 3.0,   4.0, 5.0, 6.0, 7.0,   8.0, 9.0, 10.0, 11.0,
     12.0, 13.0, 14.0, 15.0,  16.0, 17.0, 18.0, 19.0,  20.0, 21.0, 22.0, 23.0
   ]
-  let wVals : Array Float := #[
+  let wVals : Array Float64 := #[
     1.0, 0.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0, 0.0,
     0.0, 0.0, 1.0, 0.0, 0.0,
     0.0, 0.0, 0.0, 1.0, 0.0
   ]
-  let biasVals : Array Float := #[10.0, 20.0, 30.0, 40.0, 50.0]
+  let biasVals : Array Float64 := #[10.0, 20.0, 30.0, 40.0, 50.0]
 
   let xb := packF32 xVals
   let wb := packF32 wVals

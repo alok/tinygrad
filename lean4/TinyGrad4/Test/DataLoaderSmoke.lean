@@ -1,6 +1,7 @@
+import Float64
 import TinyGrad4
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -13,12 +14,12 @@ namespace TinyGrad4.Test.DataLoaderSmoke
 
 open TinyGrad4
 
-private def assertAllClose (arr : FloatArray) (expected : Array Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : FloatArray) (expected : Array Float64) (tol : Float64) (label : String) : IO Unit := do
   if arr.size != expected.size then
     throw (IO.userError s!"{label}: size mismatch {arr.size} != {expected.size}")
   let mut ok := true
   for i in [:arr.size] do
-    let diff := Float.abs (arr[i]! - expected[i]!)
+    let diff := Float64.abs (arr[i]! - expected[i]!)
     if diff > tol then
       ok := false
   if !ok then

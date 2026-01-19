@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Backend.Buffer
 
 /-!
@@ -202,8 +203,8 @@ def slice (s : RawBufferSlice) (start len : Nat) : RawBufferSlice :=
       have := s.h_valid
       sorry }
 
-/-- Get element at index as Float (for float32 dtype) -/
-def getF32 (s : RawBufferSlice) (i : Nat) : Float :=
+/-- Get element at index as Float64 (for float32 dtype) -/
+def getF32 (s : RawBufferSlice) (i : Nat) : Float64 :=
   if s.dtype != .float32 then 0.0
   else if i >= s.numElems then 0.0
   else

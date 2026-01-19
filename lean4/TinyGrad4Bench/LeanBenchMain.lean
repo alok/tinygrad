@@ -1,3 +1,4 @@
+import Float64
 import LeanBench.Runner
 import TinyGrad4Bench.LeanBenchBenches
 

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.FusedEwise
@@ -17,12 +18,12 @@ open Backend
 open Std
 
 /-- Find first corrupted index in GPU output -/
-def findFirstCorruption (expected actual : Array Float) : Option (Nat × Float × Float) := Id.run do
+def findFirstCorruption (expected actual : Array Float64) : Option (Nat × Float64 × Float64) := Id.run do
   for i in [:expected.size] do
     let exp := expected[i]!
     let act := actual[i]!
     let isNaN := act != act
-    let diff := if isNaN then 1000.0 else Float.abs (exp - act)
+    let diff := if isNaN then 1000.0 else Float64.abs (exp - act)
     if diff > 0.001 then
       return some (i, exp, act)
   return none

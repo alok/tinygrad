@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -72,9 +73,9 @@ def demo : IO Unit := do
   let constResult := eval c env
   IO.println s!"Const result: {constResult}"
 
-  -- Now try expand
+  -- Now try expandUnsafe
   IO.println ""
-  IO.println "Creating expand UOp..."
+  IO.println "Creating expandUnsafe UOp..."
   let expanded : UOp := {
     uid := ⟨1⟩
     op := .EXPAND
@@ -85,7 +86,7 @@ def demo : IO Unit := do
   }
   IO.println s!"Expand UOp: src[0].shape={expanded.src[0]!.shape}, target={expanded.shape}"
 
-  IO.println "Evaluating expand..."
+  IO.println "Evaluating expandUnsafe..."
   let expandResult := eval expanded env
   IO.println s!"Expand result: {expandResult}"
 

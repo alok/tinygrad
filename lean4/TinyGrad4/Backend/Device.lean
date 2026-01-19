@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Ops
 import TinyGrad4.DType
 import TinyGrad4.UOp.UOp

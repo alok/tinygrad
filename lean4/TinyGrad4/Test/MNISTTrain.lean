@@ -1,8 +1,9 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Data.MNIST
 import TinyGrad4.Optim.SGD
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 /-!
@@ -58,8 +59,8 @@ def initModel : IO Model := do
          w2Data := { dtype := .float32, data := w2 } }
 
 /-- Run forward pass and compute loss -/
-def forwardLoss (model : Model) (xData : Array Float) (yOneHot : Array Float)
-    (batchSize : Nat) : IO (Float × RawBuffer × RawBuffer) := do
+def forwardLoss (model : Model) (xData : Array Float64) (yOneHot : Array Float64)
+    (batchSize : Nat) : IO (Float64 × RawBuffer × RawBuffer) := do
   -- Build graph
   let result := runTensorM do
     let xBuf ← Tensor.buffer [batchSize, 784] .float32
@@ -111,8 +112,8 @@ def forwardLoss (model : Model) (xData : Array Float) (yOneHot : Array Float)
   pure (lossVal, gradW1, gradW2)
 
 /-- Single training step using native SGD update -/
-def trainStep (model : Model) (xData : Array Float) (yOneHot : Array Float)
-    (batchSize : Nat) (lr : Float) : IO (Float × Model) := do
+def trainStep (model : Model) (xData : Array Float64) (yOneHot : Array Float64)
+    (batchSize : Nat) (lr : Float64) : IO (Float64 × Model) := do
   let (loss, gradW1, gradW2) ← forwardLoss model xData yOneHot batchSize
 
   -- SGD update using native float32 kernel
@@ -123,7 +124,7 @@ def trainStep (model : Model) (xData : Array Float) (yOneHot : Array Float)
 
 /-- Compute accuracy on test set -/
 def computeAccuracy (model : Model) (images : ImageData) (labels : LabelData)
-    (numSamples : Nat) : IO Float := do
+    (numSamples : Nat) : IO Float64 := do
   let mut correct := 0
 
   -- Process in batches
@@ -173,7 +174,7 @@ def computeAccuracy (model : Model) (images : ImageData) (labels : LabelData)
   pure (correct.toFloat / numSamples.toFloat * 100.0)
 
 /-- Main training loop -/
-def train (numEpochs : Nat := 3) (batchSize : Nat := 32) (lr : Float := 0.01) : IO Unit := do
+def train (numEpochs : Nat := 3) (batchSize : Nat := 32) (lr : Float64 := 0.01) : IO Unit := do
   IO.println "=== MNIST Training ==="
   IO.println s!"Epochs: {numEpochs}, Batch size: {batchSize}, Learning rate: {lr}"
   IO.println ""

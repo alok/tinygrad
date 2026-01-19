@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -5,10 +6,10 @@ import TinyGrad4
 
 Ensures our "keep uid" optimizer rewrites no-op movement operations into cheap identity nodes,
 so the interpreter doesn't accidentally allocate/copy for cases like:
-- permute with identity permutation
-- pad with all-zero padding
-- shrink with full bounds
-- flip with empty axes
+- permuteUnsafe with identity permutation
+- padUnsafe with all-zero padding
+- shrinkUnsafe with full bounds
+- flipUnsafe with empty axes
 -/
 
 namespace TinyGrad4.Test.NoopMovementOptSmoke
@@ -19,10 +20,10 @@ open StaticTensor
 private def assertNoOpMovementRewritten : IO Unit := do
   let outU := runTensorM do
     let x ← Tensor.buffer [2, 3] .float32
-    let x1 ← StaticTensor.permute x [0, 1]
-    let x2 ← StaticTensor.pad x1 [(0, 0), (0, 0)]
-    let x3 ← StaticTensor.shrink x2 [(0, 2), (0, 3)]
-    let x4 ← StaticTensor.flip x3 []
+    let x1 ← StaticTensor.permuteUnsafe x [0, 1]
+    let x2 ← StaticTensor.padUnsafe x1 [(0, 0), (0, 0)]
+    let x3 ← StaticTensor.shrinkUnsafe x2 [(0, 2), (0, 3)]
+    let x4 ← StaticTensor.flipUnsafe x3 []
     pure x4.uop
 
   let rootsOpt := TinyGrad4.Optim.optimizeKeepUids [outU]

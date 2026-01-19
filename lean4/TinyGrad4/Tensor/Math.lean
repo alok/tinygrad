@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Movement
 
@@ -240,8 +241,8 @@ def mean {shape : List Nat} {d : DType} (t : StaticTensor shape d) : TensorM (Sc
 -- Constants for exp/log conversion
 -- ln(2) ≈ 0.693147
 -- log2(e) ≈ 1.442695
-def ln2 : Float := 0.6931471805599453
-def log2e : Float := 1.4426950408889634
+def ln2 : Float64 := 0.6931471805599453
+def log2e : Float64 := 1.4426950408889634
 
 -- NOTE: We use Float32 for const construction so float32 graphs can stay in Float32/ByteArray land.
 def ln2f32 : Float32 := 0.6931471805599453
@@ -458,7 +459,7 @@ def meanAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (kee
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d) := do
   let sumT ← sumAxis t axis keepdim
   let n := listGetD s axis 1
-  let nConst ← UOp.const d (Float.ofNat n).toFloat32
+  let nConst ← UOp.const d (Float64.ofNat n).toFloat32
   let result ← UOp.div sumT.uop nConst
   pure { uop := result, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
 
@@ -501,8 +502,35 @@ def rmsNorm {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat := s.l
 private def classRangeF32 (n : Nat) : Array Float32 := Id.run do
   let mut out := Array.emptyWithCapacity n
   for i in [:n] do
-    out := out.push (Float.ofNat i).toFloat32
+    out := out.push (Float64.ofNat i).toFloat32
   return out
+
+private def resolveDim (dim rank : Nat) : Nat :=
+  if dim < rank then dim else
+    panic! s!"dim {dim} out of range for rank {rank}"
+
+private def swapLastPerm (rank dim : Nat) : List Nat :=
+  let last := rank - 1
+  (listRange rank).map fun i =>
+    if i == dim then last else if i == last then dim else i
+
+private def replaceLast (s : Shape) (n : Nat) : Shape :=
+  if s.isEmpty then [n] else s.take (s.length - 1) ++ [n]
+
+private def gatherShapeOk (shape idxShape : Shape) (dim : Nat) : Bool :=
+  shape.length == idxShape.length &&
+  listAll (fun i => if i == dim then true else listGetD shape i 0 >= listGetD idxShape i 0) (listRange shape.length)
+
+private def oneHotLastF32 {s : Shape}
+    (idx : StaticTensor s .float32) (numClasses : Nat)
+    : TensorM (StaticTensor (replaceLast s numClasses) .bool) := do
+  let classUop ← UOp.vconstF32 (classRangeF32 numClasses)
+  let classes : StaticTensor [numClasses] .float32 := { uop := classUop, h_shape := sorry_proof }
+  let eq ← UOp.cmpeq idx.uop classes.uop
+  pure { uop := eq, h_shape := sorry_proof }
+
+private def lastSliceShape (s : Shape) (_i : Nat) : Shape :=
+  if s.isEmpty then [1] else s.take (s.length - 1) ++ [1]
 
 /-- One-hot encoding for class indices (float32). -/
 def oneHotF32 {batch numClasses : Nat}
@@ -510,23 +538,53 @@ def oneHotF32 {batch numClasses : Nat}
     : TensorM (StaticTensor [batch, numClasses] .float32) := do
   let classUop ← UOp.vconstF32 (classRangeF32 numClasses)
   let classes : StaticTensor [numClasses] .float32 := { uop := classUop, h_shape := sorry_proof }
-  let targets2 ← reshape targets [batch, 1]
-  let classes2 ← reshape classes [1, numClasses]
+  let targets2 ← reshapeUnsafe targets [batch, 1]
+  let classes2 ← reshapeUnsafe classes [1, numClasses]
   let cmp ← UOp.cmpeq targets2.uop classes2.uop
   let one ← UOp.const .float32 1.0
   let zero ← UOp.const .float32 0.0
   let out ← UOp.where_ cmp one zero
   pure { uop := out, h_shape := sorry_proof }
 
+/-- Gather along an axis using index values (float32 indices). -/
+def gatherF32 {s idxShape : Shape}
+    (t : StaticTensor s .float32) (dim : Nat)
+    (index : StaticTensor idxShape .float32)
+    : TensorM (StaticTensor idxShape .float32) := do
+  let tShape := t.uop.shape
+  let idxShape' := index.uop.shape
+  let dim' := resolveDim dim tShape.length
+  if !gatherShapeOk tShape idxShape' dim' then
+    panic! s!"gather: invalid shapes {tShape} {idxShape'} for dim {dim'}"
+  let bounds := (listRange tShape.length).map fun i =>
+    if i == dim' then (0, listGetD tShape i 0) else (0, listGetD idxShape' i 0)
+  let tShrunk ← shrinkUnsafe t bounds
+  let tUnsq ← unsqueezeUnsafe tShrunk tShape.length
+  let tPerm ← permuteUnsafe tUnsq (swapLastPerm (tShape.length + 1) dim')
+  let idxUnsq ← unsqueezeUnsafe index idxShape'.length
+  let numClasses := listGetD tShape dim' 0
+  let oneHot ← oneHotLastF32 idxUnsq numClasses
+  let zero ← UOp.const .float32 0.0
+  let masked ← UOp.where_ oneHot.uop tPerm.uop zero
+  let reduced ← UOp.sum masked [idxShape'.length] false
+  pure { uop := reduced, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+
+/-- Gather along an axis using int32 indices. -/
+def gather {s idxShape : Shape}
+    (t : StaticTensor s .float32) (dim : Nat)
+    (index : StaticTensor idxShape .int32)
+    : TensorM (StaticTensor idxShape .float32) := do
+  let indexF ← cast index .float32
+  gatherF32 t dim indexF
+
 /-- Gather along the last axis using class indices (float32). -/
 def gatherLastF32 {batch numClasses : Nat}
     (x : StaticTensor [batch, numClasses] .float32)
     (targets : StaticTensor [batch] .float32)
     : TensorM (StaticTensor [batch] .float32) := do
-  let oneHot ← oneHotF32 targets
-  let prod ← mul x oneHot
-  let sumC ← sumAxis prod 1 false
-  pure sumC
+  let targets2 ← reshapeUnsafe targets [batch, 1]
+  let gathered ← gatherF32 x 1 targets2
+  reshapeUnsafe gathered [batch]
 
 def gatherLast {batch numClasses : Nat}
     (x : StaticTensor [batch, numClasses] .float32)
@@ -540,8 +598,8 @@ def scatterLastF32 {batch numClasses : Nat}
     (targets : StaticTensor [batch] .float32)
     : TensorM (StaticTensor [batch, numClasses] .float32) := do
   let oneHot ← oneHotF32 targets
-  let values2 ← reshape values [batch, 1]
-  let valuesB ← expand values2 [batch, numClasses]
+  let values2 ← reshapeUnsafe values [batch, 1]
+  let valuesB ← expandUnsafe values2 [batch, numClasses]
   let out ← mul oneHot valuesB
   pure out
 
@@ -551,6 +609,202 @@ def scatterLast {batch numClasses : Nat}
     : TensorM (StaticTensor [batch, numClasses] .float32) := do
   let targetsF ← cast targets .float32
   scatterLastF32 values targetsF
+
+inductive ScatterReduce where
+  | sum
+  | mean
+  | amax
+  | amin
+  deriving Repr, DecidableEq
+
+private def preScatterF32 {s idxShape srcShape : Shape}
+    (self : StaticTensor s .float32) (dim : Nat)
+    (index : StaticTensor idxShape .float32) (src : StaticTensor srcShape .float32)
+    : TensorM
+        (StaticTensor (s ++ [listGetD s dim 0]) .float32 ×
+         StaticTensor (s ++ [listGetD s dim 0]) .bool) := do
+  let selfShape := self.uop.shape
+  let idxShape' := index.uop.shape
+  let srcShape' := src.uop.shape
+  let dim' := resolveDim dim selfShape.length
+  if selfShape.length != idxShape'.length || selfShape.length != srcShape'.length then
+    panic! s!"scatter: rank mismatch {selfShape} {idxShape'} {srcShape'}"
+  let ok := listAll (fun i =>
+    if i == dim' then true
+    else (listGetD selfShape i 0 >= listGetD idxShape' i 0) &&
+         (listGetD srcShape' i 0 >= listGetD idxShape' i 0)) (listRange selfShape.length)
+  if !ok then
+    panic! s!"scatter: invalid shapes {selfShape} {idxShape'} {srcShape'} for dim {dim'}"
+  let srcBounds := (listRange srcShape'.length).map fun i => (0, listGetD idxShape' i 0)
+  let srcShrunk ← shrinkUnsafe src srcBounds
+  let srcUnsq ← unsqueezeUnsafe srcShrunk srcShape'.length
+  let numClasses := listGetD selfShape dim' 0
+  let srcExpanded ← expandUnsafe srcUnsq (srcShrunk.uop.shape ++ [numClasses])
+  let perm := swapLastPerm (selfShape.length + 1) dim'
+  let srcT ← permuteUnsafe srcExpanded perm
+  let idxUnsq ← unsqueezeUnsafe index idxShape'.length
+  let maskT ← oneHotLastF32 idxUnsq numClasses
+  let maskP ← permuteUnsafe maskT perm
+  let padSpec := (listRange selfShape.length).map fun i =>
+    if i == dim' then (0, 0)
+    else
+      let need := listGetD selfShape i 0
+      let haveDim := listGetD srcT.uop.shape i 0
+      if need < haveDim then (0, 0) else (0, need - haveDim)
+  let padSpec := padSpec ++ [(0, 0)]
+  let srcP ← padUnsafe srcT padSpec
+  let maskP ← padUnsafe maskP padSpec
+  let srcOut : StaticTensor (s ++ [listGetD s dim 0]) .float32 := { uop := srcP.uop, h_shape := sorry_proof }
+  let maskOut : StaticTensor (s ++ [listGetD s dim 0]) .bool := { uop := maskP.uop, h_shape := sorry_proof }
+  pure (srcOut, maskOut)
+
+private def sliceLast {s : Shape} {d : DType}
+    (t : StaticTensor s d) (i : Nat)
+    : TensorM (StaticTensor (lastSliceShape s i) d) := do
+  let shape := t.uop.shape
+  if shape.isEmpty then
+    panic! "sliceLast: empty shape"
+  let last := shape.length - 1
+  let bounds := (listRange last).map fun j => (0, listGetD shape j 0)
+  let bounds := bounds ++ [(i, i + 1)]
+  let sliced ← shrinkUnsafe t bounds
+  pure { uop := sliced.uop, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+
+private def squeezeLast {s : Shape} {d : DType}
+    (t : StaticTensor s d) : TensorM (StaticTensor (s.take (s.length - 1)) d) := do
+  let shape := t.uop.shape
+  if shape.isEmpty then
+    panic! "squeezeLast: empty shape"
+  let newShape := shape.take (shape.length - 1)
+  let reshaped ← UOp.reshape t.uop newShape
+  pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+
+private def whereSame {s : Shape} {d : DType}
+    (cond : StaticTensor s .bool) (x y : StaticTensor s d)
+    : TensorM (StaticTensor s d) := do
+  let out ← UOp.where_ cond.uop x.uop y.uop
+  pure { uop := out, requiresGrad := x.requiresGrad || y.requiresGrad, h_shape := sorry_proof }
+
+private def maskedSetitemLast {s vShape : Shape}
+    (target : StaticTensor s .float32)
+    (values : StaticTensor vShape .float32)
+    (mask : StaticTensor vShape .bool)
+    : TensorM (StaticTensor s .float32) := do
+  let shape := values.uop.shape
+  if shape.isEmpty then
+    panic! "maskedSetitemLast: empty shape"
+  let lastDim := listGetD shape (shape.length - 1) 0
+  if lastDim == 0 then
+    pure target
+  else
+    let accVal0 ← sliceLast values 0
+    let accMask0 ← sliceLast mask 0
+    let mut accVal := accVal0
+    let mut accMask := accMask0
+    if lastDim > 1 then
+      for i in [:lastDim] do
+        if i == 0 then
+          pure ()
+        else
+          let vi ← sliceLast values i
+          let mi ← sliceLast mask i
+          let accVal' ← whereSame mi vi accVal
+          let accMask' ← bitor accMask mi
+          accVal := accVal'
+          accMask := accMask'
+    let accValS ← squeezeLast accVal
+    let accMaskS ← squeezeLast accMask
+    let accValOut : StaticTensor s .float32 := { uop := accValS.uop, h_shape := sorry_proof }
+    let accMaskOut : StaticTensor s .bool := { uop := accMaskS.uop, h_shape := sorry_proof }
+    whereSame accMaskOut accValOut target
+
+def scatterReduceF32 {s idxShape srcShape : Shape}
+    (self : StaticTensor s .float32) (dim : Nat)
+    (index : StaticTensor idxShape .float32) (src : StaticTensor srcShape .float32)
+    (reduce : ScatterReduce) (includeSelf : Bool := true)
+    : TensorM (StaticTensor s .float32) := do
+  let (srcP, maskP) ← preScatterF32 self dim index src
+  let lastAxis := srcP.uop.shape.length - 1
+  let zero ← UOp.const .float32 0.0
+  let one ← UOp.const .float32 1.0
+  let maskOnes ← UOp.where_ maskP.uop one zero
+  let countU ← UOp.sum maskOnes [lastAxis] false
+  let noUpdateU ← UOp.cmpeq countU zero
+  let noUpdate : StaticTensor s .bool := { uop := noUpdateU, h_shape := sorry_proof }
+  let maskedU ← UOp.where_ maskP.uop srcP.uop zero
+  let sumU ← UOp.sum maskedU [lastAxis] false
+  let sumT : StaticTensor s .float32 := { uop := sumU, h_shape := sorry_proof }
+  match reduce with
+  | .sum =>
+    if includeSelf then
+      add sumT self
+    else
+      let invU ← UOp.where_ noUpdate.uop self.uop zero
+      let invT : StaticTensor s .float32 := { uop := invU, h_shape := sorry_proof }
+      add sumT invT
+  | .mean =>
+    let baseNum ←
+      if includeSelf then
+        add sumT self
+      else
+        let invU ← UOp.where_ noUpdate.uop self.uop zero
+        let invT : StaticTensor s .float32 := { uop := invU, h_shape := sorry_proof }
+        add sumT invT
+    let countAddU ←
+      if includeSelf then
+        UOp.add countU one
+      else
+        let addOneU ← UOp.where_ noUpdate.uop one zero
+        UOp.add countU addOneU
+    let countT : StaticTensor s .float32 := { uop := countAddU, h_shape := sorry_proof }
+    div baseNum countT
+  | .amax =>
+    let negInf ← UOp.const .float32 (-1.0e38)
+    let maskedMax ← UOp.where_ maskP.uop srcP.uop negInf
+    let maxU ← UOp.max_ maskedMax [lastAxis] false
+    let maxT : StaticTensor s .float32 := { uop := maxU, h_shape := sorry_proof }
+    if includeSelf then
+      let outU ← UOp.maxBinary maxT.uop self.uop
+      pure { uop := outU, h_shape := sorry_proof }
+    else
+      let outU ← UOp.where_ noUpdate.uop self.uop maxT.uop
+      pure { uop := outU, h_shape := sorry_proof }
+  | .amin =>
+    let negInf ← UOp.const .float32 (-1.0e38)
+    let negSrc ← neg srcP
+    let negSelf ← neg self
+    let maskedNeg ← UOp.where_ maskP.uop negSrc.uop negInf
+    let maxNegU ← UOp.max_ maskedNeg [lastAxis] false
+    let maxNegT : StaticTensor s .float32 := { uop := maxNegU, h_shape := sorry_proof }
+    let mergedNegU ←
+      if includeSelf then
+        UOp.maxBinary maxNegT.uop negSelf.uop
+      else
+        UOp.where_ noUpdate.uop negSelf.uop maxNegT.uop
+    let mergedNegT : StaticTensor s .float32 := { uop := mergedNegU, h_shape := sorry_proof }
+    neg mergedNegT
+
+def scatterReduce {s idxShape srcShape : Shape}
+    (self : StaticTensor s .float32) (dim : Nat)
+    (index : StaticTensor idxShape .int32) (src : StaticTensor srcShape .float32)
+    (reduce : ScatterReduce) (includeSelf : Bool := true)
+    : TensorM (StaticTensor s .float32) := do
+  let indexF ← cast index .float32
+  scatterReduceF32 self dim indexF src reduce includeSelf
+
+def scatterF32 {s idxShape srcShape : Shape}
+    (self : StaticTensor s .float32) (dim : Nat)
+    (index : StaticTensor idxShape .float32) (src : StaticTensor srcShape .float32)
+    : TensorM (StaticTensor s .float32) := do
+  let (srcP, maskP) ← preScatterF32 self dim index src
+  maskedSetitemLast self srcP maskP
+
+def scatter {s idxShape srcShape : Shape}
+    (self : StaticTensor s .float32) (dim : Nat)
+    (index : StaticTensor idxShape .int32) (src : StaticTensor srcShape .float32)
+    : TensorM (StaticTensor s .float32) := do
+  let indexF ← cast index .float32
+  scatterF32 self dim indexF src
 
 /-- Log-sum-exp along axis (numerically stable). -/
 def logsumexpAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) (keepdim : Bool := true)
@@ -568,7 +822,7 @@ def logsumexpAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat)
     pure { uop := outKeep, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
   | false =>
     let outKeepT : StaticTensor (Shape.reduce s [axis] true) d := { uop := outKeep, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
-    reshape outKeepT (Shape.reduce s [axis] false)
+    reshapeUnsafe outKeepT (Shape.reduce s [axis] false)
 
 /-- Log-softmax along an axis (stable). -/
 def logSoftmaxAxis {s : List Nat} {d : DType} (t : StaticTensor s d) (axis : Nat) : TensorM (StaticTensor s d) := do
@@ -602,8 +856,8 @@ private def argmaxF32 {batch n : Nat} (t : StaticTensor [batch, n] .float32)
   let eqF ← cast eqT .float32
   let classesUop ← UOp.vconstF32 (classRangeF32 n)
   let classes : StaticTensor [n] .float32 := { uop := classesUop, h_shape := sorry_proof }
-  let classes2 ← reshape classes [1, n]
-  let classesB ← expand classes2 [batch, n]
+  let classes2 ← reshapeUnsafe classes [1, n]
+  let classesB ← expandUnsafe classes2 [batch, n]
   let prod ← mul eqF classesB
   let sumC ← sumAxis prod 1 false
   cast sumC .int32
@@ -840,24 +1094,24 @@ def avgPool2dPlaceholder {batch cin h w hOut wOut : Nat} {d : DType}
 
 /-- Pad 1D tensor with symmetric padding on W dimension.
     Input:  [batch, channels, width]
-    Output: [batch, channels, width + 2*pad] -/
+    Output: [batch, channels, width + 2*padUnsafe] -/
 def pad1d {batch cin w : Nat} {d : DType}
     (x : StaticTensor [batch, cin, w] d)
     (padW : Nat)
     : TensorM (StaticTensor [batch, cin, w + 2*padW] d) := do
   let padding := [(0, 0), (0, 0), (padW, padW)]
-  let result ← pad x padding
+  let result ← padUnsafe x padding
   pure { uop := result.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
 
 /-- Pad 2D tensor with symmetric padding on H and W dimensions.
     Input:  [batch, channels, height, width]
-    Output: [batch, channels, height + 2*pad, width + 2*pad] -/
+    Output: [batch, channels, height + 2*padUnsafe, width + 2*padUnsafe] -/
 def pad2d {batch cin h w : Nat} {d : DType}
     (x : StaticTensor [batch, cin, h, w] d)
     (padH padW : Nat)
     : TensorM (StaticTensor [batch, cin, h + 2*padH, w + 2*padW] d) := do
   let padding := [(0, 0), (0, 0), (padH, padH), (padW, padW)]
-  let result ← pad x padding
+  let result ← padUnsafe x padding
   pure { uop := result.uop, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
 
 /-- Max pooling 2D operation using pool/im2col + reduce.
@@ -919,7 +1173,7 @@ def avgPool2d {batch cin h w : Nat} {d : DType}
 
   -- Divide by kernel area for mean
   let kernelArea := (kernelSize * kernelSize : Nat)
-  let divisor ← UOp.const d (Float.ofNat kernelArea).toFloat32
+  let divisor ← UOp.const d (Float64.ofNat kernelArea).toFloat32
   let result ← UOp.div sum2 divisor
 
   pure { uop := result, requiresGrad := x.requiresGrad, h_shape := sorry_proof }
@@ -956,11 +1210,11 @@ def conv1d {batch cin cout w kW : Nat} {d : DType}
   -- [batch, cin, wOut, kW] -> [batch * wOut, cin * kW]
   let patchFlat := batch * wOut
   let kernelFlat := cin * kW
-  let patchesReshaped ← reshape patches [patchFlat, kernelFlat]
+  let patchesReshaped ← reshapeUnsafe patches [patchFlat, kernelFlat]
 
   -- Step 4: Reshape weight
   -- [cout, cin, kW] -> [cout, cin * kW]
-  let weightReshaped ← reshape weight [cout, kernelFlat]
+  let weightReshaped ← reshapeUnsafe weight [cout, kernelFlat]
 
   -- Step 5: Transpose weight for matmul: [cout, kernelFlat] -> [kernelFlat, cout]
   let weightT ← T weightReshaped
@@ -969,16 +1223,16 @@ def conv1d {batch cin cout w kW : Nat} {d : DType}
   let mm ← matmul patchesReshaped weightT
 
   -- Step 7: Reshape to [batch, wOut, cout]
-  let mmReshaped ← reshape mm [batch, wOut, cout]
+  let mmReshaped ← reshapeUnsafe mm [batch, wOut, cout]
 
   -- Step 8: Permute to [batch, cout, wOut]
-  let result ← permute mmReshaped [0, 2, 1]
+  let result ← permuteUnsafe mmReshaped [0, 2, 1]
 
   -- Step 9: Add bias if present
   let finalUop ← match bias with
   | none => pure result.uop
   | some b =>
-    let biasReshaped ← reshape b [1, cout, 1]
+    let biasReshaped ← reshapeUnsafe b [1, cout, 1]
     UOp.add result.uop biasReshaped.uop
 
   let biasGrad := match bias with | none => false | some b => b.requiresGrad
@@ -1029,11 +1283,11 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType}
   -- [batch, cin, hOut, wOut, kH, kW] -> [batch * hOut * wOut, cin * kH * kW]
   let patchFlat := batch * hOut * wOut
   let kernelFlat := cin * kH * kW
-  let patchesReshaped ← reshape patches [patchFlat, kernelFlat]
+  let patchesReshaped ← reshapeUnsafe patches [patchFlat, kernelFlat]
 
   -- Step 4: Reshape weight
   -- [cout, cin, kH, kW] -> [cout, cin * kH * kW]
-  let weightReshaped ← reshape weight [cout, kernelFlat]
+  let weightReshaped ← reshapeUnsafe weight [cout, kernelFlat]
 
   -- Step 5: Transpose weight for matmul: [cout, kernelFlat] -> [kernelFlat, cout]
   let weightT ← T weightReshaped
@@ -1042,17 +1296,17 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType}
   let mm ← matmul patchesReshaped weightT
 
   -- Step 7: Reshape to [batch, hOut, wOut, cout]
-  let mmReshaped ← reshape mm [batch, hOut, wOut, cout]
+  let mmReshaped ← reshapeUnsafe mm [batch, hOut, wOut, cout]
 
   -- Step 8: Permute to [batch, cout, hOut, wOut]
-  let result ← permute mmReshaped [0, 3, 1, 2]
+  let result ← permuteUnsafe mmReshaped [0, 3, 1, 2]
 
   -- Step 9: Add bias if present
   let finalUop ← match bias with
   | none => pure result.uop
   | some b =>
     -- Reshape bias [cout] -> [1, cout, 1, 1] for broadcasting
-    let biasReshaped ← reshape b [1, cout, 1, 1]
+    let biasReshaped ← reshapeUnsafe b [1, cout, 1, 1]
     UOp.add result.uop biasReshaped.uop
 
   let biasGrad := match bias with | none => false | some b => b.requiresGrad
@@ -1071,9 +1325,9 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType}
     4. Batched matmul: [batch, cin, hOut*wOut, kH*kW] @ [1, cin, kH*kW, 1]
        -> broadcasts batch dims, performs matmul for each (batch, cin)
        -> result: [batch, cin, hOut*wOut, 1]
-    5. Squeeze and reshape to [batch, cin, hOut, wOut]
+    5. Squeeze and reshapeUnsafe to [batch, cin, hOut, wOut]
 
-    This uses a single batched CONTRACT operation instead of expand+multiply+sum.
+    This uses a single batched CONTRACT operation instead of expandUnsafe+multiply+sum.
 -/
 def depthwiseConv2d {batch cin h w kH kW : Nat} {d : DType}
     (x : StaticTensor [batch, cin, h, w] d)
@@ -1113,7 +1367,7 @@ def depthwiseConv2d {batch cin h w kH kW : Nat} {d : DType}
   -- Result: [batch, cin, hOut*wOut, 1]
   let mmResult ← UOp.contract2D patchesReshaped weightReshaped
 
-  -- Step 6: Squeeze and reshape to [batch, cin, hOut, wOut]
+  -- Step 6: Squeeze and reshapeUnsafe to [batch, cin, hOut, wOut]
   let result ← UOp.reshape mmResult [batch, cin, hOut, wOut]
 
   -- Step 7: Add bias if present

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -10,7 +11,7 @@ Directly exercises the portable C matmul+bias kernel:
 
 namespace TinyGrad4.Test.FusedMatmul
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
@@ -19,23 +20,23 @@ open Interpreter
 open Backend
 
 /-- Pack float64 array to float32 bytes -/
-private def packF32 (data : Array Float) : ByteArray :=
+private def packF32 (data : Array Float64) : ByteArray :=
   Native.packF32FromF64 ⟨data⟩
 
-private def assertAllClose (arr : Array Float) (expected : Array Float) (tol : Float) (label : String) : IO Unit := do
+private def assertAllClose (arr : Array Float64) (expected : Array Float64) (tol : Float64) (label : String) : IO Unit := do
   if arr.size != expected.size then
     throw (IO.userError s!"{label}: size {arr.size} != {expected.size}")
   for i in [:arr.size] do
     let v := arr[i]!
     let e := expected[i]!
-    let diff := Float.abs (v - e)
+    let diff := Float64.abs (v - e)
     if diff > tol then
       throw (IO.userError s!"{label}: idx {i} value {v} expected {e} diff {diff} > {tol}")
 
 private def testMatmulBias : IO Unit := do
-  let a : Array Float := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0]  -- [2,3]
-  let b : Array Float := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]  -- [3,2]
-  let bias : Array Float := #[0.1, 0.2]                     -- [2]
+  let a : Array Float64 := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0]  -- [2,3]
+  let b : Array Float64 := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]  -- [3,2]
+  let bias : Array Float64 := #[0.1, 0.2]                     -- [2]
   let ab := packF32 a
   let bb := packF32 b
   let biasb := packF32 bias
@@ -47,9 +48,9 @@ private def testMatmulBias : IO Unit := do
   assertAllClose out #[1.6, 1.7, 1.6, 1.7] 0.0001 "matmul+bias"
 
 private def testMatmulBiasRelu : IO Unit := do
-  let a : Array Float := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0]   -- [2,3]
-  let b : Array Float := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]   -- [3,2]
-  let bias : Array Float := #[-2.0, 0.2]                     -- [2]
+  let a : Array Float64 := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0]   -- [2,3]
+  let b : Array Float64 := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]   -- [3,2]
+  let bias : Array Float64 := #[-2.0, 0.2]                     -- [2]
   let ab := packF32 a
   let bb := packF32 b
   let biasb := packF32 bias
@@ -61,10 +62,10 @@ private def testMatmulBiasRelu : IO Unit := do
   assertAllClose out #[0.0, 1.7, 0.0, 1.7] 0.0001 "matmul+bias+relu"
 
 private def testMatmulBias2 : IO Unit := do
-  let a : Array Float := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0]  -- [2,3]
-  let b : Array Float := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]  -- [3,2]
-  let bias0 : Array Float := #[0.1, 0.2]                    -- [2]
-  let bias1 : Array Float := #[1.0, 2.0,  3.0, 4.0]         -- [2,2]
+  let a : Array Float64 := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0]  -- [2,3]
+  let b : Array Float64 := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]  -- [3,2]
+  let bias0 : Array Float64 := #[0.1, 0.2]                    -- [2]
+  let bias1 : Array Float64 := #[1.0, 2.0,  3.0, 4.0]         -- [2,2]
   let ab := packF32 a
   let bb := packF32 b
   let b0 := packF32 bias0
@@ -77,10 +78,10 @@ private def testMatmulBias2 : IO Unit := do
   assertAllClose out #[2.6, 3.7, 4.6, 5.7] 0.0001 "matmul+bias2"
 
 private def testMatmulBias2Relu : IO Unit := do
-  let a : Array Float := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0]   -- [2,3]
-  let b : Array Float := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]   -- [3,2]
-  let bias0 : Array Float := #[-2.0, 0.2]                    -- [2]
-  let bias1 : Array Float := #[0.0]                          -- []
+  let a : Array Float64 := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0]   -- [2,3]
+  let b : Array Float64 := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]   -- [3,2]
+  let bias0 : Array Float64 := #[-2.0, 0.2]                    -- [2]
+  let bias1 : Array Float64 := #[0.0]                          -- []
   let ab := packF32 a
   let bb := packF32 b
   let b0 := packF32 bias0
@@ -93,9 +94,9 @@ private def testMatmulBias2Relu : IO Unit := do
   assertAllClose out #[0.0, 1.7, 0.0, 1.7] 0.0001 "matmul+bias2+relu"
 
 private def testMatmulBatchedBias : IO Unit := do
-  let a : Array Float := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0,  2.0, 2.0, 2.0,  2.0, 2.0, 2.0] -- [2,2,3]
-  let b : Array Float := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]                                  -- [1,3,2]
-  let bias : Array Float := #[0.1, 0.2]                                                      -- [2]
+  let a : Array Float64 := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0,  2.0, 2.0, 2.0,  2.0, 2.0, 2.0] -- [2,2,3]
+  let b : Array Float64 := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]                                  -- [1,3,2]
+  let bias : Array Float64 := #[0.1, 0.2]                                                      -- [2]
   let ab := packF32 a
   let bb := packF32 b
   let biasb := packF32 bias
@@ -110,10 +111,10 @@ private def testMatmulBatchedBias : IO Unit := do
   assertAllClose out #[1.6, 1.7, 1.6, 1.7, 3.1, 3.2, 3.1, 3.2] 0.0001 "batched matmul+bias"
 
 private def testMatmulBatchedBias2 : IO Unit := do
-  let a : Array Float := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0,  2.0, 2.0, 2.0,  2.0, 2.0, 2.0] -- [2,2,3]
-  let b : Array Float := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]                                  -- [1,3,2]
-  let bias0 : Array Float := #[0.1, 0.2]                                                     -- [2]
-  let bias1 : Array Float := #[1.0, 2.0,  3.0, 4.0,  5.0, 6.0,  7.0, 8.0]                    -- [2,2,2]
+  let a : Array Float64 := #[1.0, 1.0, 1.0,  1.0, 1.0, 1.0,  2.0, 2.0, 2.0,  2.0, 2.0, 2.0] -- [2,2,3]
+  let b : Array Float64 := #[0.5, 0.5,  0.5, 0.5,  0.5, 0.5]                                  -- [1,3,2]
+  let bias0 : Array Float64 := #[0.1, 0.2]                                                     -- [2]
+  let bias1 : Array Float64 := #[1.0, 2.0,  3.0, 4.0,  5.0, 6.0,  7.0, 8.0]                    -- [2,2,2]
   let ab := packF32 a
   let bb := packF32 b
   let b0 := packF32 bias0
@@ -214,7 +215,7 @@ private def testPlannerBatchedBias : IO Unit := do
 private def testPlannerBatchedBiasExpandedA : IO Unit := do
   let root := runTensorM do
     let a0 ← Tensor.full [1, 2, 3] .float32 1.0
-    let a ← StaticTensor.expand a0 [2, 2, 3]
+    let a ← StaticTensor.expandUnsafe a0 [2, 2, 3]
     let b ← Tensor.full [1, 3, 2] .float32 0.5
     let bias ← Tensor.full [2] .float32 0.1
     let ab ← UOp.contract2D a.uop b.uop
@@ -232,18 +233,18 @@ private def testPlannerBatchedBiasExpandedA : IO Unit := do
     return refCnt0
 
   match FusedMatmul.compile root keepIds refCnt0 with
-  | none => throw (IO.userError "planner batched bias expand: expected fusion plan")
+  | none => throw (IO.userError "planner batched bias expandUnsafe: expected fusion plan")
   | some plan =>
     if plan.aStarts == #[0, 0] then
       pure ()
     else
-      throw (IO.userError "planner batched bias expand: expected broadcasted aStarts")
+      throw (IO.userError "planner batched bias expandUnsafe: expected broadcasted aStarts")
 
 private def testPlannerBatchedBiasExpandedB : IO Unit := do
   let root := runTensorM do
     let a ← Tensor.full [2, 2, 3] .float32 1.0
     let b0 ← Tensor.full [1, 3, 2] .float32 0.5
-    let b ← StaticTensor.expand b0 [2, 3, 2]
+    let b ← StaticTensor.expandUnsafe b0 [2, 3, 2]
     let bias ← Tensor.full [2] .float32 0.1
     let ab ← UOp.contract2D a.uop b.uop
     let y ← UOp.add ab bias.uop
@@ -260,19 +261,19 @@ private def testPlannerBatchedBiasExpandedB : IO Unit := do
     return refCnt0
 
   match FusedMatmul.compile root keepIds refCnt0 with
-  | none => throw (IO.userError "planner batched bias expand B: expected fusion plan")
+  | none => throw (IO.userError "planner batched bias expandUnsafe B: expected fusion plan")
   | some plan =>
     if plan.bStarts == #[0, 0] then
       pure ()
     else
-      throw (IO.userError "planner batched bias expand B: expected broadcasted bStarts")
+      throw (IO.userError "planner batched bias expandUnsafe B: expected broadcasted bStarts")
 
 private def testPlannerBatchedBiasExpandedBias : IO Unit := do
   let root := runTensorM do
     let a ← Tensor.full [2, 2, 3] .float32 1.0
     let b ← Tensor.full [1, 3, 2] .float32 0.5
     let bias0 ← Tensor.full [1, 2] .float32 0.1
-    let bias ← StaticTensor.expand bias0 [2, 2]
+    let bias ← StaticTensor.expandUnsafe bias0 [2, 2]
     let ab ← UOp.contract2D a.uop b.uop
     let y ← UOp.add ab bias.uop
     pure y
@@ -288,19 +289,19 @@ private def testPlannerBatchedBiasExpandedBias : IO Unit := do
     return refCnt0
 
   match FusedMatmul.compile root keepIds refCnt0 with
-  | none => throw (IO.userError "planner batched bias expand bias: expected fusion plan")
+  | none => throw (IO.userError "planner batched bias expandUnsafe bias: expected fusion plan")
   | some plan =>
     if plan.biasStarts == #[0, 0] then
       pure ()
     else
-      throw (IO.userError "planner batched bias expand bias: expected broadcasted biasStarts")
+      throw (IO.userError "planner batched bias expandUnsafe bias: expected broadcasted biasStarts")
 
 private def testPlannerBatchedBias2ExpandedBias0 : IO Unit := do
   let root := runTensorM do
     let a ← Tensor.full [2, 2, 3] .float32 1.0
     let b ← Tensor.full [1, 3, 2] .float32 0.5
     let bias0Base ← Tensor.buffer [1, 2] .float32
-    let bias0 ← StaticTensor.expand bias0Base [2, 2]
+    let bias0 ← StaticTensor.expandUnsafe bias0Base [2, 2]
     let bias1 ← Tensor.buffer [2, 2, 2] .float32
     let ab ← UOp.contract2D a.uop b.uop
     let t ← UOp.add ab bias0.uop
@@ -318,12 +319,12 @@ private def testPlannerBatchedBias2ExpandedBias0 : IO Unit := do
     return refCnt0
 
   match FusedMatmul.compile root keepIds refCnt0 with
-  | none => throw (IO.userError "planner batched bias2 expand bias0: expected fusion plan")
+  | none => throw (IO.userError "planner batched bias2 expandUnsafe bias0: expected fusion plan")
   | some plan =>
     if plan.biasStarts == #[0, 0] && plan.bias2Starts == #[0, 16] then
       pure ()
     else
-      throw (IO.userError s!"planner batched bias2 expand bias0: biasStarts={repr plan.biasStarts} bias2Starts={repr plan.bias2Starts}")
+      throw (IO.userError s!"planner batched bias2 expandUnsafe bias0: biasStarts={repr plan.biasStarts} bias2Starts={repr plan.bias2Starts}")
 
 private def testPlannerBatchedBias2ExpandedBias1 : IO Unit := do
   let root := runTensorM do
@@ -331,7 +332,7 @@ private def testPlannerBatchedBias2ExpandedBias1 : IO Unit := do
     let b ← Tensor.full [1, 3, 2] .float32 0.5
     let bias0 ← Tensor.full [2] .float32 0.1
     let bias1Base ← Tensor.buffer [1, 2, 2] .float32
-    let bias1 ← StaticTensor.expand bias1Base [2, 2, 2]
+    let bias1 ← StaticTensor.expandUnsafe bias1Base [2, 2, 2]
     let ab ← UOp.contract2D a.uop b.uop
     let t ← UOp.add ab bias0.uop
     let y ← UOp.add t bias1.uop
@@ -348,12 +349,12 @@ private def testPlannerBatchedBias2ExpandedBias1 : IO Unit := do
     return refCnt0
 
   match FusedMatmul.compile root keepIds refCnt0 with
-  | none => throw (IO.userError "planner batched bias2 expand bias1: expected fusion plan")
+  | none => throw (IO.userError "planner batched bias2 expandUnsafe bias1: expected fusion plan")
   | some plan =>
     if plan.bias2Starts == #[0, 0] then
       pure ()
     else
-      throw (IO.userError s!"planner batched bias2 expand bias1: bias2Starts={repr plan.bias2Starts}")
+      throw (IO.userError s!"planner batched bias2 expandUnsafe bias1: bias2Starts={repr plan.bias2Starts}")
 
 def runAll : IO Unit := do
   IO.println "=== FusedMatmul Tests ==="

@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 import TinyGrad4.Data.MNIST
 
@@ -114,7 +115,7 @@ def run (epochs : Nat := 1) (batchSize : Nat := 32) (hidden : Nat := 128) (numBa
   let w2Ref ← IO.mkRef w2Init
 
   for epoch in [:epochs] do
-    let mut totalLoss : Float := 0.0
+    let mut totalLoss : Float64 := 0.0
     for bi in [:numBatches] do
       let (xBuf, yBuf) := batches[bi]!
       let env : Env := (∅ : Env)
@@ -134,7 +135,7 @@ def run (epochs : Nat := 1) (batchSize : Nat := 32) (hidden : Nat := 128) (numBa
         IO.print s!"\r  epoch {epoch + 1}/{epochs} batch {bi + 1}/{numBatches} loss={lossVal}"
         (← IO.getStdout).flush
     IO.println ""
-    let avgLoss := totalLoss / (Float.ofNat numBatches)
+    let avgLoss := totalLoss / (Float64.ofNat numBatches)
     IO.println s!"  avg loss: {avgLoss}"
 
 end TinyGrad4.Test.MNISTCompiledTrain

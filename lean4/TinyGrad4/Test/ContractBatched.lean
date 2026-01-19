@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4
 
 /-!
@@ -9,7 +10,7 @@ Checks that `.CONTRACT` supports broadcasting over leading (batch) dims:
 
 namespace TinyGrad4.Test
 
--- Disable RawBuffer linter for test files that need Array Float literals
+-- Disable RawBuffer linter for test files that need Array Float64 literals
 set_option linter.useRawBuffer false
 
 open TinyGrad4
@@ -38,7 +39,7 @@ def batchedContractForward : IO Unit := do
     let out3 ← bmatmul a3 b3
     let outArr3 := eval out3.uop env
 
-    let close8 := fun x => Float.abs (x - 8.0) < 0.0001
+    let close8 := fun x => Float64.abs (x - 8.0) < 0.0001
     pure (outArr1.all close8 && outArr2.all close8 && outArr3.all close8)
 
   if !ok then
@@ -69,9 +70,9 @@ def batchedContractRankMismatch : IO Unit := do
   for i0 in [:3] do
     let base := i0 * 12
     for j in [:6] do
-      ok := ok && Float.abs (out[base + j]! - 4.0) < 0.0001
+      ok := ok && Float64.abs (out[base + j]! - 4.0) < 0.0001
     for j in [:6] do
-      ok := ok && Float.abs (out[base + 6 + j]! - 8.0) < 0.0001
+      ok := ok && Float64.abs (out[base + 6 + j]! - 8.0) < 0.0001
 
   if !ok then
     throw (IO.userError "Batched CONTRACT RankMismatch: FAILED")

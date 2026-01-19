@@ -6,6 +6,8 @@ import Float64
 Generates a PTX file for a fixed-shape Triton matmul kernel using `uv`.
 - Default output: tmp/triton_matmul.ptx
 - Override with TG4_TRITON_PTX
+- Kernel name via TG4_TRITON_KERNEL
+- Bias kernel via TG4_TRITON_WITH_BIAS
 - Block sizes via TG4_TRITON_BLOCK_M/_N/_K
 - Warp/stage via TG4_TRITON_NUM_WARPS, TG4_TRITON_NUM_STAGES
 - Shapes via TG4_TRITON_M/_N/_K (compile-time constants in the kernel)
@@ -15,6 +17,7 @@ namespace TinyGrad4.Backend.TritonEmit
 
 structure EmitConfig where
   ptxPath : System.FilePath := System.FilePath.mk "tmp" / "triton_matmul.ptx"
+  kernelName : String := "matmul_kernel"
   blockM : Nat := 64
   blockN : Nat := 64
   blockK : Nat := 32
@@ -24,6 +27,7 @@ structure EmitConfig where
   n : Nat := 256
   k : Nat := 256
   ptxVersion : Option Nat := none
+  withBias : Bool := false
 
 private def envNat (name : String) (default : Nat) : IO Nat := do
   match ← IO.getEnv name with
@@ -48,6 +52,16 @@ private def pythonSource (cfg : EmitConfig) : String :=
     match cfg.ptxVersion with
     | none => "  ptx_version = None"
     | some v => s!"  ptx_version = {v}"
+  let (kernelDef, signatureLine, biasLoad) :=
+    if cfg.withBias then
+      (s!"def {cfg.kernelName}(c_ptr, a_ptr, b_ptr, bias_ptr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr):",
+       "  signature = {\"c_ptr\": \"*fp16\", \"a_ptr\": \"*fp16\", \"b_ptr\": \"*fp16\", \"bias_ptr\": \"*fp16\"}",
+       "  bias = tl.load(bias_ptr + offs_bn, mask=offs_bn < N, other=0.0)\n" ++
+       "  acc += bias[None, :]\n")
+    else
+      (s!"def {cfg.kernelName}(c_ptr, a_ptr, b_ptr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr):",
+       "  signature = {\"c_ptr\": \"*fp16\", \"a_ptr\": \"*fp16\", \"b_ptr\": \"*fp16\"}",
+       "")
   let optsLine :=
     "  opts = {\"num_warps\": num_warps, \"num_stages\": num_stages}\n" ++
     "  if ptx_version is not None:\n" ++
@@ -59,7 +73,7 @@ private def pythonSource (cfg : EmitConfig) : String :=
     "from triton.compiler import ASTSource, compile as triton_compile",
     "",
     "@triton.jit",
-    "def matmul_kernel(c_ptr, a_ptr, b_ptr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr):",
+    kernelDef,
     s!"  M, N, K = {cfg.m}, {cfg.n}, {cfg.k}",
     "  stride_am = K",
     "  stride_ak = 1",
@@ -85,6 +99,7 @@ private def pythonSource (cfg : EmitConfig) : String :=
     "    a_ptrs += BLOCK_SIZE_K * stride_ak",
     "    b_ptrs += BLOCK_SIZE_K * stride_bk",
     "",
+    biasLoad,
     "  c = tl.cast(acc, tl.float16)",
     "  offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)",
     "  offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)",
@@ -94,9 +109,9 @@ private def pythonSource (cfg : EmitConfig) : String :=
     "",
     s!"def emit_ptx(path, block_m={cfg.blockM}, block_n={cfg.blockN}, block_k={cfg.blockK}, num_warps={cfg.numWarps}, num_stages={cfg.numStages}):",
     ptxLine,
-    "  signature = {\"c_ptr\": \"*fp16\", \"a_ptr\": \"*fp16\", \"b_ptr\": \"*fp16\"}",
+    signatureLine,
     "  src = ASTSource(",
-    "    matmul_kernel,",
+    s!"    {cfg.kernelName},",
     "    signature,",
     "    constexprs={\"BLOCK_SIZE_M\": block_m, \"BLOCK_SIZE_N\": block_n, \"BLOCK_SIZE_K\": block_k},",
     "  )",
@@ -150,6 +165,13 @@ def emit (cfg : EmitConfig) : IO UInt32 := do
 /-- Build an EmitConfig from environment variables. -/
 def configFromEnv : IO EmitConfig := do
   let ptxPath := System.FilePath.mk ((← IO.getEnv "TG4_TRITON_PTX").getD "tmp/triton_matmul.ptx")
+  let kernelName := (← IO.getEnv "TG4_TRITON_KERNEL").getD "matmul_kernel"
+  let withBias :=
+    match ← IO.getEnv "TG4_TRITON_WITH_BIAS" with
+    | none => false
+    | some v =>
+      let v := v.toLower
+      v == "1" || v == "true" || v == "yes"
   let blockM ← envNat "TG4_TRITON_BLOCK_M" 64
   let blockN ← envNat "TG4_TRITON_BLOCK_N" 64
   let blockK ← envNat "TG4_TRITON_BLOCK_K" 32
@@ -167,6 +189,7 @@ def configFromEnv : IO EmitConfig := do
       | none => throw (IO.userError s!"TritonEmit: TG4_TRITON_PTX_VERSION must be Nat, got '{v}'")
   pure {
     ptxPath,
+    kernelName,
     blockM,
     blockN,
     blockK,
@@ -175,7 +198,8 @@ def configFromEnv : IO EmitConfig := do
     m,
     n,
     k,
-    ptxVersion
+    ptxVersion,
+    withBias
   }
 
 /-- Emit Triton PTX using env config. -/

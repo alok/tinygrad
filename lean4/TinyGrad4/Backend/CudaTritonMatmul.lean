@@ -68,12 +68,17 @@ private def getCudaTarget : IO CudaTarget := do
   let ptxVersion := ptxVersionFromDriver driver
   pure { sm, ptxVersion }
 
-private def defaultPtxPath (preset : TritonPreset) (target : CudaTarget) (m n k : Nat) : System.FilePath :=
-  System.FilePath.mk "tmp" / s!"triton_{presetTag preset}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}.ptx"
+private def kernelTag (withBias : Bool) : String :=
+  if withBias then "_bias" else ""
 
-private def emitConfigForPreset (preset : TritonPreset) (target : CudaTarget) (m n k : Nat) : TinyGrad4.Backend.TritonEmit.EmitConfig :=
+private def defaultPtxPath (preset : TritonPreset) (target : CudaTarget) (m n k : Nat) (withBias : Bool) : System.FilePath :=
+  System.FilePath.mk "tmp" / s!"triton_{presetTag preset}{kernelTag withBias}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}.ptx"
+
+private def emitConfigForPreset (preset : TritonPreset) (target : CudaTarget) (m n k : Nat)
+    (kernelName : String) (withBias : Bool) : TinyGrad4.Backend.TritonEmit.EmitConfig :=
   let params := presetParams preset
-  { ptxPath := defaultPtxPath preset target m n k,
+  { ptxPath := defaultPtxPath preset target m n k withBias,
+    kernelName := kernelName,
     blockM := params.blockM,
     blockN := params.blockN,
     blockK := params.blockK,
@@ -82,7 +87,8 @@ private def emitConfigForPreset (preset : TritonPreset) (target : CudaTarget) (m
     m := m,
     n := n,
     k := k,
-    ptxVersion := some target.ptxVersion }
+    ptxVersion := some target.ptxVersion,
+    withBias := withBias }
 
 private def divisible (x y : Nat) : Bool :=
   x % y == 0
@@ -161,6 +167,9 @@ private def kernelParamCount (ptxPath : System.FilePath) (kernel : String) : IO 
 
 /-- Cache for optional Triton config loaded from environment. -/
 initialize tritonConfigCache : IO.Ref (Option (Option TritonMatmulConfig)) ← IO.mkRef none
+
+/-- Cache for optional Triton bias config (auto-emitted). -/
+initialize tritonBiasConfigCache : IO.Ref (Option (Option TritonMatmulConfig)) ← IO.mkRef none
 
 /-- Optional default Triton preset (enables auto-emit without env). -/
 initialize tritonPresetCache : IO.Ref (Option TritonPreset) ← IO.mkRef none
@@ -285,14 +294,14 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
     if m % params.blockM != 0 || n % params.blockN != 0 || k % params.blockK != 0 then
       return none
     let target ← getCudaTarget
-    let emitCfg := emitConfigForPreset preset target m n k
+    let kernelName := "matmul_kernel"
+    let emitCfg := emitConfigForPreset preset target m n k kernelName false
     if !(← emitCfg.ptxPath.pathExists) then
       let rc ← TinyGrad4.Backend.TritonEmit.emit emitCfg
       if rc != 0 then
         return none
     if !(← emitCfg.ptxPath.pathExists) then
       return none
-    let kernelName := "matmul_kernel"
     let paramCount ← kernelParamCount emitCfg.ptxPath kernelName
     let cfg : TritonMatmulConfig := {
       kernelName,
@@ -309,6 +318,41 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
     }
     setConfig (some cfg)
     return some cfg
+
+/-- Emit PTX + configure Triton for a fused bias kernel. -/
+def ensureConfigBias (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmulConfig) := do
+  match ← tritonBiasConfigCache.get with
+  | some (some cfg) => return some cfg
+  | _ => pure ()
+
+  let params := presetParams preset
+  if m % params.blockM != 0 || n % params.blockN != 0 || k % params.blockK != 0 then
+    return none
+  let target ← getCudaTarget
+  let kernelName := "linear_kernel"
+  let emitCfg := emitConfigForPreset preset target m n k kernelName true
+  if !(← emitCfg.ptxPath.pathExists) then
+    let rc ← TinyGrad4.Backend.TritonEmit.emit emitCfg
+    if rc != 0 then
+      return none
+  if !(← emitCfg.ptxPath.pathExists) then
+    return none
+  let paramCount ← kernelParamCount emitCfg.ptxPath kernelName
+  let cfg : TritonMatmulConfig := {
+    kernelName,
+    ptxPath := emitCfg.ptxPath,
+    blockM := params.blockM,
+    blockN := params.blockN,
+    blockK := params.blockK,
+    numWarps := params.numWarps,
+    sharedBytes := 0,
+    paramCount,
+    expectedM := m,
+    expectedN := n,
+    expectedK := k
+  }
+  tritonBiasConfigCache.set (some (some cfg))
+  return some cfg
 
 /-- Load a PTX module from disk and bind the kernel. -/
 private def loadKernel (cfg : TritonMatmulConfig) : IO CUDAProgram := do
@@ -365,6 +409,55 @@ private def padKernelArgs (bufs : Array CUDABuffer) (count : Nat) (fill : CUDABu
 
   pure { dtype := .float16, data := outBytes }
 
+/-- Execute Triton matmul (float16) with bias, fixed sizes. -/
+@[inline] def matmulF16Bias (cfg : TritonMatmulConfig)
+    (a b bias : RawBuffer) (m k n : Nat) : IO RawBuffer := do
+  ensure (a.dtype == .float16) "CudaTritonMatmul: A must be float16"
+  ensure (b.dtype == .float16) "CudaTritonMatmul: B must be float16"
+  ensure (bias.dtype == .float16) "CudaTritonMatmul: bias must be float16"
+  ensure (m == cfg.expectedM) "CudaTritonMatmul: M does not match compiled kernel"
+  ensure (n == cfg.expectedN) "CudaTritonMatmul: N does not match compiled kernel"
+  ensure (k == cfg.expectedK) "CudaTritonMatmul: K does not match compiled kernel"
+  ensure (m % cfg.blockM == 0) "CudaTritonMatmul: M must be multiple of blockM"
+  ensure (n % cfg.blockN == 0) "CudaTritonMatmul: N must be multiple of blockN"
+  ensure (k % cfg.blockK == 0) "CudaTritonMatmul: K must be multiple of blockK"
+
+  let aBytes := m * k * 2
+  let bBytes := k * n * 2
+  let biasBytes := n * 2
+  let cBytes := m * n * 2
+  ensure (a.data.size == aBytes) "CudaTritonMatmul: A buffer size mismatch"
+  ensure (b.data.size == bBytes) "CudaTritonMatmul: B buffer size mismatch"
+  ensure (bias.data.size == biasBytes) "CudaTritonMatmul: bias buffer size mismatch"
+
+  let prog ← loadKernel cfg
+
+  let aBuf ← cudaAllocBytes aBytes
+  let bBuf ← cudaAllocBytes bBytes
+  let biasBuf ← cudaAllocBytes biasBytes
+  let cBuf ← cudaAllocBytes cBytes
+
+  cudaCopyInBytes aBuf a.data
+  cudaCopyInBytes bBuf b.data
+  cudaCopyInBytes biasBuf bias.data
+
+  let gridX := m / cfg.blockM
+  let gridY := n / cfg.blockN
+  let blockX := cfg.numWarps * 32
+  let blockY := 1
+
+  let args := padKernelArgs #[cBuf, aBuf, bBuf, biasBuf] cfg.paramCount cBuf
+  cudaLaunchGrid2D prog args gridX gridY blockX blockY cfg.sharedBytes
+
+  let outBytes ← cudaCopyOutBytes cBuf cBytes
+
+  cudaFree aBuf
+  cudaFree bBuf
+  cudaFree biasBuf
+  cudaFree cBuf
+
+  pure { dtype := .float16, data := outBytes }
+
 /-- Execute Triton matmul for float32 inputs by converting to float16 and back. -/
 @[inline] def matmulF32ViaF16 (cfg : TritonMatmulConfig)
     (a b : RawBuffer) (m k n : Nat) : IO RawBuffer := do
@@ -390,6 +483,43 @@ private def padKernelArgs (bufs : Array CUDABuffer) (count : Nat) (fill : CUDABu
   ensure (bF16.size == bF16Bytes) "CudaTritonMatmul: B float16 conversion failed"
 
   let outF16 ← matmulF16 cfg { dtype := .float16, data := aF16 } { dtype := .float16, data := bF16 } m k n
+  let outF32 := Native.f16ToF32 outF16.data
+  pure { dtype := .float32, data := outF32 }
+
+/-- Execute Triton matmul with bias for float32 inputs by converting to float16 and back. -/
+@[inline] def matmulF32ViaF16Bias (cfg : TritonMatmulConfig)
+    (a b bias : RawBuffer) (m k n : Nat) : IO RawBuffer := do
+  ensure (a.dtype == .float32) "CudaTritonMatmul: A must be float32"
+  ensure (b.dtype == .float32) "CudaTritonMatmul: B must be float32"
+  ensure (bias.dtype == .float32) "CudaTritonMatmul: bias must be float32"
+  ensure (m == cfg.expectedM) "CudaTritonMatmul: M does not match compiled kernel"
+  ensure (n == cfg.expectedN) "CudaTritonMatmul: N does not match compiled kernel"
+  ensure (k == cfg.expectedK) "CudaTritonMatmul: K does not match compiled kernel"
+  ensure (m % cfg.blockM == 0) "CudaTritonMatmul: M must be multiple of blockM"
+  ensure (n % cfg.blockN == 0) "CudaTritonMatmul: N must be multiple of blockN"
+  ensure (k % cfg.blockK == 0) "CudaTritonMatmul: K must be multiple of blockK"
+
+  let aBytes := m * k * 4
+  let bBytes := k * n * 4
+  let biasBytes := n * 4
+  ensure (a.data.size == aBytes) "CudaTritonMatmul: A buffer size mismatch"
+  ensure (b.data.size == bBytes) "CudaTritonMatmul: B buffer size mismatch"
+  ensure (bias.data.size == biasBytes) "CudaTritonMatmul: bias buffer size mismatch"
+
+  let aF16 := Native.f32ToF16 a.data
+  let bF16 := Native.f32ToF16 b.data
+  let biasF16 := Native.f32ToF16 bias.data
+  let aF16Bytes := m * k * 2
+  let bF16Bytes := k * n * 2
+  let biasF16Bytes := n * 2
+  ensure (aF16.size == aF16Bytes) "CudaTritonMatmul: A float16 conversion failed"
+  ensure (bF16.size == bF16Bytes) "CudaTritonMatmul: B float16 conversion failed"
+  ensure (biasF16.size == biasF16Bytes) "CudaTritonMatmul: bias float16 conversion failed"
+
+  let outF16 ← matmulF16Bias cfg
+    { dtype := .float16, data := aF16 }
+    { dtype := .float16, data := bF16 }
+    { dtype := .float16, data := biasF16 } m k n
   let outF32 := Native.f16ToF32 outF16.data
   pure { dtype := .float32, data := outF32 }
 
@@ -420,6 +550,33 @@ def tryMatmulF32ViaF16 (a b : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) :
       return none
     try
       let out ← matmulF32ViaF16 cfg a b m k n
+      return some out
+    catch _ =>
+      return none
+
+/-- Attempt Triton matmul with bias for float32 inputs if CUDA is available. -/
+def tryMatmulF32ViaF16Bias (a b bias : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) := do
+  if a.dtype != .float32 || b.dtype != .float32 || bias.dtype != .float32 then
+    return none
+  let available ← TinyGrad4.Backend.Cuda.isAvailable
+  if !available then
+    return none
+  let cfg? ←
+    match ← getDefaultPreset with
+    | some preset => ensureConfigBias preset m n k
+    | none =>
+      match choosePreset .float32 m n k with
+      | none => pure none
+      | some preset => ensureConfigBias preset m n k
+  match cfg? with
+  | none => return none
+  | some cfg =>
+    if m != cfg.expectedM || n != cfg.expectedN || k != cfg.expectedK then
+      return none
+    if m % cfg.blockM != 0 || n % cfg.blockN != 0 || k % cfg.blockK != 0 then
+      return none
+    try
+      let out ← matmulF32ViaF16Bias cfg a b bias m k n
       return some out
     catch _ =>
       return none

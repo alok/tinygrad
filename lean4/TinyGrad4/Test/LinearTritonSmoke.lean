@@ -4,12 +4,32 @@ import TinyGrad4.Tensor.Math
 import TinyGrad4.NN.Linear
 import TinyGrad4.Backend.CudaTritonMatmul
 import TinyGrad4.Backend.Cuda
+import TinyGrad4.Backend.Native
 import TinyGrad4.Backend.Interpreter
 
 open TinyGrad4
 
 private def approxEq (a b : Float64) (eps : Float64 := 1.0e-2) : Bool :=
   Float64.abs (a - b) <= eps
+
+private def pushF32LE (out : ByteArray) (v : Float32) : ByteArray :=
+  let bits := v.toBits
+  let b0 := (bits &&& 0xFF).toUInt8
+  let b1 := ((bits >>> 8) &&& 0xFF).toUInt8
+  let b2 := ((bits >>> 16) &&& 0xFF).toUInt8
+  let b3 := ((bits >>> 24) &&& 0xFF).toUInt8
+  out.push b0 |>.push b1 |>.push b2 |>.push b3
+
+private def packF32 (v : Float32) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity 4
+  out := pushF32LE out v
+  return out
+
+private def roundF32ToF16 (v : Float32) : Float64 := Id.run do
+  let f16 := TinyGrad4.Backend.Native.f32ToF16 (packF32 v)
+  let f32 := TinyGrad4.Backend.Native.f16ToF32 f16
+  let vals := RawBuffer.unpackF32Bytes f32
+  vals.getD 0 0.0
 
 private def checkExpected (vals : Array Float64) (expected : Float64) : IO Bool := do
   if vals.isEmpty then
@@ -70,7 +90,7 @@ def main : IO UInt32 := do
     if out.data.size != expectedBytes then
       IO.println s!"Linear Triton smoke: FAIL (size {out.data.size} != {expectedBytes})"
       return 1
-    let expected := Float64.ofNat k + 0.5
+    let expected := roundF32ToF16 ((Float64.ofNat k + 0.5).toFloat32)
     let vals := RawBuffer.unpackF32Bytes out.data
     let ok ← checkExpected vals expected
     if !ok then

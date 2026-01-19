@@ -10,6 +10,14 @@ Loads a precompiled PTX kernel (from Triton) and runs a fixed-shape matmul.
 This mirrors `extra/gemm/triton_nv_matmul.py` and is intentionally narrow:
 - float16 inputs/outputs
 - fixed M/N/K and block sizes from the compiled kernel
+
+Environment config (used by `getConfigFromEnv`):
+- TG4_TRITON_PTX (path to PTX)
+- TG4_TRITON_KERNEL (default: matmul_kernel)
+- TG4_TRITON_BLOCK_M / _N / _K
+- TG4_TRITON_NUM_WARPS
+- TG4_TRITON_SHARED_BYTES (default: 0)
+- TG4_TRITON_M / _N / _K (expected shapes)
 -/
 
 namespace TinyGrad4.Backend.CudaTritonMatmul

@@ -278,6 +278,9 @@ lean_exe linear_triton_smoke where
   root := `TinyGrad4.Test.LinearTritonSmoke
   moreLinkArgs := metalLinkArgs
 
+lean_exe emit_triton_ptx where
+  root := `TinyGrad4.Test.EmitTritonPTX
+
 lean_exe metal_matmul_test where
   root := `TinyGrad4.Test.MetalMatmulSmoke
   moreLinkArgs := metalLinkArgs

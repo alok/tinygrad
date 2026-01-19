@@ -71,12 +71,12 @@ nvidia-smi --query-gpu=name --format=csv,noheader
 echo ""
 echo "Running lake build..."
 lake update
-lake build cuda_smoke 2>&1 | tail -30
+lake -R -K cuda=1 build cuda_smoke 2>&1 | tail -30
 
 echo ""
 echo "=== Running CUDA Smoke Test ==="
 echo ""
-lake exe cuda_smoke
+lake -R -K cuda=1 exe cuda_smoke
 '''
 
 
@@ -230,10 +230,10 @@ def print_test_commands():
     print("git clone https://github.com/alokbeniwal/tinygrad.git")
     print("cd tinygrad && git checkout alok-103-conv1d")
     print("cd lean4")
-    print("lake update && lake build cuda_smoke")
+    print("lake update && lake -R -K cuda=1 build cuda_smoke")
     print()
     print("# 3. Run CUDA test")
-    print("lake exe cuda_smoke")
+    print("lake -R -K cuda=1 exe cuda_smoke")
 
 
 def main():

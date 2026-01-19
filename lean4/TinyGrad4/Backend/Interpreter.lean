@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Tensor.Tensor
@@ -14,13 +15,14 @@ import TinyGrad4.Backend.FusedSoftmax
 import TinyGrad4.Backend.Metal
 import TinyGrad4.Backend.MetalMatmul
 import TinyGrad4.Backend.MetalEwise
+import TinyGrad4.Backend.CudaTritonMatmul
 import TinyGrad4.Backend.DeviceBuffer
 import TinyGrad4.Tags
 import Std.Data.HashMap
 
 namespace TinyGrad4
 
--- Disable RawBuffer linter: this file uses Array Float for internal conversion helpers
+-- Disable RawBuffer linter: this file uses Array Float64 for internal conversion helpers
 -- (ofFloats, packFloatsToF32Bytes, unpackF32Bytes) which convert to/from ByteArray
 set_option linter.useRawBuffer false
 
@@ -38,8 +40,8 @@ def zeros (dtype : DType) (numel : Nat) : RawBuffer :=
   | _ =>
     { dtype, data := ByteArray.mk (Array.replicate (numel * dtype.itemsize) 0) }
 
-/-- Pack Float values as Float32 into RawBuffer -/
-def ofFloats (arr : Array Float) : RawBuffer := Id.run do
+/-- Pack Float64 values as Float32 into RawBuffer -/
+def ofFloats (arr : Array Float64) : RawBuffer := Id.run do
   let mut bytes := ByteArray.emptyWithCapacity (arr.size * 4)
   for v in arr do
     let f32 := v.toFloat32
@@ -61,11 +63,11 @@ def ofFloat32s (arr : Array Float32) : RawBuffer := Id.run do
     bytes := bytes.push ((bits.toNat >>> 24).toUInt8)
   { dtype := .float32, data := bytes }
 
-/-- Pack FloatArray (Array Float wrapped in structure) into RawBuffer -/
+/-- Pack FloatArray (Array Float64 wrapped in structure) into RawBuffer -/
 def ofF32 (arr : FloatArray) : RawBuffer := ofFloats arr.data
 
-/-- Pack Float array to F32 bytes (internal helper) -/
-def packFloatsToF32Bytes (arr : Array Float) : ByteArray := Id.run do
+/-- Pack Float64 array to F32 bytes (internal helper) -/
+def packFloatsToF32Bytes (arr : Array Float64) : ByteArray := Id.run do
   let mut bytes := ByteArray.emptyWithCapacity (arr.size * 4)
   for v in arr do
     let f32 := v.toFloat32
@@ -76,8 +78,8 @@ def packFloatsToF32Bytes (arr : Array Float) : ByteArray := Id.run do
     bytes := bytes.push ((bits.toNat >>> 24).toUInt8)
   bytes
 
-/-- Unpack F32 bytes to Float array (internal helper) -/
-def unpackF32Bytes (data : ByteArray) : Array Float := Id.run do
+/-- Unpack F32 bytes to Float64 array (internal helper) -/
+def unpackF32Bytes (data : ByteArray) : Array Float64 := Id.run do
   let numel := data.size / 4
   let mut out := Array.emptyWithCapacity numel
   for i in [:numel] do
@@ -128,7 +130,7 @@ instance : Repr RawBuffer where
 instance : ToString RawBuffer where
   toString b := b.reprAsString
 
-def decodeScalarF32? (b : RawBuffer) : Option Float :=
+def decodeScalarF32? (b : RawBuffer) : Option Float64 :=
   if b.dtype != .float32 then
     none
   else if b.data.size < 4 then
@@ -145,11 +147,11 @@ def decodeScalarF32? (b : RawBuffer) : Option Float :=
       ((UInt32.ofNat b3.toNat) <<< 24)
     some ((Float32.ofBits bits).toFloat)
 
-def decodeScalarF32 (b : RawBuffer) : Float :=
+def decodeScalarF32 (b : RawBuffer) : Float64 :=
   (decodeScalarF32? b).getD 0.0
 
-/-- Get float32 at index i (returns as Float for Lean compatibility) -/
-def getF32 (b : RawBuffer) (i : Nat) : Float :=
+/-- Get float32 at index i (returns as Float64 for Lean compatibility) -/
+def getF32 (b : RawBuffer) (i : Nat) : Float64 :=
   if b.dtype != .float32 then 0.0
   else if i * 4 + 3 >= b.data.size then 0.0
   else
@@ -175,7 +177,7 @@ def size (b : RawBuffer) : Nat :=
 end RawBuffer
 
 /-- GetElem instance for RawBuffer - enables buf[i] syntax -/
-instance : GetElem RawBuffer Nat Float (fun b i => i < b.numF32) where
+instance : GetElem RawBuffer Nat Float64 (fun b i => i < b.numF32) where
   getElem b i _ := b.getF32 i
 
 namespace Interpreter
@@ -371,22 +373,22 @@ private def readU64LE (b : ByteArray) (offset : Nat) : UInt64 :=
     ((UInt64.ofNat b6.toNat) <<< 48) |||
     ((UInt64.ofNat b7.toNat) <<< 56)
 
-private def readF32At (b : ByteArray) (idx : Nat) : Float :=
+private def readF32At (b : ByteArray) (idx : Nat) : Float64 :=
   let base := idx * 4
   let bits := readU32LE b base
   (Float32.ofBits bits).toFloat
 
-private def intToFloat (v : Int) : Float :=
+private def intToFloat (v : Int) : Float64 :=
   if v >= 0 then
-    Float.ofNat v.toNat
+    Float64.ofNat v.toNat
   else
-    -Float.ofNat (-v).toNat
+    -Float64.ofNat (-v).toNat
 
 private def readAsInt (dtype : DType) (b : ByteArray) (idx : Nat) : Int :=
   match dtype with
   | .float32 =>
     let v := readF32At b idx
-    (Float.toInt64 v).toInt
+    (Float64.toInt64 v).toInt
   | .bool =>
     if b.get! idx == 0 then 0 else 1
   | .int8 =>
@@ -412,7 +414,7 @@ private def readAsInt (dtype : DType) (b : ByteArray) (idx : Nat) : Int :=
   | _ =>
     0
 
-private def readAsFloat (dtype : DType) (b : ByteArray) (idx : Nat) : Float :=
+private def readAsFloat (dtype : DType) (b : ByteArray) (idx : Nat) : Float64 :=
   match dtype with
   | .float32 => readF32At b idx
   | _ => intToFloat (readAsInt dtype b idx)
@@ -433,8 +435,8 @@ private def repeatBytes (bytes : Array UInt8) (count : Nat) : ByteArray := Id.ru
 private def constIntArg (arg : UArg) : Int :=
   match arg with
   | .constInt v => v
-  | .constFloat v => (Float.toInt64 v).toInt
-  | .constF32Bits bits => (Float.toInt64 (Float32.ofBits bits).toFloat).toInt
+  | .constFloat v => (Float64.toInt64 v).toInt
+  | .constF32Bits bits => (Float64.toInt64 (Float32.ofBits bits).toFloat).toInt
   | .constBool v => if v then 1 else 0
   | _ => 0
 
@@ -1129,6 +1131,40 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
           return RawBuffer.zeros u.dtype (listProd u.shape)
         return { dtype := .float32, data := outBytes }
 
+  private def evalFusedMatmulBiasIO (u : UOp) (plan : FusedMatmul.Plan)
+      (env : Env) (cache : HashMap UOpId RawBuffer) : IO RawBuffer := do
+    if u.dtype != .float32 then
+      return evalFusedMatmulBias u plan env cache
+
+    let isBatched := !plan.aStarts.isEmpty
+    let hasBias2 := plan.bias2.isSome
+    let hasScale := plan.scaleBits.isSome
+    let hasRelu := plan.relu
+    let fast := plan.aFast && plan.bFast && (plan.biasNumel == 0 || plan.biasFast)
+    let useTriton := !plan.needsStack && !isBatched && !hasBias2 && !hasScale && !hasRelu && fast
+
+    if !useTriton then
+      return evalFusedMatmulBias u plan env cache
+
+    let aFallback := env.getD plan.aBase (RawBuffer.zeros .float32 0)
+    let bFallback := env.getD plan.bBase (RawBuffer.zeros .float32 0)
+    let biasFallback := env.getD plan.bias (RawBuffer.zeros .float32 plan.biasNumel)
+    let aBuf := cache.getD plan.aBase aFallback
+    let bBuf := cache.getD plan.bBase bFallback
+    let biasBuf := cache.getD plan.bias biasFallback
+
+    match (← CudaTritonMatmul.tryMatmulF32ViaF16 aBuf bBuf plan.m plan.k plan.n) with
+    | none =>
+      return evalFusedMatmulBias u plan env cache
+    | some out =>
+      if plan.biasNumel == 0 then
+        return out
+      let outShape := u.shape.toArray
+      let outBytes := Native.addBcastF32 out.data biasBuf.data outShape plan.biasShape outShape
+      if outBytes.isEmpty then
+        return RawBuffer.zeros u.dtype (listProd u.shape)
+      return { dtype := .float32, data := outBytes }
+
   private def evalFusedSoftmax (u : UOp) (plan : FusedSoftmax.Plan) (env : Env) (cache : HashMap UOpId RawBuffer) : RawBuffer :=
     if u.dtype != .float32 then
       RawBuffer.zeros u.dtype (listProd u.shape)
@@ -1166,7 +1202,7 @@ private def packF32BitsArray (bits : Array UInt32) : ByteArray := Id.run do
     out := out.push b3
   return out
 
-private def cmpF32 (x y : RawBuffer) (xShape yShape outShape : Shape) (pred : Float → Float → Bool) : ByteArray := Id.run do
+private def cmpF32 (x y : RawBuffer) (xShape yShape outShape : Shape) (pred : Float64 → Float64 → Bool) : ByteArray := Id.run do
   let xData :=
     if xShape == outShape then
       x.data
@@ -1830,7 +1866,7 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
       let numel := listProd u.shape
       match u.dtype with
       | .float32 =>
-        let mut out : Array Float := Array.emptyWithCapacity numel
+        let mut out : Array Float64 := Array.emptyWithCapacity numel
         for i in [:numel] do
           out := out.push (readAsFloat src.dtype src.data i)
         return { dtype := .float32, data := RawBuffer.packFloatsToF32Bytes out }
@@ -1849,7 +1885,7 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
           let v :=
             match src.dtype with
             | .float32 =>
-              (Float.toInt64 (readF32At src.data i)).toInt
+              (Float64.toInt64 (readF32At src.data i)).toInt
             | _ => readAsInt src.dtype src.data i
           match u.dtype with
           | .int8 | .uint8 =>
@@ -2216,7 +2252,7 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
     shape : Shape
     numel : Nat
     dtype : DType
-    ms : Float
+    ms : Float64
     deriving Repr
 
   def evalCompiledRawTimed (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer × Array KernelTiming) := do
@@ -2252,7 +2288,7 @@ private def evalNode (u : UOp) (env : Env) (cache : HashMap UOpId RawBuffer) : R
               evalNode u env cache
           let stop ← IO.monoNanosNow
           let dtNs : Nat := stop - start
-          let ms : Float := (Float.ofNat dtNs) / 1.0e6
+          let ms : Float64 := (Float64.ofNat dtNs) / 1.0e6
           pure (v, some { uid := u.uid, tag := item.tag, shape := u.shape, numel := u.numel, dtype := u.dtype, ms })
         else
           let v := evalNode u env cache
@@ -2379,7 +2415,9 @@ private def evalContractIO (u : UOp) (cache : HashMap UOpId RawBuffer) : IO RawB
 
   if rA == 2 && rB == 2 then
     -- Simple 2D matmul: use GPU with CPU fallback
-    MetalMatmul.runMatmul2D a b m k n
+    match (← CudaTritonMatmul.tryMatmulF32ViaF16 a b m k n) with
+    | some out => return out
+    | none => MetalMatmul.runMatmul2D a b m k n
   else
     -- Batched matmul: compute batch starts, use GPU with CPU fallback
     let batchA := aSh.take (rA - 2)
@@ -2431,7 +2469,7 @@ def evalCompiledRawIO (c : Compiled) (env : Env) : IO (HashMap UOpId RawBuffer) 
         match item.impl with
         | some impl =>
           match impl with
-          | .fusedMatmul plan => pure (evalFusedMatmulBias u plan env cache)
+          | .fusedMatmul plan => evalFusedMatmulBiasIO u plan env cache
           | .fusedSoftmax plan => pure (evalFusedSoftmax u plan env cache)
           | .fusedReduce plan => pure (evalFusedReduce u plan env cache)
           | .fusedEwise plan => evalFusedEwiseIO u plan env cache

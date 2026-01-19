@@ -1,3 +1,4 @@
+import Float64
 import TinyGrad4.Tensor.Tensor
 import TinyGrad4.Tensor.Math
 import TinyGrad4.Tensor.Movement
@@ -5,7 +6,7 @@ import TinyGrad4.Tensor.Movement
 /-!
 # Linear Layer
 
-Applies a linear transformation: y = x @ W^T + b
+Applies a linear transformation: y = x @ W + b, where W is stored as [in, out].
 
 Mirrors tinygrad's `nn.Linear` with Kaiming uniform initialization.
 -/
@@ -17,8 +18,8 @@ open StaticTensor
 
 /-- Linear layer parameters -/
 structure LinearParams (inFeatures outFeatures : Nat) (dt : DType) where
-  /-- Weight matrix [outFeatures, inFeatures] (stored transposed for efficient matmul) -/
-  weight : Matrix outFeatures inFeatures dt
+  /-- Weight matrix [inFeatures, outFeatures] (stored transposed for efficient matmul) -/
+  weight : Matrix inFeatures outFeatures dt
   /-- Optional bias [outFeatures] -/
   bias : Option (Vector outFeatures dt)
 
@@ -29,10 +30,10 @@ namespace LinearParams
 def create (inFeatures outFeatures : Nat) (dt : DType := .float32) (useBias : Bool := true)
     (seed : Nat := 42) : TensorM (LinearParams inFeatures outFeatures dt) := do
   -- Kaiming bound = 1 / sqrt(in_features)
-  let bound := (1.0 / Float.sqrt (Float.ofNat inFeatures)).toFloat32
+  let bound := (1.0 / Float64.sqrt (Float64.ofNat inFeatures)).toFloat32
 
-  -- Weight: uniform(-bound, bound) shaped [outFeatures, inFeatures]
-  let weight ← uniformInit [outFeatures, inFeatures] dt (-bound) bound seed
+  -- Weight: uniform(-bound, bound) shaped [inFeatures, outFeatures]
+  let weight ← uniformInit [inFeatures, outFeatures] dt (-bound) bound seed
 
   -- Bias: uniform(-bound, bound) shaped [outFeatures]
   let bias ← if useBias then
@@ -48,10 +49,8 @@ def create (inFeatures outFeatures : Nat) (dt : DType := .float32) (useBias : Bo
     Output: [batch, outFeatures] -/
 def forward {batch : Nat} (params : LinearParams inFeatures outFeatures dt)
     (x : Matrix batch inFeatures dt) : TensorM (Matrix batch outFeatures dt) := do
-  -- x @ W^T: [batch, in] @ [in, out] = [batch, out]
-  -- We store W as [out, in], so we need W^T = [in, out]
-  let wT ← T params.weight
-  let y ← matmul x wT
+  -- x @ W: [batch, in] @ [in, out] = [batch, out]
+  let y ← matmul x params.weight
 
   match params.bias with
   | none => pure y
@@ -72,11 +71,10 @@ end LinearParams
 /-- Convenience: Create and apply linear layer in one step -/
 def linear' {batch inFeatures outFeatures : Nat} {dt : DType}
     (x : Matrix batch inFeatures dt)
-    (weight : Matrix outFeatures inFeatures dt)
+    (weight : Matrix inFeatures outFeatures dt)
     (bias : Option (Vector outFeatures dt) := none)
     : TensorM (Matrix batch outFeatures dt) := do
-  let wT ← T weight
-  let y ← matmul x wT
+  let y ← matmul x weight
   match bias with
   | none => pure y
   | some b =>

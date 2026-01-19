@@ -1,3 +1,4 @@
+import Float64
 namespace TinyGrad4.Backend.Native
 
 /-!
@@ -5,12 +6,12 @@ namespace TinyGrad4.Backend.Native
 
 This module is the bridge between the TinyGrad4 IR/interpreter and low-level kernels.
 
-Today: a portable C matmul on `FloatArray` (Lean `Float` = C `double`).
+Today: a portable C matmul on `FloatArray` (Lean `Float64` = C `double`).
 Tomorrow: optional BLAS backends can be swapped in under the same API.
 -/
 
 @[extern "tg4_full_f32"]
-opaque fullF32 (n : @& Nat) (v : @& Float) : ByteArray
+opaque fullF32 (n : @& Nat) (v : @& Float64) : ByteArray
 
 @[extern "tg4_full_f32_bits"]
 opaque fullF32Bits (n : @& Nat) (bits : @& UInt32) : ByteArray
@@ -67,7 +68,7 @@ opaque subBcastF32 (a b : @& ByteArray) (aShape bShape outShape : @& Array Nat) 
 opaque mulF32 (a b : @& ByteArray) : ByteArray
 
 @[extern "tg4_sgd_update_f32"]
-opaque sgdUpdateF32 (w grad : @& ByteArray) (lr : @& Float) : ByteArray
+opaque sgdUpdateF32 (w grad : @& ByteArray) (lr : @& Float64) : ByteArray
 
 @[extern "tg4_mul_bcast_f32"]
 opaque mulBcastF32 (a b : @& ByteArray) (aShape bShape outShape : @& Array Nat) : ByteArray
@@ -308,6 +309,12 @@ opaque packF32FromF64 (a : @& FloatArray) : ByteArray
 
 @[extern "tg4_unpack_f64_from_f32"]
 opaque unpackF64FromF32 (a : @& ByteArray) : FloatArray
+
+@[extern "tg4_f32_to_f16"]
+opaque f32ToF16 (a : @& ByteArray) : ByteArray
+
+@[extern "tg4_f16_to_f32"]
+opaque f16ToF32 (a : @& ByteArray) : ByteArray
 
 @[extern "tg4_matmul_f32"]
 opaque matmulF32 (a b : @& ByteArray) (m k n : @& Nat) : ByteArray

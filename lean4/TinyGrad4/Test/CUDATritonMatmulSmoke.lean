@@ -92,12 +92,14 @@ def main : IO UInt32 := do
 
     let tritonOut ← TinyGrad4.Backend.CudaTritonMatmul.matmulF32ViaF16 cfg aBuf bBuf m k n
     let cpuOut := TinyGrad4.Backend.Native.matmulF32 aBytes bBytes m k n
+    let cpuOutF16 := TinyGrad4.Backend.Native.f32ToF16 cpuOut
+    let cpuOutRounded := TinyGrad4.Backend.Native.f16ToF32 cpuOutF16
 
     let samples := sampleIndices (m * n)
     let mut ok := true
     for idx in samples do
       let got := readF32At tritonOut.data idx
-      let ref := readF32At cpuOut idx
+      let ref := readF32At cpuOutRounded idx
       if !approxEq got ref then
         ok := false
         IO.println s!"Mismatch at {idx}: triton={got} cpu={ref}"

@@ -82,6 +82,14 @@ opaque cudaSync : IO Unit
 @[extern "tg4_cuda_device_name"]
 opaque cudaDeviceName : IO String
 
+/-- Get CUDA driver version (e.g., 12020 for CUDA 12.2). -/
+@[extern "tg4_cuda_driver_version"]
+opaque cudaDriverVersion : IO Nat
+
+/-- Get CUDA compute capability (major, minor). -/
+@[extern "tg4_cuda_compute_capability"]
+opaque cudaComputeCapability : IO (Nat × Nat)
+
 /-! ## Synchronous GPU Matmul -/
 
 /-- Execute matmul on GPU: C[m,n] = A[m,k] @ B[k,n]

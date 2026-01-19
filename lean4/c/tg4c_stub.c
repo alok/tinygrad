@@ -3907,8 +3907,18 @@ LEAN_EXPORT lean_obj_res tg4_cuda_sync(lean_object* world) {
 }
 
 LEAN_EXPORT lean_obj_res tg4_cuda_device_name(lean_object* world) {
-  (void)world;
-  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+    (void)world;
+    return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_driver_version(lean_object* world) {
+    (void)world;
+    return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
+}
+
+LEAN_EXPORT lean_obj_res tg4_cuda_compute_capability(lean_object* world) {
+    (void)world;
+    return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string("CUDA not available")));
 }
 
 // Legacy float-based API stubs (for backward compatibility)

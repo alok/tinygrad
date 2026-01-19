@@ -49,12 +49,31 @@ private def presetTag : TritonPreset → String
   | .linear => "linear"
   | .linearLarge => "linear_large"
 
-private def defaultPtxPath (preset : TritonPreset) (m n k : Nat) : System.FilePath :=
-  System.FilePath.mk "tmp" / s!"triton_{presetTag preset}_{m}x{n}x{k}.ptx"
+private structure CudaTarget where
+  sm : Nat
+  ptxVersion : Nat
 
-private def emitConfigForPreset (preset : TritonPreset) (m n k : Nat) : TinyGrad4.Backend.TritonEmit.EmitConfig :=
+private def ptxVersionFromDriver (driver : Nat) : Nat :=
+  let cudaMajor := driver / 1000
+  let cudaMinor := (driver % 1000) / 10
+  if cudaMajor < 4 then
+    50
+  else
+    (cudaMajor - 4) * 10 + cudaMinor
+
+private def getCudaTarget : IO CudaTarget := do
+  let driver ← TinyGrad4.Backend.Cuda.cudaDriverVersion
+  let (major, minor) ← TinyGrad4.Backend.Cuda.cudaComputeCapability
+  let sm := major * 10 + minor
+  let ptxVersion := ptxVersionFromDriver driver
+  pure { sm, ptxVersion }
+
+private def defaultPtxPath (preset : TritonPreset) (target : CudaTarget) (m n k : Nat) : System.FilePath :=
+  System.FilePath.mk "tmp" / s!"triton_{presetTag preset}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}.ptx"
+
+private def emitConfigForPreset (preset : TritonPreset) (target : CudaTarget) (m n k : Nat) : TinyGrad4.Backend.TritonEmit.EmitConfig :=
   let params := presetParams preset
-  { ptxPath := defaultPtxPath preset m n k,
+  { ptxPath := defaultPtxPath preset target m n k,
     blockM := params.blockM,
     blockN := params.blockN,
     blockK := params.blockK,
@@ -62,7 +81,8 @@ private def emitConfigForPreset (preset : TritonPreset) (m n k : Nat) : TinyGrad
     numStages := params.numStages,
     m := m,
     n := n,
-    k := k }
+    k := k,
+    ptxVersion := some target.ptxVersion }
 
 private def divisible (x y : Nat) : Bool :=
   x % y == 0
@@ -89,6 +109,7 @@ structure TritonMatmulConfig where
   blockK : Nat
   numWarps : Nat
   sharedBytes : Nat
+  paramCount : Nat
   expectedM : Nat
   expectedN : Nat
   expectedK : Nat
@@ -98,6 +119,45 @@ private def ensure (cond : Bool) (msg : String) : IO Unit :=
 
 private def ceilDiv (a b : Nat) : Nat :=
   (a + b - 1) / b
+
+private def ltrim (s : String) : String :=
+  let rec drop (cs : List Char) : List Char :=
+    match cs with
+    | [] => []
+    | c :: rest =>
+      if c == ' ' || c == '\t' then
+        drop rest
+      else
+        cs
+  String.ofList (drop s.toList)
+
+private def countKernelParams (ptx : String) (kernel : String) : Nat :=
+  let entry := s!".entry {kernel}("
+  match ptx.splitOn entry with
+  | _ :: after :: _ =>
+    let lines := after.splitOn "\n"
+    let rec go (rest : List String) (acc : Nat) : Nat :=
+      match rest with
+      | [] => acc
+      | line :: tail =>
+        let trimmed := ltrim line
+        if trimmed.startsWith ")" then
+          acc
+        else if trimmed.startsWith ".param" then
+          go tail (acc + 1)
+        else
+          go tail acc
+    go lines 0
+  | _ => 0
+
+private def kernelParamCount (ptxPath : System.FilePath) (kernel : String) : IO Nat := do
+  let ptx ← IO.FS.readFile ptxPath
+  let count := countKernelParams ptx kernel
+  if count == 0 then
+    throw (IO.userError s!"CudaTritonMatmul: kernel {kernel} not found in PTX")
+  if count < 3 then
+    throw (IO.userError s!"CudaTritonMatmul: kernel {kernel} param count {count} is too small")
+  return count
 
 /-- Cache for optional Triton config loaded from environment. -/
 initialize tritonConfigCache : IO.Ref (Option (Option TritonMatmulConfig)) ← IO.mkRef none
@@ -169,6 +229,7 @@ def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
     let expectedM ← requireEnvNat "TG4_TRITON_M"
     let expectedN ← requireEnvNat "TG4_TRITON_N"
     let expectedK ← requireEnvNat "TG4_TRITON_K"
+    let paramCount ← kernelParamCount ptxPath kernelName
     return some {
       kernelName,
       ptxPath,
@@ -177,6 +238,7 @@ def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
       blockK,
       numWarps,
       sharedBytes,
+      paramCount,
       expectedM,
       expectedN,
       expectedK
@@ -222,21 +284,25 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
     let params := presetParams preset
     if m % params.blockM != 0 || n % params.blockN != 0 || k % params.blockK != 0 then
       return none
-    let emitCfg := emitConfigForPreset preset m n k
+    let target ← getCudaTarget
+    let emitCfg := emitConfigForPreset preset target m n k
     if !(← emitCfg.ptxPath.pathExists) then
       let rc ← TinyGrad4.Backend.TritonEmit.emit emitCfg
       if rc != 0 then
         return none
     if !(← emitCfg.ptxPath.pathExists) then
       return none
+    let kernelName := "matmul_kernel"
+    let paramCount ← kernelParamCount emitCfg.ptxPath kernelName
     let cfg : TritonMatmulConfig := {
-      kernelName := "matmul_kernel",
+      kernelName,
       ptxPath := emitCfg.ptxPath,
       blockM := params.blockM,
       blockN := params.blockN,
       blockK := params.blockK,
       numWarps := params.numWarps,
       sharedBytes := 0,
+      paramCount,
       expectedM := m,
       expectedN := n,
       expectedK := k
@@ -248,6 +314,13 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
 private def loadKernel (cfg : TritonMatmulConfig) : IO CUDAProgram := do
   let ptx ← IO.FS.readFile cfg.ptxPath
   cudaLoadPTX cfg.kernelName ptx
+
+private def padKernelArgs (bufs : Array CUDABuffer) (count : Nat) (fill : CUDABuffer) : Array CUDABuffer :=
+  if count <= bufs.size then
+    bufs
+  else
+    let extra := Array.replicate (count - bufs.size) fill
+    bufs ++ extra
 
 /-- Execute Triton matmul (float16) with fixed sizes. -/
 @[inline] def matmulF16 (cfg : TritonMatmulConfig)
@@ -281,7 +354,8 @@ private def loadKernel (cfg : TritonMatmulConfig) : IO CUDAProgram := do
   let blockX := cfg.numWarps * 32
   let blockY := 1
 
-  cudaLaunchGrid2D prog #[cBuf, aBuf, bBuf] gridX gridY blockX blockY cfg.sharedBytes
+  let args := padKernelArgs #[cBuf, aBuf, bBuf] cfg.paramCount cBuf
+  cudaLaunchGrid2D prog args gridX gridY blockX blockY cfg.sharedBytes
 
   let outBytes ← cudaCopyOutBytes cBuf cBytes
 
@@ -323,6 +397,9 @@ private def loadKernel (cfg : TritonMatmulConfig) : IO CUDAProgram := do
 def tryMatmulF32ViaF16 (a b : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) := do
   if a.dtype != .float32 || b.dtype != .float32 then
     return none
+  let available ← TinyGrad4.Backend.Cuda.isAvailable
+  if !available then
+    return none
   let cfg? ← getConfigFromEnv
   let cfg? ←
     match cfg? with
@@ -337,9 +414,6 @@ def tryMatmulF32ViaF16 (a b : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) :
   match cfg? with
   | none => return none
   | some cfg =>
-    let available ← TinyGrad4.Backend.Cuda.isAvailable
-    if !available then
-      return none
     if m != cfg.expectedM || n != cfg.expectedN || k != cfg.expectedK then
       return none
     if m % cfg.blockM != 0 || n % cfg.blockN != 0 || k % cfg.blockK != 0 then

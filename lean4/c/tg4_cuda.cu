@@ -432,6 +432,33 @@ extern "C" lean_obj_res tg4_cuda_device_name(lean_object* world) {
     return lean_io_result_mk_ok(lean_mk_string(name));
 }
 
+// Get CUDA driver version (e.g., 12020 for CUDA 12.2)
+// @[extern "tg4_cuda_driver_version"]
+extern "C" lean_obj_res tg4_cuda_driver_version(lean_object* world) {
+    ensure_cuda_init();
+
+    int version = 0;
+    CHECK_CU(cuDriverGetVersion(&version));
+
+    return lean_io_result_mk_ok(lean_usize_to_nat((size_t)version));
+}
+
+// Get CUDA compute capability (major, minor)
+// @[extern "tg4_cuda_compute_capability"]
+extern "C" lean_obj_res tg4_cuda_compute_capability(lean_object* world) {
+    ensure_cuda_init();
+
+    int major = 0;
+    int minor = 0;
+    CHECK_CU(cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, g_device));
+    CHECK_CU(cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, g_device));
+
+    lean_object* pair = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(pair, 0, lean_usize_to_nat((size_t)major));
+    lean_ctor_set(pair, 1, lean_usize_to_nat((size_t)minor));
+    return lean_io_result_mk_ok(pair);
+}
+
 // ============================================================================
 // Byte-Based API (for GPULoader compatibility)
 // ============================================================================

@@ -23,6 +23,7 @@ structure EmitConfig where
   m : Nat := 256
   n : Nat := 256
   k : Nat := 256
+  ptxVersion : Option Nat := none
 
 private def envNat (name : String) (default : Nat) : IO Nat := do
   match ← IO.getEnv name with
@@ -43,6 +44,14 @@ private def findUv : IO String := do
   throw (IO.userError "TritonEmit: uv not found in PATH or ~/.local/bin")
 
 private def pythonSource (cfg : EmitConfig) : String :=
+  let ptxLine :=
+    match cfg.ptxVersion with
+    | none => "  ptx_version = None"
+    | some v => s!"  ptx_version = {v}"
+  let optsLine :=
+    "  opts = {\"num_warps\": num_warps, \"num_stages\": num_stages}\n" ++
+    "  if ptx_version is not None:\n" ++
+    "    opts[\"ptx_version\"] = ptx_version\n"
   String.intercalate "\n" [
     "import os",
     "import triton",
@@ -84,14 +93,16 @@ private def pythonSource (cfg : EmitConfig) : String :=
     "",
     "",
     s!"def emit_ptx(path, block_m={cfg.blockM}, block_n={cfg.blockN}, block_k={cfg.blockK}, num_warps={cfg.numWarps}, num_stages={cfg.numStages}):",
+    ptxLine,
     "  signature = {\"c_ptr\": \"*fp16\", \"a_ptr\": \"*fp16\", \"b_ptr\": \"*fp16\"}",
     "  src = ASTSource(",
     "    matmul_kernel,",
     "    signature,",
     "    constexprs={\"BLOCK_SIZE_M\": block_m, \"BLOCK_SIZE_N\": block_n, \"BLOCK_SIZE_K\": block_k},",
     "  )",
+    optsLine,
     "  try:",
-    "    compiled = triton_compile(src, options={\"num_warps\": num_warps, \"num_stages\": num_stages})",
+    "    compiled = triton_compile(src, options=opts)",
     "  except TypeError:",
     "    compiled = triton_compile(src)",
     "  asm = compiled.asm.get(\"ptx\")",
@@ -147,6 +158,13 @@ def configFromEnv : IO EmitConfig := do
   let m ← envNat "TG4_TRITON_M" 256
   let n ← envNat "TG4_TRITON_N" 256
   let k ← envNat "TG4_TRITON_K" 256
+  let ptxVersion ←
+    match ← IO.getEnv "TG4_TRITON_PTX_VERSION" with
+    | none => pure none
+    | some v =>
+      match v.toNat? with
+      | some n => pure (some n)
+      | none => throw (IO.userError s!"TritonEmit: TG4_TRITON_PTX_VERSION must be Nat, got '{v}'")
   pure {
     ptxPath,
     blockM,
@@ -156,7 +174,8 @@ def configFromEnv : IO EmitConfig := do
     numStages,
     m,
     n,
-    k
+    k,
+    ptxVersion
   }
 
 /-- Emit Triton PTX using env config. -/

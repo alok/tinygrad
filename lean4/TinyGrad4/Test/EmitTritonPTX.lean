@@ -9,7 +9,7 @@ Generates a PTX file for a fixed-shape Triton matmul kernel using `uv`.
 - Block sizes via TG4_TRITON_BLOCK_M/_N/_K
 - Warp/stage via TG4_TRITON_NUM_WARPS, TG4_TRITON_NUM_STAGES
 - Shapes via TG4_TRITON_M/_N/_K (compile-time constants in the kernel)
--/-
+-/
 
 namespace TinyGrad4.Test.EmitTritonPTX
 
@@ -114,7 +114,7 @@ def main : IO UInt32 := do
   let k ← envNat "TG4_TRITON_K" 256
 
   let scriptPath := System.FilePath.mk "tmp" / "emit_triton_ptx.py"
-  IO.FS.createDirAll scriptPath.parent
+  IO.FS.createDirAll (scriptPath.parent.getD (System.FilePath.mk "."))
   let source := pythonSource ptxPath m n k blockM blockN blockK numWarps numStages
   IO.FS.writeFile scriptPath source
 

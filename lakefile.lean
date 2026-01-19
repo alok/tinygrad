@@ -62,6 +62,15 @@ def checkCudaAvailable : IO Bool := do
   if System.Platform.isOSX then
     return false
   let home := (← IO.getEnv "HOME").getD ""
+  let nvccCandidates := #[
+    "/usr/local/cuda/bin/nvcc",
+    "/usr/local/cuda-12.4/bin/nvcc",
+    home ++ "/cuda/bin/nvcc",
+    home ++ "/cuda-12.4/bin/nvcc"
+  ]
+  let hasNvcc ← anyPathExists nvccCandidates
+  if hasNvcc then
+    return true
   let includeCandidates := #[
     "/usr/local/cuda/include/cuda.h",
     "/usr/local/cuda-12.4/include/cuda.h",

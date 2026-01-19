@@ -1139,10 +1139,11 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
     let isBatched := !plan.aStarts.isEmpty
     let hasBias2 := plan.bias2.isSome
     let hasScale := plan.scaleBits.isSome
-    let hasRelu := plan.relu
-    let fast := plan.aFast && plan.bFast && (plan.biasNumel == 0 || plan.biasFast)
-    let useTriton2D := !plan.needsStack && !isBatched && !hasBias2 && !hasScale && !hasRelu && fast
-    let useTritonBatched := !plan.needsStack && isBatched && !hasBias2 && !hasScale && !hasRelu && fast
+    let biasFastOk := plan.biasNumel == 0 || plan.biasFast
+    let bias2FastOk := !hasBias2 || plan.bias2Fast
+    let fast := plan.aFast && plan.bFast && biasFastOk && bias2FastOk
+    let useTriton2D := !plan.needsStack && !isBatched && fast
+    let useTritonBatched := !plan.needsStack && isBatched && fast
 
     if !useTriton2D && !useTritonBatched then
       return evalFusedMatmulBias u plan env cache
@@ -1153,6 +1154,13 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
     let aBuf := cache.getD plan.aBase aFallback
     let bBuf := cache.getD plan.bBase bFallback
     let biasBuf := cache.getD plan.bias biasFallback
+    let bias2Buf :=
+      match plan.bias2 with
+      | some bias2Id =>
+        let fallback := env.getD bias2Id (RawBuffer.zeros .float32 plan.bias2Numel)
+        some (cache.getD bias2Id fallback)
+      | none => none
+    let outShape := u.shape.toArray
 
     let rec isBiasShape (dims : List Nat) : Bool :=
       match dims with
@@ -1161,33 +1169,57 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
       | d :: ds => d == 1 && isBiasShape ds
     let simpleBias :=
       plan.biasNumel == plan.n && plan.biasFast && isBiasShape plan.biasShape.toList
+    let mut biasApplied := false
+    let mut out? : Option RawBuffer := none
     if useTritonBatched then
-      if plan.biasNumel == 0 then
-        match (← CudaTritonMatmul.tryMatmulBatchedF32ViaF16 aBuf bBuf plan.m plan.k plan.n plan.aStarts plan.bStarts) with
-        | some out => return out
-        | none => return evalFusedMatmulBias u plan env cache
-      if simpleBias && plan.biasStarts.size == plan.aStarts.size then
-        match (← CudaTritonMatmul.tryMatmulBatchedF32ViaF16Bias aBuf bBuf biasBuf plan.m plan.k plan.n plan.aStarts plan.bStarts plan.biasStarts) with
-        | some out => return out
-        | none => return evalFusedMatmulBias u plan env cache
-      return evalFusedMatmulBias u plan env cache
+      if plan.biasNumel != 0 && simpleBias && !hasScale && plan.biasStarts.size == plan.aStarts.size then
+        out? ← CudaTritonMatmul.tryMatmulBatchedF32ViaF16Bias
+          aBuf bBuf biasBuf plan.m plan.k plan.n plan.aStarts plan.bStarts plan.biasStarts
+        if out?.isSome then
+          biasApplied := true
+      if out?.isNone then
+        out? ← CudaTritonMatmul.tryMatmulBatchedF32ViaF16 aBuf bBuf plan.m plan.k plan.n plan.aStarts plan.bStarts
+    else
+      if plan.biasNumel != 0 && simpleBias && !hasScale then
+        out? ← CudaTritonMatmul.tryMatmulF32ViaF16Bias aBuf bBuf biasBuf plan.m plan.k plan.n
+        if out?.isSome then
+          biasApplied := true
+      if out?.isNone then
+        out? ← CudaTritonMatmul.tryMatmulF32ViaF16 aBuf bBuf plan.m plan.k plan.n
 
-    if plan.biasNumel != 0 && simpleBias then
-      match (← CudaTritonMatmul.tryMatmulF32ViaF16Bias aBuf bBuf biasBuf plan.m plan.k plan.n) with
-      | some out => return out
-      | none => pure ()
+    let out ←
+      match out? with
+      | some out => pure out
+      | none => return evalFusedMatmulBias u plan env cache
 
-    match (← CudaTritonMatmul.tryMatmulF32ViaF16 aBuf bBuf plan.m plan.k plan.n) with
-    | none =>
-      return evalFusedMatmulBias u plan env cache
-    | some out =>
-      if plan.biasNumel == 0 then
-        return out
-      let outShape := u.shape.toArray
+    let mut out := out
+    if let some scaleBits := plan.scaleBits then
+      let scaleVal := Float32.ofBits scaleBits
+      let scaleBuf := RawBuffer.ofFloat32s #[scaleVal]
+      let scaled := Native.mulBcastF32 out.data scaleBuf.data outShape #[] outShape
+      if scaled.isEmpty then
+        return RawBuffer.zeros u.dtype (listProd u.shape)
+      out := { dtype := .float32, data := scaled }
+
+    if plan.biasNumel != 0 && !biasApplied then
       let outBytes := Native.addBcastF32 out.data biasBuf.data outShape plan.biasShape outShape
       if outBytes.isEmpty then
         return RawBuffer.zeros u.dtype (listProd u.shape)
-      return { dtype := .float32, data := outBytes }
+      out := { dtype := .float32, data := outBytes }
+
+    if let some bias2 := bias2Buf then
+      let outBytes := Native.addBcastF32 out.data bias2.data outShape plan.bias2Shape outShape
+      if outBytes.isEmpty then
+        return RawBuffer.zeros u.dtype (listProd u.shape)
+      out := { dtype := .float32, data := outBytes }
+
+    if plan.relu then
+      let outBytes := Native.reluF32 out.data
+      if outBytes.isEmpty then
+        return RawBuffer.zeros u.dtype (listProd u.shape)
+      out := { dtype := .float32, data := outBytes }
+
+    return out
 
   private def evalFusedSoftmax (u : UOp) (plan : FusedSoftmax.Plan) (env : Env) (cache : HashMap UOpId RawBuffer) : RawBuffer :=
     if u.dtype != .float32 then

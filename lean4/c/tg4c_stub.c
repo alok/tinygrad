@@ -104,6 +104,62 @@ static inline uint32_t f32_to_bits(float f) {
   return v.u;
 }
 
+static inline uint16_t f32_to_f16_bits(float f) {
+  uint32_t x = f32_to_bits(f);
+  uint32_t sign = (x >> 16) & 0x8000;
+  uint32_t exp = (x >> 23) & 0xff;
+  uint32_t mant = x & 0x7fffff;
+  if (exp == 0xff) {
+    if (mant) return (uint16_t)(sign | 0x7e00);
+    return (uint16_t)(sign | 0x7c00);
+  }
+  int32_t exp16 = (int32_t)exp - 127 + 15;
+  if (exp16 >= 31) return (uint16_t)(sign | 0x7c00);
+  if (exp16 <= 0) {
+    if (exp16 < -10) return (uint16_t)sign;
+    mant |= 0x800000;
+    int32_t shift = 1 - exp16;
+    uint32_t mant16 = mant >> (shift + 13);
+    uint32_t round_bit = 1u << (shift + 12);
+    if (mant & round_bit) mant16 += 1;
+    return (uint16_t)(sign | mant16);
+  }
+  uint32_t mant_round = mant + 0x1000;
+  if (mant_round & 0x800000) {
+    mant_round = 0;
+    exp16 += 1;
+    if (exp16 >= 31) return (uint16_t)(sign | 0x7c00);
+  }
+  return (uint16_t)(sign | ((uint32_t)exp16 << 10) | (mant_round >> 13));
+}
+
+static inline float f16_bits_to_f32(uint16_t h) {
+  uint32_t sign = ((uint32_t)h & 0x8000) << 16;
+  uint32_t exp = (h >> 10) & 0x1f;
+  uint32_t mant = h & 0x3ff;
+  uint32_t bits;
+  if (exp == 0) {
+    if (mant == 0) {
+      bits = sign;
+    } else {
+      exp = 1;
+      while ((mant & 0x400) == 0) {
+        mant <<= 1;
+        exp -= 1;
+      }
+      mant &= 0x3ff;
+      exp = exp + (127 - 15);
+      bits = sign | (exp << 23) | (mant << 13);
+    }
+  } else if (exp == 31) {
+    bits = sign | 0x7f800000 | (mant << 13);
+  } else {
+    exp = exp + (127 - 15);
+    bits = sign | (exp << 23) | (mant << 13);
+  }
+  return f32_from_bits(bits);
+}
+
 static inline float read_f32(const uint8_t* data, size_t idx) {
   float v;
   memcpy(&v, data + idx * 4, 4);
@@ -2961,6 +3017,35 @@ LEAN_EXPORT lean_obj_res tg4_unpack_f64_from_f32(b_lean_obj_arg a) {
   const uint8_t* x = byte_array_cptr((lean_object*)a);
   for (size_t i = 0; i < n; ++i) {
     o[i] = (double)read_f32(x, i);
+  }
+  return out;
+}
+
+LEAN_EXPORT lean_obj_res tg4_f32_to_f16(b_lean_obj_arg a) {
+  size_t in_bytes = byte_array_size(a);
+  if (in_bytes % 4 != 0) return mk_byte_array(0);
+  size_t n = in_bytes / 4;
+  lean_object* out = mk_byte_array(n * 2);
+  const uint8_t* x = byte_array_cptr((lean_object*)a);
+  uint8_t* o = byte_array_cptr(out);
+  for (size_t i = 0; i < n; ++i) {
+    uint16_t h = f32_to_f16_bits(read_f32(x, i));
+    o[i * 2] = (uint8_t)(h & 0xff);
+    o[i * 2 + 1] = (uint8_t)(h >> 8);
+  }
+  return out;
+}
+
+LEAN_EXPORT lean_obj_res tg4_f16_to_f32(b_lean_obj_arg a) {
+  size_t in_bytes = byte_array_size(a);
+  if (in_bytes % 2 != 0) return mk_byte_array(0);
+  size_t n = in_bytes / 2;
+  lean_object* out = mk_byte_array(n * 4);
+  const uint8_t* x = byte_array_cptr((lean_object*)a);
+  uint8_t* o = byte_array_cptr(out);
+  for (size_t i = 0; i < n; ++i) {
+    uint16_t h = (uint16_t)x[i * 2] | ((uint16_t)x[i * 2 + 1] << 8);
+    write_f32(o, i, f16_bits_to_f32(h));
   }
   return out;
 }

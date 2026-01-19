@@ -307,6 +307,41 @@ extern "C" lean_obj_res tg4_cuda_compile(b_lean_obj_arg name_obj, b_lean_obj_arg
     return lean_io_result_mk_ok(cuda_program_box(cuda_prog));
 }
 
+// Load PTX directly (precompiled) and bind a kernel
+// @[extern "tg4_cuda_load_ptx"]
+extern "C" lean_obj_res tg4_cuda_load_ptx(b_lean_obj_arg name_obj, b_lean_obj_arg ptx_obj, lean_object* world) {
+    ensure_cuda_init();
+
+    const char* name_cstr = lean_string_cstr(name_obj);
+    const char* ptx_cstr = lean_string_cstr(ptx_obj);
+
+    CUmodule module;
+    CUresult loadResult = cuModuleLoadDataEx(&module, ptx_cstr, 0, NULL, NULL);
+    if (loadResult != CUDA_SUCCESS) {
+        const char* errStr;
+        cuGetErrorString(loadResult, &errStr);
+        char errMsg[256];
+        snprintf(errMsg, sizeof(errMsg), "cuModuleLoadData error: %s", errStr);
+        return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(errMsg)));
+    }
+
+    CUfunction kernel;
+    CUresult funcResult = cuModuleGetFunction(&kernel, module, name_cstr);
+    if (funcResult != CUDA_SUCCESS) {
+        cuModuleUnload(module);
+        char errMsg[256];
+        snprintf(errMsg, sizeof(errMsg), "Kernel '%s' not found in module", name_cstr);
+        return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(errMsg)));
+    }
+
+    TG4CUDAProgram* cuda_prog = (TG4CUDAProgram*)malloc(sizeof(TG4CUDAProgram));
+    cuda_prog->module = module;
+    cuda_prog->kernel = kernel;
+    cuda_prog->name = strdup(name_cstr);
+
+    return lean_io_result_mk_ok(cuda_program_box(cuda_prog));
+}
+
 // ============================================================================
 // Runtime Functions
 // ============================================================================
@@ -503,6 +538,61 @@ extern "C" lean_obj_res tg4_cuda_launch_2d(
         grid_x, grid_y, 1,        // Grid dims
         lx, ly, 1,                // Block dims
         0,                        // Shared memory
+        g_stream,                 // Stream
+        kernel_args,              // Kernel args
+        NULL                      // Extra
+    ));
+
+    free(buf_ptrs);
+    free(kernel_args);
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+// Launch a kernel with explicit 2D grid and shared memory
+// @[extern "tg4_cuda_launch_grid_2d"]
+extern "C" lean_obj_res tg4_cuda_launch_grid_2d(
+    b_lean_obj_arg prog_obj,
+    b_lean_obj_arg bufs_obj,
+    b_lean_obj_arg grid_x_obj, b_lean_obj_arg grid_y_obj,
+    b_lean_obj_arg block_x_obj, b_lean_obj_arg block_y_obj,
+    b_lean_obj_arg shared_mem_obj,
+    lean_object* world
+) {
+    ensure_cuda_init();
+
+    TG4CUDAProgram* prog = cuda_program_unbox(prog_obj);
+
+    size_t grid_x = lean_usize_of_nat(grid_x_obj);
+    size_t grid_y = lean_usize_of_nat(grid_y_obj);
+    size_t block_x = lean_usize_of_nat(block_x_obj);
+    size_t block_y = lean_usize_of_nat(block_y_obj);
+    size_t shared_mem = lean_usize_of_nat(shared_mem_obj);
+
+    int maxThreads;
+    cuDeviceGetAttribute(&maxThreads, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, g_device);
+    if (block_x * block_y > (size_t)maxThreads) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("tg4_cuda_launch_grid_2d: block dims exceed device limit")));
+    }
+
+    // Pack buffer pointers for kernel args
+    size_t num_bufs = lean_array_size(bufs_obj);
+    void** kernel_args = (void**)malloc(num_bufs * sizeof(void*));
+    CUdeviceptr* buf_ptrs = (CUdeviceptr*)malloc(num_bufs * sizeof(CUdeviceptr));
+
+    for (size_t i = 0; i < num_bufs; i++) {
+        lean_object* buf_lean = lean_array_get_core(bufs_obj, i);
+        TG4CUDABuffer* buf = cuda_buffer_unbox(buf_lean);
+        buf_ptrs[i] = buf->gpu_mem;
+        kernel_args[i] = &buf_ptrs[i];
+    }
+
+    CHECK_CU(cuLaunchKernel(
+        prog->kernel,
+        grid_x, grid_y, 1,        // Grid dims
+        block_x, block_y, 1,      // Block dims
+        (unsigned int)shared_mem, // Shared memory
         g_stream,                 // Stream
         kernel_args,              // Kernel args
         NULL                      // Extra

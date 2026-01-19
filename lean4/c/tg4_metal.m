@@ -808,7 +808,7 @@ lean_obj_res tg4_metal_wrap_bytes_nocopy(b_lean_obj_arg ba_obj, b_lean_obj_arg o
         size_t len = lean_usize_of_nat(len_obj);
 
         // Bounds check
-        if (offset + len > ba_size) {
+        if (offset > ba_size || len > ba_size - offset) {
             return lean_io_result_mk_error(lean_mk_io_user_error(
                 lean_mk_string("tg4_metal_wrap_bytes_nocopy: offset+len exceeds ByteArray size")));
         }
@@ -825,6 +825,43 @@ lean_obj_res tg4_metal_wrap_bytes_nocopy(b_lean_obj_arg ba_obj, b_lean_obj_arg o
             mtlBuf = [g_device newBufferWithBytes:data + offset
                                            length:len
                                           options:MTLResourceStorageModeShared];
+        }
+
+        TG4MetalBuffer* buf = malloc(sizeof(TG4MetalBuffer));
+        buf->buffer = mtlBuf;
+        buf->numel = len / sizeof(float);  // Assume float32 for numel
+
+        return lean_io_result_mk_ok(metal_buffer_box(buf));
+    }
+}
+
+// Wrap ByteArray data in a Metal buffer without copying.
+// Fails if no-copy allocation is not possible.
+// @[extern "tg4_metal_wrap_bytes_nocopy_strict"]
+lean_obj_res tg4_metal_wrap_bytes_nocopy_strict(b_lean_obj_arg ba_obj, b_lean_obj_arg offset_obj, b_lean_obj_arg len_obj, lean_object* world) {
+    @autoreleasepool {
+        ensure_metal_init();
+
+        uint8_t* data = lean_sarray_cptr(ba_obj);
+        size_t ba_size = lean_sarray_size(ba_obj);
+        size_t offset = lean_usize_of_nat(offset_obj);
+        size_t len = lean_usize_of_nat(len_obj);
+
+        // Bounds check
+        if (offset > ba_size || len > ba_size - offset) {
+            return lean_io_result_mk_error(lean_mk_io_user_error(
+                lean_mk_string("tg4_metal_wrap_bytes_nocopy_strict: offset+len exceeds ByteArray size")));
+        }
+
+        // Create Metal buffer wrapping existing memory (no copy!)
+        id<MTLBuffer> mtlBuf = [g_device newBufferWithBytesNoCopy:data + offset
+                                                           length:len
+                                                          options:MTLResourceStorageModeShared
+                                                      deallocator:nil];
+
+        if (mtlBuf == nil) {
+            return lean_io_result_mk_error(lean_mk_io_user_error(
+                lean_mk_string("tg4_metal_wrap_bytes_nocopy_strict: no-copy allocation failed")));
         }
 
         TG4MetalBuffer* buf = malloc(sizeof(TG4MetalBuffer));

@@ -9,6 +9,7 @@ Generates a PTX file for a fixed-shape Triton matmul kernel using `uv`.
 - Kernel name via TG4_TRITON_KERNEL
 - Bias kernel via TG4_TRITON_WITH_BIAS
 - Force re-emit via TG4_TRITON_FORCE
+- PTX dir via TG4_TRITON_PTX_DIR
 - Block sizes via TG4_TRITON_BLOCK_M/_N/_K
 - Warp/stage via TG4_TRITON_NUM_WARPS, TG4_TRITON_NUM_STAGES
 - Shapes via TG4_TRITON_M/_N/_K (compile-time constants in the kernel)
@@ -146,6 +147,11 @@ private def envFlag (name : String) : IO Bool := do
     let v := v.toLower
     pure (v == "1" || v == "true" || v == "yes")
 
+private def ptxDir : IO System.FilePath := do
+  match ← IO.getEnv "TG4_TRITON_PTX_DIR" with
+  | some dir => pure (System.FilePath.mk dir)
+  | none => pure (System.FilePath.mk "tmp")
+
 /-- Emit Triton PTX for an explicit config. -/
 def emit (cfg : EmitConfig) : IO UInt32 := do
   let scriptPath := System.FilePath.mk "tmp" / "emit_triton_ptx.py"
@@ -175,7 +181,12 @@ def emit (cfg : EmitConfig) : IO UInt32 := do
 
 /-- Build an EmitConfig from environment variables. -/
 def configFromEnv : IO EmitConfig := do
-  let ptxPath := System.FilePath.mk ((← IO.getEnv "TG4_TRITON_PTX").getD "tmp/triton_matmul.ptx")
+  let ptxPath ←
+    match ← IO.getEnv "TG4_TRITON_PTX" with
+    | some path => pure (System.FilePath.mk path)
+    | none => do
+      let dir ← ptxDir
+      pure (dir / "triton_matmul.ptx")
   let kernelName := (← IO.getEnv "TG4_TRITON_KERNEL").getD "matmul_kernel"
   let withBias :=
     match ← IO.getEnv "TG4_TRITON_WITH_BIAS" with

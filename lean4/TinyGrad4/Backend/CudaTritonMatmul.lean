@@ -19,6 +19,7 @@ Environment config (used by `getConfigFromEnv`):
 - TG4_TRITON_NUM_WARPS
 - TG4_TRITON_SHARED_BYTES (default: 0)
 - TG4_TRITON_M / _N / _K (expected shapes)
+- TG4_TRITON_PTX_DIR (optional cache dir for auto-emitted PTX)
 -/
 
 namespace TinyGrad4.Backend.CudaTritonMatmul
@@ -71,13 +72,19 @@ private def getCudaTarget : IO CudaTarget := do
 private def kernelTag (withBias : Bool) : String :=
   if withBias then "_bias" else ""
 
-private def defaultPtxPath (preset : TritonPreset) (target : CudaTarget) (m n k : Nat) (withBias : Bool) : System.FilePath :=
-  System.FilePath.mk "tmp" / s!"triton_{presetTag preset}{kernelTag withBias}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}.ptx"
+private def ptxDir : IO System.FilePath := do
+  match ← IO.getEnv "TG4_TRITON_PTX_DIR" with
+  | some dir => pure (System.FilePath.mk dir)
+  | none => pure (System.FilePath.mk "tmp")
 
-private def emitConfigForPreset (preset : TritonPreset) (target : CudaTarget) (m n k : Nat)
+private def defaultPtxPath (dir : System.FilePath) (preset : TritonPreset) (target : CudaTarget)
+    (m n k : Nat) (withBias : Bool) : System.FilePath :=
+  dir / s!"triton_{presetTag preset}{kernelTag withBias}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}.ptx"
+
+private def emitConfigForPreset (dir : System.FilePath) (preset : TritonPreset) (target : CudaTarget) (m n k : Nat)
     (kernelName : String) (withBias : Bool) : TinyGrad4.Backend.TritonEmit.EmitConfig :=
   let params := presetParams preset
-  { ptxPath := defaultPtxPath preset target m n k withBias,
+  { ptxPath := defaultPtxPath dir preset target m n k withBias,
     kernelName := kernelName,
     blockM := params.blockM,
     blockN := params.blockN,
@@ -208,6 +215,7 @@ private def envNatDefault (name : String) (default : Nat) : IO Nat := do
     Optional:
     - TG4_TRITON_KERNEL (default: matmul_kernel)
     - TG4_TRITON_SHARED_BYTES (default: 0)
+    - TG4_TRITON_PTX_DIR (used when TG4_TRITON_PTX is unset)
     -/
 def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
   let ptxStr? ← IO.getEnv "TG4_TRITON_PTX"
@@ -216,7 +224,8 @@ def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
     match ptxStr? with
     | some ptxStr => pure (some (System.FilePath.mk ptxStr))
     | none =>
-      let defaultPath := System.FilePath.mk "tmp" / "triton_matmul.ptx"
+      let dir ← ptxDir
+      let defaultPath := dir / "triton_matmul.ptx"
       if ← defaultPath.pathExists then
         pure (some defaultPath)
       else
@@ -348,7 +357,8 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
       return none
     let target ← getCudaTarget
     let kernelName := "matmul_kernel"
-    let emitCfg := emitConfigForPreset preset target m n k kernelName false
+    let dir ← ptxDir
+    let emitCfg := emitConfigForPreset dir preset target m n k kernelName false
     if !(← emitCfg.ptxPath.pathExists) then
       let rc ← TinyGrad4.Backend.TritonEmit.emit emitCfg
       if rc != 0 then
@@ -390,7 +400,8 @@ def ensureConfigBias (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMa
     return none
   let target ← getCudaTarget
   let kernelName := "linear_kernel"
-  let emitCfg := emitConfigForPreset preset target m n k kernelName true
+  let dir ← ptxDir
+  let emitCfg := emitConfigForPreset dir preset target m n k kernelName true
   if !(← emitCfg.ptxPath.pathExists) then
     let rc ← TinyGrad4.Backend.TritonEmit.emit emitCfg
     if rc != 0 then

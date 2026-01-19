@@ -1153,8 +1153,13 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
     let bBuf := cache.getD plan.bBase bFallback
     let biasBuf := cache.getD plan.bias biasFallback
 
+    let rec isBiasShape (dims : List Nat) : Bool :=
+      match dims with
+      | [] => false
+      | [last] => last == plan.n
+      | d :: ds => d == 1 && isBiasShape ds
     let simpleBias :=
-      plan.biasNumel == plan.n && plan.biasShape.size == 1 && plan.biasShape.getD 0 0 == plan.n && plan.biasFast
+      plan.biasNumel == plan.n && plan.biasFast && isBiasShape plan.biasShape.toList
     if plan.biasNumel != 0 && simpleBias then
       match (← CudaTritonMatmul.tryMatmulF32ViaF16Bias aBuf bBuf biasBuf plan.m plan.k plan.n) with
       | some out => return out

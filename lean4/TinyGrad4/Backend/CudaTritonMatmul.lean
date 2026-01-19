@@ -2,6 +2,7 @@ import Float64
 import TinyGrad4.Backend.Cuda
 import TinyGrad4.Backend.Buffer
 import TinyGrad4.Backend.Native
+import TinyGrad4.Backend.TritonEmit
 
 /-!
 # Triton-Generated Matmul (CUDA PTX)
@@ -25,6 +26,38 @@ namespace TinyGrad4.Backend.CudaTritonMatmul
 open TinyGrad4
 open TinyGrad4.Backend.Cuda
 
+inductive TritonPreset where
+  | linear
+  deriving Repr, DecidableEq, Inhabited
+
+structure TritonPresetParams where
+  blockM : Nat
+  blockN : Nat
+  blockK : Nat
+  numWarps : Nat
+  numStages : Nat
+
+private def presetParams : TritonPreset → TritonPresetParams
+  | .linear => { blockM := 64, blockN := 128, blockK := 64, numWarps := 4, numStages := 2 }
+
+private def presetTag : TritonPreset → String
+  | .linear => "linear"
+
+private def defaultPtxPath (preset : TritonPreset) (m n k : Nat) : System.FilePath :=
+  System.FilePath.mk "tmp" / s!"triton_{presetTag preset}_{m}x{n}x{k}.ptx"
+
+private def emitConfigForPreset (preset : TritonPreset) (m n k : Nat) : TinyGrad4.Backend.TritonEmit.EmitConfig :=
+  let params := presetParams preset
+  { ptxPath := defaultPtxPath preset m n k,
+    blockM := params.blockM,
+    blockN := params.blockN,
+    blockK := params.blockK,
+    numWarps := params.numWarps,
+    numStages := params.numStages,
+    m := m,
+    n := n,
+    k := k }
+
 /-- Configuration for a Triton-generated matmul kernel. -/
 structure TritonMatmulConfig where
   kernelName : String := "matmul_kernel"
@@ -46,6 +79,9 @@ private def ceilDiv (a b : Nat) : Nat :=
 
 /-- Cache for optional Triton config loaded from environment. -/
 initialize tritonConfigCache : IO.Ref (Option (Option TritonMatmulConfig)) ← IO.mkRef none
+
+/-- Optional default Triton preset (enables auto-emit without env). -/
+initialize tritonPresetCache : IO.Ref (Option TritonPreset) ← IO.mkRef none
 
 private def envNat? (name : String) : IO (Option Nat) := do
   match ← IO.getEnv name with
@@ -130,6 +166,51 @@ def clearConfigCache : IO Unit :=
 def setConfig (cfg? : Option TritonMatmulConfig) : IO Unit :=
   tritonConfigCache.set (some cfg?)
 
+/-- Set a default preset for auto-emitting PTX when env config is missing. -/
+def setDefaultPreset (preset? : Option TritonPreset) : IO Unit :=
+  tritonPresetCache.set preset?
+
+/-- Get the default preset for auto-emitting PTX. -/
+def getDefaultPreset : IO (Option TritonPreset) :=
+  tritonPresetCache.get
+
+/-- Emit PTX + configure Triton based on a preset when env config is missing. -/
+def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmulConfig) := do
+  match ← tritonConfigCache.get with
+  | some (some cfg) => return some cfg
+  | _ => pure ()
+
+  let envCfg? ← loadConfigFromEnv
+  match envCfg? with
+  | some cfg =>
+    setConfig (some cfg)
+    return some cfg
+  | none =>
+    let params := presetParams preset
+    if m % params.blockM != 0 || n % params.blockN != 0 || k % params.blockK != 0 then
+      return none
+    let emitCfg := emitConfigForPreset preset m n k
+    if !(← emitCfg.ptxPath.pathExists) then
+      let rc ← TinyGrad4.Backend.TritonEmit.emit emitCfg
+      if rc != 0 then
+        return none
+    if !(← emitCfg.ptxPath.pathExists) then
+      return none
+    let cfg : TritonMatmulConfig := {
+      kernelName := "matmul_kernel",
+      ptxPath := emitCfg.ptxPath,
+      blockM := params.blockM,
+      blockN := params.blockN,
+      blockK := params.blockK,
+      numWarps := params.numWarps,
+      sharedBytes := 0,
+      expectedM := m,
+      expectedN := n,
+      expectedK := k
+    }
+    setConfig (some cfg)
+    return some cfg
+
 /-- Load a PTX module from disk and bind the kernel. -/
 private def loadKernel (cfg : TritonMatmulConfig) : IO CUDAProgram := do
   let ptx ← IO.FS.readFile cfg.ptxPath
@@ -210,6 +291,13 @@ def tryMatmulF32ViaF16 (a b : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) :
   if a.dtype != .float32 || b.dtype != .float32 then
     return none
   let cfg? ← getConfigFromEnv
+  let cfg? ←
+    match cfg? with
+    | some cfg => pure (some cfg)
+    | none =>
+      match ← getDefaultPreset with
+      | none => pure none
+      | some preset => ensureConfig preset m n k
   match cfg? with
   | none => return none
   | some cfg =>

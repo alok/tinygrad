@@ -2,7 +2,6 @@ import Float64
 import TinyGrad4.Backend.Cuda
 import TinyGrad4.Backend.CudaTritonMatmul
 import TinyGrad4.Backend.Native
-import TinyGrad4.Test.EmitTritonPTX
 
 private def pushF32LE (out : ByteArray) (v : Float32) : ByteArray :=
   let bits := v.toBits
@@ -54,21 +53,30 @@ private def makeData (n : Nat) (seed : Nat) : Array Float32 := Id.run do
 
 /-- Smoke test: run Triton matmul if configured in env, compare a few samples to CPU. -/
 def main : IO UInt32 := do
-  TinyGrad4.Test.EmitTritonPTX.autogenIfNeeded
-  let cfg? ← TinyGrad4.Backend.CudaTritonMatmul.getConfigFromEnv
+  let available ← TinyGrad4.Backend.Cuda.isAvailable
+  if !available then
+    IO.println "Triton matmul smoke: skipped (CUDA not available)"
+    return 0
+
+  let preset := TinyGrad4.Backend.CudaTritonMatmul.TritonPreset.linear
+  let cfgEnv? ← TinyGrad4.Backend.CudaTritonMatmul.getConfigFromEnv
+  let (m, n, k, cfg?) ←
+    match cfgEnv? with
+    | some cfg =>
+      pure (cfg.expectedM, cfg.expectedN, cfg.expectedK, some cfg)
+    | none => do
+      TinyGrad4.Backend.CudaTritonMatmul.setDefaultPreset (some preset)
+      let m := 256
+      let n := 256
+      let k := 256
+      let cfg? ← TinyGrad4.Backend.CudaTritonMatmul.ensureConfig preset m n k
+      pure (m, n, k, cfg?)
+
   match cfg? with
   | none =>
-    IO.println "Triton matmul smoke: skipped (TG4_TRITON_PTX not set)"
-    return 0
+    IO.println "Triton matmul smoke: FAIL (no Triton config available)"
+    return 1
   | some cfg =>
-    let available ← TinyGrad4.Backend.Cuda.isAvailable
-    if !available then
-      IO.println "Triton matmul smoke: skipped (CUDA not available)"
-      return 0
-
-    let m := cfg.expectedM
-    let n := cfg.expectedN
-    let k := cfg.expectedK
     let aNumel := m * k
     let bNumel := k * n
 

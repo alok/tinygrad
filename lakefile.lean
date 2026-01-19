@@ -40,8 +40,8 @@ def objcFlags : Array String :=
 def dropSuffix (s suf : String) : String :=
   if s.endsWith suf then s.dropRight suf.length else s
 
-def configBool? (name : Name) : Option Bool :=
-  match get_config? name with
+def configCuda? : Option Bool :=
+  match get_config? cuda with
   | none => none
   | some v =>
     let v := v.toLower
@@ -118,7 +118,7 @@ def cudaLinkArgs : Array String :=
 -- Required for any executable that links libtg4c.a
 -- On non-macOS platforms, these are empty (no Metal/Accelerate support)
 def cudaLinkEnabled : Bool :=
-  match configBool? `cuda with
+  match configCuda? with
   | some v => v && !System.Platform.isOSX
   | none => false
 
@@ -147,7 +147,7 @@ extern_lib tg4c pkg := do
       if System.Platform.isOSX then
         pure false
       else
-        match configBool? `cuda with
+        match configCuda? with
         | some true =>
           let available ← checkCudaAvailable
           if !available then

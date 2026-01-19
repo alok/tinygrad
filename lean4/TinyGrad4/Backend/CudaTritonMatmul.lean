@@ -182,6 +182,13 @@ private def envNat? (name : String) : IO (Option Nat) := do
     | some n => pure (some n)
     | none => throw (IO.userError s!"CudaTritonMatmul: {name} must be Nat, got '{v}'")
 
+private def envFlag (name : String) : IO Bool := do
+  match ← IO.getEnv name with
+  | none => pure false
+  | some v =>
+    let v := v.toLower
+    pure (v == "1" || v == "true" || v == "yes")
+
 private def requireEnvNat (name : String) : IO Nat := do
   match ← envNat? name with
   | some n => pure n
@@ -253,6 +260,43 @@ def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
       expectedK
     }
 
+/-- Load Triton bias config from environment variables (requires TG4_TRITON_WITH_BIAS=1). -/
+def loadBiasConfigFromEnv : IO (Option TritonMatmulConfig) := do
+  if !(← envFlag "TG4_TRITON_WITH_BIAS") then
+    return none
+  let ptxStr? ← IO.getEnv "TG4_TRITON_PTX"
+  let ptxPath ←
+    match ptxStr? with
+    | some ptxStr => pure (System.FilePath.mk ptxStr)
+    | none => throw (IO.userError "CudaTritonMatmul: TG4_TRITON_PTX required for bias kernel")
+  if !(← ptxPath.pathExists) then
+    throw (IO.userError s!"CudaTritonMatmul: TG4_TRITON_PTX not found: {ptxPath}")
+  let kernelName := (← IO.getEnv "TG4_TRITON_KERNEL").getD "linear_kernel"
+  let blockM ← requireEnvNat "TG4_TRITON_BLOCK_M"
+  let blockN ← requireEnvNat "TG4_TRITON_BLOCK_N"
+  let blockK ← requireEnvNat "TG4_TRITON_BLOCK_K"
+  let numWarps ← requireEnvNat "TG4_TRITON_NUM_WARPS"
+  let sharedBytes ← envNatDefault "TG4_TRITON_SHARED_BYTES" 0
+  let expectedM ← requireEnvNat "TG4_TRITON_M"
+  let expectedN ← requireEnvNat "TG4_TRITON_N"
+  let expectedK ← requireEnvNat "TG4_TRITON_K"
+  let paramCount ← kernelParamCount ptxPath kernelName
+  if paramCount < 4 then
+    throw (IO.userError s!"CudaTritonMatmul: bias kernel {kernelName} must have at least 4 params")
+  return some {
+    kernelName,
+    ptxPath,
+    blockM,
+    blockN,
+    blockK,
+    numWarps,
+    sharedBytes,
+    paramCount,
+    expectedM,
+    expectedN,
+    expectedK
+  }
+
 /-- Load (and memoize) Triton config from the environment. -/
 def getConfigFromEnv : IO (Option TritonMatmulConfig) := do
   match ← tritonConfigCache.get with
@@ -260,6 +304,15 @@ def getConfigFromEnv : IO (Option TritonMatmulConfig) := do
   | none =>
     let cfg ← loadConfigFromEnv
     tritonConfigCache.set (some cfg)
+    return cfg
+
+/-- Load (and memoize) Triton bias config from the environment. -/
+def getBiasConfigFromEnv : IO (Option TritonMatmulConfig) := do
+  match ← tritonBiasConfigCache.get with
+  | some cfg => return cfg
+  | none =>
+    let cfg ← loadBiasConfigFromEnv
+    tritonBiasConfigCache.set (some cfg)
     return cfg
 
 /-- Clear cached Triton config (useful when env vars change). -/
@@ -324,6 +377,13 @@ def ensureConfigBias (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMa
   match ← tritonBiasConfigCache.get with
   | some (some cfg) => return some cfg
   | _ => pure ()
+
+  let envCfg? ← loadBiasConfigFromEnv
+  match envCfg? with
+  | some cfg =>
+    tritonBiasConfigCache.set (some (some cfg))
+    return some cfg
+  | none => pure ()
 
   let params := presetParams preset
   if m % params.blockM != 0 || n % params.blockN != 0 || k % params.blockK != 0 then
@@ -561,13 +621,17 @@ def tryMatmulF32ViaF16Bias (a b bias : RawBuffer) (m k n : Nat) : IO (Option Raw
   let available ← TinyGrad4.Backend.Cuda.isAvailable
   if !available then
     return none
+  let cfgEnv? ← getBiasConfigFromEnv
   let cfg? ←
-    match ← getDefaultPreset with
-    | some preset => ensureConfigBias preset m n k
+    match cfgEnv? with
+    | some cfg => pure (some cfg)
     | none =>
-      match choosePreset .float32 m n k with
-      | none => pure none
+      match ← getDefaultPreset with
       | some preset => ensureConfigBias preset m n k
+      | none =>
+        match choosePreset .float32 m n k with
+        | none => pure none
+        | some preset => ensureConfigBias preset m n k
   match cfg? with
   | none => return none
   | some cfg =>

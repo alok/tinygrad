@@ -100,7 +100,7 @@ private def pythonSource (ptxPath : String) (m n k : Nat) (blockM blockN blockK 
   ]
 
 /-- Emit Triton PTX using uv + python. -/
-def main : IO UInt32 := do
+def emitMain : IO UInt32 := do
   let ptxPath := (← IO.getEnv "TG4_TRITON_PTX").getD "tmp/triton_matmul.ptx"
   let blockM ← envNat "TG4_TRITON_BLOCK_M" 64
   let blockN ← envNat "TG4_TRITON_BLOCK_N" 64
@@ -148,6 +148,6 @@ def autogenIfNeeded : IO Unit := do
   let path := System.FilePath.mk ptxPath
   if ← path.pathExists then
     return
-  let rc ← main
+  let rc ← emitMain
   if rc != 0 then
     throw (IO.userError "EmitTritonPTX: autogen failed")

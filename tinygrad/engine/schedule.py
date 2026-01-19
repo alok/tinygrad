@@ -115,9 +115,14 @@ pm_pre_sched_cache = PatternMatcher([
 
 def replace_input_buffer_back(ctx:dict[UOp, UOp], b:UOp):
   if (ret:=ctx.get(b, None)) is None:
-    assert b.op is Ops.BUFFER
-    # if it's not in the cache, create a new buffer
-    ctx[b] = ret = UOp.new_buffer(b.device, b.arg, b.dtype)
+    if b.op is Ops.BUFFER:
+      # if it's not in the cache, create a new buffer
+      ctx[b] = ret = UOp.new_buffer(b.device, b.arg, b.dtype)
+    else:
+      assert b.op is Ops.CONST
+      # schedule cache can contain CONST(device, LUNIQUE) placeholders that aren't in the current input_buffers map (ex: internal consts).
+      # rebuild a fresh unique_const.
+      ctx[b] = ret = UOp.unique_const(b.dtype, b.arg, device=b.src[0].arg)
   return ret
 
 pm_post_sched_cache = PatternMatcher([

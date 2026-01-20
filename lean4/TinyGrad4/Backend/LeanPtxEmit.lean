@@ -17,6 +17,7 @@ Environment (for `emitFromEnv`):
 - TG4_TRITON_M / _N / _K
 - TG4_TRITON_BLOCK_M / _N / _K
 - TG4_TRITON_NUM_WARPS
+- TG4_TRITON_STRIDE_AM / _AK / _BK / _BN / _CM / _CN (optional, defaults to contiguous)
 - TG4_TRITON_KERNEL (default: matmul_kernel)
 - TG4_TRITON_PTX (optional path override)
 - TG4_TRITON_PTX_DIR (optional cache dir)
@@ -40,6 +41,12 @@ structure EmitConfig where
   m : Nat
   n : Nat
   k : Nat
+  strideAm : Nat
+  strideAk : Nat
+  strideBk : Nat
+  strideBn : Nat
+  strideCm : Nat
+  strideCn : Nat
   blockM : Nat := 1
   blockN : Nat := 1
   blockK : Nat := 1
@@ -89,6 +96,11 @@ private def requireEnvNat (name : String) : IO Nat := do
   match ← envNat? name with
   | some n => pure n
   | none => throw (IO.userError s!"LeanPtxEmit: missing {name}")
+
+private def envNatDefault (name : String) (default : Nat) : IO Nat := do
+  match ← envNat? name with
+  | some n => pure n
+  | none => pure default
 
 private def ptxVersionFromDriver (driver : Nat) : Nat :=
   let cudaMajor := driver / 1000
@@ -176,7 +188,7 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   [ ")"
   , "{"
   , "  .reg .pred %p<2>;"
-  , "  .reg .b32 %r<10>;"
+  , "  .reg .b32 %r<12>;"
   , "  .reg .b64 %rd<10>;"
   , "  .reg .f32 %f<3>;"
   , "  .reg .b16 %h<3>;"
@@ -197,10 +209,12 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   , "LOOP:"
   , s!"  setp.ge.u32 %p1, %r3, {cfg.k};"
   , "  @%p1 bra LOOP_END;"
-  , s!"  mul.lo.u32 %r4, %r0, {cfg.k};"
-  , "  add.u32 %r5, %r4, %r3;"
-  , s!"  mul.lo.u32 %r6, %r3, {cfg.n};"
-  , "  add.u32 %r7, %r6, %r1;"
+  , s!"  mul.lo.u32 %r4, %r0, {cfg.strideAm};"
+  , s!"  mul.lo.u32 %r5, %r3, {cfg.strideAk};"
+  , "  add.u32 %r5, %r4, %r5;"
+  , s!"  mul.lo.u32 %r6, %r3, {cfg.strideBk};"
+  , s!"  mul.lo.u32 %r7, %r1, {cfg.strideBn};"
+  , "  add.u32 %r7, %r6, %r7;"
   , "  mul.wide.u32 %rd4, %r5, 2;"
   , "  add.u64 %rd5, %rd1, %rd4;"
   , "  ld.global.u16 %h0, [%rd5];"
@@ -215,8 +229,9 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   , "LOOP_END:"
   ]
   ++ biasBodyLines cfg ++
-  [ s!"  mul.lo.u32 %r8, %r0, {cfg.n};"
-  , "  add.u32 %r9, %r8, %r1;"
+  [ s!"  mul.lo.u32 %r8, %r0, {cfg.strideCm};"
+  , s!"  mul.lo.u32 %r9, %r1, {cfg.strideCn};"
+  , "  add.u32 %r9, %r8, %r9;"
   , "  mul.wide.u32 %rd4, %r9, 2;"
   , "  add.u64 %rd5, %rd0, %rd4;"
   , "  cvt.rn.f16.f32 %h0, %f0;"
@@ -295,15 +310,17 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
       , "K_LOOP:"
       , s!"  setp.ge.u32 %p1, %r9, {cfg.k};"
       , "  @%p1 bra K_DONE;"
-      , s!"  mul.lo.u32 %r13, %r9, {cfg.n};"
+      , s!"  mul.lo.u32 %r13, %r9, {cfg.strideBk};"
       ] do
     lines := lines.push line
 
   for i in List.range tileM do
     for line in
         [ s!"  add.u32 %r10, %r7, {i};"
-        , s!"  mul.lo.u32 %r12, %r10, {cfg.k};"
-        , "  add.u32 %r14, %r12, %r9;"
+        , s!"  rem.u32 %r10, %r10, {cfg.m};"
+        , s!"  mul.lo.u32 %r12, %r10, {cfg.strideAm};"
+        , s!"  mul.lo.u32 %r14, %r9, {cfg.strideAk};"
+        , "  add.u32 %r14, %r12, %r14;"
         , "  mul.wide.u32 %rd4, %r14, 2;"
         , "  add.u64 %rd5, %rd1, %rd4;"
         , "  ld.global.u16 %h0, [%rd5];"
@@ -314,7 +331,9 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
   for j in List.range tileN do
     for line in
         [ s!"  add.u32 %r11, %r8, {j};"
-        , "  add.u32 %r14, %r13, %r11;"
+        , s!"  rem.u32 %r11, %r11, {cfg.n};"
+        , s!"  mul.lo.u32 %r14, %r11, {cfg.strideBn};"
+        , "  add.u32 %r14, %r13, %r14;"
         , "  mul.wide.u32 %rd4, %r14, 2;"
         , "  add.u64 %rd5, %rd2, %rd4;"
         , "  ld.global.u16 %h1, [%rd5];"
@@ -337,6 +356,7 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
     for j in List.range tileN do
       for line in
           [ s!"  add.u32 %r11, %r8, {j};"
+          , s!"  rem.u32 %r11, %r11, {cfg.n};"
           , "  mul.wide.u32 %rd4, %r11, 2;"
           , "  add.u64 %rd5, %rd3, %rd4;"
           , "  ld.global.u16 %h2, [%rd5];"
@@ -351,8 +371,9 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
       for line in
           [ s!"  add.u32 %r10, %r7, {i};"
           , s!"  add.u32 %r11, %r8, {j};"
-          , s!"  mul.lo.u32 %r12, %r10, {cfg.n};"
-          , "  add.u32 %r14, %r12, %r11;"
+          , s!"  mul.lo.u32 %r12, %r10, {cfg.strideCm};"
+          , s!"  mul.lo.u32 %r14, %r11, {cfg.strideCn};"
+          , "  add.u32 %r14, %r12, %r14;"
           , "  mul.wide.u32 %rd4, %r14, 2;"
           , "  add.u64 %rd5, %rd0, %rd4;"
           , s!"  cvt.rn.f16.f32 %h0, {accReg i j};"
@@ -382,7 +403,7 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
   let threads := cfg.numWarps * 32
   let totalA := cfg.blockM * cfg.blockK
   let totalB := cfg.blockK * cfg.blockN
-  let useVec2 := cfg.blockK % 2 == 0 && cfg.blockN % 2 == 0
+  let useVec2 := cfg.blockK % 2 == 0 && cfg.blockN % 2 == 0 && cfg.strideAk == 1 && cfg.strideBn == 1
   let blockK2 := cfg.blockK / 2
   let blockN2 := cfg.blockN / 2
   let totalA2 := cfg.blockM * blockK2
@@ -466,8 +487,9 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
         , s!"  rem.u32 %r14, %r10, {blockK2};"
         , "  mul.lo.u32 %r14, %r14, 2;"
         , "  add.u32 %r15, %r7, %r11;"
+        , s!"  rem.u32 %r15, %r15, {cfg.m};"
         , "  add.u32 %r18, %r9, %r14;"
-        , s!"  mul.lo.u32 %r19, %r15, {cfg.k};"
+        , s!"  mul.lo.u32 %r19, %r15, {cfg.strideAm};"
         , "  add.u32 %r19, %r19, %r18;"
         , "  mul.wide.u32 %rd4, %r19, 2;"
         , "  add.u64 %rd5, %rd1, %rd4;"
@@ -493,8 +515,10 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
         [ s!"  div.u32 %r11, %r10, {cfg.blockK};"
         , s!"  rem.u32 %r14, %r10, {cfg.blockK};"
         , "  add.u32 %r15, %r7, %r11;"
+        , s!"  rem.u32 %r15, %r15, {cfg.m};"
         , "  add.u32 %r18, %r9, %r14;"
-        , s!"  mul.lo.u32 %r19, %r15, {cfg.k};"
+        , s!"  mul.lo.u32 %r19, %r15, {cfg.strideAm};"
+        , s!"  mul.lo.u32 %r18, %r18, {cfg.strideAk};"
         , "  add.u32 %r19, %r19, %r18;"
         , "  mul.wide.u32 %rd4, %r19, 2;"
         , "  add.u64 %rd5, %rd1, %rd4;"
@@ -521,7 +545,8 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
         , "  mul.lo.u32 %r14, %r14, 2;"
         , "  add.u32 %r15, %r9, %r11;"
         , "  add.u32 %r18, %r8, %r14;"
-        , s!"  mul.lo.u32 %r19, %r15, {cfg.n};"
+        , s!"  rem.u32 %r18, %r18, {cfg.n};"
+        , s!"  mul.lo.u32 %r19, %r15, {cfg.strideBk};"
         , "  add.u32 %r19, %r19, %r18;"
         , "  mul.wide.u32 %rd4, %r19, 2;"
         , "  add.u64 %rd5, %rd2, %rd4;"
@@ -543,7 +568,9 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
         , s!"  rem.u32 %r14, %r10, {cfg.blockN};"
         , "  add.u32 %r15, %r9, %r11;"
         , "  add.u32 %r18, %r8, %r14;"
-        , s!"  mul.lo.u32 %r19, %r15, {cfg.n};"
+        , s!"  rem.u32 %r18, %r18, {cfg.n};"
+        , s!"  mul.lo.u32 %r19, %r15, {cfg.strideBk};"
+        , s!"  mul.lo.u32 %r18, %r18, {cfg.strideBn};"
         , "  add.u32 %r19, %r19, %r18;"
         , "  mul.wide.u32 %rd4, %r19, 2;"
         , "  add.u64 %rd5, %rd2, %rd4;"
@@ -608,6 +635,7 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
     for j in List.range tileN do
       for line in
           [ s!"  add.u32 %r11, %r13, {j};"
+          , s!"  rem.u32 %r11, %r11, {cfg.n};"
           , "  mul.wide.u32 %rd4, %r11, 2;"
           , "  add.u64 %rd5, %rd3, %rd4;"
           , "  ld.global.u16 %h2, [%rd5];"
@@ -622,7 +650,8 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
       for line in
           [ s!"  add.u32 %r11, %r12, {i};"
           , s!"  add.u32 %r14, %r13, {j};"
-          , s!"  mul.lo.u32 %r15, %r11, {cfg.n};"
+          , s!"  mul.lo.u32 %r15, %r11, {cfg.strideCm};"
+          , s!"  mul.lo.u32 %r14, %r14, {cfg.strideCn};"
           , "  add.u32 %r15, %r15, %r14;"
           , "  mul.wide.u32 %rd4, %r15, 2;"
           , "  add.u64 %rd5, %rd0, %rd4;"
@@ -663,6 +692,12 @@ def configFromEnv : IO EmitConfig := do
   let m ← requireEnvNat "TG4_TRITON_M"
   let n ← requireEnvNat "TG4_TRITON_N"
   let k ← requireEnvNat "TG4_TRITON_K"
+  let strideAm ← envNatDefault "TG4_TRITON_STRIDE_AM" k
+  let strideAk ← envNatDefault "TG4_TRITON_STRIDE_AK" 1
+  let strideBk ← envNatDefault "TG4_TRITON_STRIDE_BK" n
+  let strideBn ← envNatDefault "TG4_TRITON_STRIDE_BN" 1
+  let strideCm ← envNatDefault "TG4_TRITON_STRIDE_CM" n
+  let strideCn ← envNatDefault "TG4_TRITON_STRIDE_CN" 1
   let blockM ← requireEnvNat "TG4_TRITON_BLOCK_M"
   let blockN ← requireEnvNat "TG4_TRITON_BLOCK_N"
   let blockK ← requireEnvNat "TG4_TRITON_BLOCK_K"
@@ -687,6 +722,12 @@ def configFromEnv : IO EmitConfig := do
     m,
     n,
     k,
+    strideAm,
+    strideAk,
+    strideBk,
+    strideBn,
+    strideCm,
+    strideCn,
     blockM,
     blockN,
     blockK,

@@ -25,6 +25,9 @@ Environment (for `emitFromEnv`):
 - TG4_TRITON_LEAN_VARIANT (basic|tiled|smem)
 - TG4_TRITON_FORCE (overwrite)
 - TG4_TRITON_DUMP (write `{ptxPath}.dump`)
+
+Meta helpers:
+- import `TinyGrad4.Backend.LeanPtxMeta` to use `emitPtx!` / `ptxSource!` literals
 -/
 
 namespace TinyGrad4.Backend.LeanPtxEmit
@@ -55,6 +58,27 @@ structure EmitConfig where
   sm : Nat
   withBias : Bool := false
   variant : PtxVariant := .tiled
+
+structure EmitOverride where
+  ptxPath? : Option System.FilePath := none
+  kernelName? : Option String := none
+  m? : Option Nat := none
+  n? : Option Nat := none
+  k? : Option Nat := none
+  strideAm? : Option Nat := none
+  strideAk? : Option Nat := none
+  strideBk? : Option Nat := none
+  strideBn? : Option Nat := none
+  strideCm? : Option Nat := none
+  strideCn? : Option Nat := none
+  blockM? : Option Nat := none
+  blockN? : Option Nat := none
+  blockK? : Option Nat := none
+  numWarps? : Option Nat := none
+  ptxVersion? : Option Nat := none
+  sm? : Option Nat := none
+  withBias? : Option Bool := none
+  variant? : Option PtxVariant := none
 
 def parseVariant (value : String) : Option PtxVariant :=
   match value.toLower with
@@ -101,6 +125,50 @@ private def envNatDefault (name : String) (default : Nat) : IO Nat := do
   match ← envNat? name with
   | some n => pure n
   | none => pure default
+
+private def applyOverride (base : EmitConfig) (ov : EmitOverride) : EmitConfig :=
+  let m := ov.m?.getD base.m
+  let n := ov.n?.getD base.n
+  let k := ov.k?.getD base.k
+  let shapeChanged := ov.m?.isSome || ov.n?.isSome || ov.k?.isSome
+  let strideAm := match ov.strideAm? with
+    | some v => v
+    | none => if shapeChanged then k else base.strideAm
+  let strideAk := match ov.strideAk? with
+    | some v => v
+    | none => if shapeChanged then 1 else base.strideAk
+  let strideBk := match ov.strideBk? with
+    | some v => v
+    | none => if shapeChanged then n else base.strideBk
+  let strideBn := match ov.strideBn? with
+    | some v => v
+    | none => if shapeChanged then 1 else base.strideBn
+  let strideCm := match ov.strideCm? with
+    | some v => v
+    | none => if shapeChanged then n else base.strideCm
+  let strideCn := match ov.strideCn? with
+    | some v => v
+    | none => if shapeChanged then 1 else base.strideCn
+  { base with
+    ptxPath := ov.ptxPath?.getD base.ptxPath
+    kernelName := ov.kernelName?.getD base.kernelName
+    m,
+    n,
+    k,
+    strideAm,
+    strideAk,
+    strideBk,
+    strideBn,
+    strideCm,
+    strideCn,
+    blockM := ov.blockM?.getD base.blockM
+    blockN := ov.blockN?.getD base.blockN
+    blockK := ov.blockK?.getD base.blockK
+    numWarps := ov.numWarps?.getD base.numWarps
+    ptxVersion := ov.ptxVersion?.getD base.ptxVersion
+    sm := ov.sm?.getD base.sm
+    withBias := ov.withBias?.getD base.withBias
+    variant := ov.variant?.getD base.variant }
 
 private def ptxVersionFromDriver (driver : Nat) : Nat :=
   let cudaMajor := driver / 1000
@@ -756,5 +824,20 @@ def emit (cfg : EmitConfig) : IO UInt32 := do
 def emitFromEnv : IO UInt32 := do
   let cfg ← configFromEnv
   emit cfg
+
+/-- Build a config from env, then apply overrides (useful for meta helpers). -/
+def configFromEnvOverride (ov : EmitOverride) : IO EmitConfig := do
+  let base ← configFromEnv
+  pure (applyOverride base ov)
+
+/-- Emit PTX using env config plus overrides. -/
+def emitFromOverride (ov : EmitOverride) : IO UInt32 := do
+  let cfg ← configFromEnvOverride ov
+  emit cfg
+
+/-- Build PTX source using env config plus overrides. -/
+def ptxSourceFromOverride (ov : EmitOverride) : IO String := do
+  let cfg ← configFromEnvOverride ov
+  pure (ptxSource cfg)
 
 end TinyGrad4.Backend.LeanPtxEmit

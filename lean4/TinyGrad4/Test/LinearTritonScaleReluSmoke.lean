@@ -54,10 +54,11 @@ private def buildLinearScaleRelu (batch inFeatures outFeatures : Nat)
   let x ← Tensor.full [batch, inFeatures] .float32 1.0
   let w ← Tensor.full [inFeatures, outFeatures] .float32 1.0
   let b ← Tensor.full [outFeatures] .float32 biasVal
-  let y ← TinyGrad4.NN.linear' x w (some b)
+  let y ← TinyGrad4.StaticTensor.matmul x w
   let yScaled ← TinyGrad4.StaticTensor.scale y scale
-  let out ← TinyGrad4.StaticTensor.relu yScaled
-  pure out
+  let yBias ← TinyGrad4.StaticTensor.addB yScaled b
+  let yRelu ← TinyGrad4.StaticTensor.relu yBias
+  pure { uop := yRelu.uop, requiresGrad := yRelu.requiresGrad, h_shape := sorry_proof }
 
 /-- Smoke test: build a linear layer with scale+relu and eval via IO path. -/
 def main : IO UInt32 := do

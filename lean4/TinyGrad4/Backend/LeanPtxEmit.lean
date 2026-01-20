@@ -12,6 +12,18 @@ Variants:
 - Supports optional FP16 bias add.
 - Uses compile-time constants for M/N/K baked into the PTX.
 - Intended as a correctness-first fallback.
+
+Environment (for `emitFromEnv`):
+- TG4_TRITON_M / _N / _K
+- TG4_TRITON_BLOCK_M / _N / _K
+- TG4_TRITON_NUM_WARPS
+- TG4_TRITON_KERNEL (default: matmul_kernel)
+- TG4_TRITON_PTX (optional path override)
+- TG4_TRITON_PTX_DIR (optional cache dir)
+- TG4_TRITON_WITH_BIAS (optional)
+- TG4_TRITON_LEAN_VARIANT (basic|tiled|smem)
+- TG4_TRITON_FORCE (overwrite)
+- TG4_TRITON_DUMP (write `{ptxPath}.dump`)
 -/
 
 namespace TinyGrad4.Backend.LeanPtxEmit

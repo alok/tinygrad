@@ -2,13 +2,14 @@ import Float64
 import TinyGrad4.Backend.Cuda
 import TinyGrad4.Backend.Buffer
 import TinyGrad4.Backend.Native
-import TinyGrad4.Backend.TritonEmit
+import TinyGrad4.Backend.LeanPtxEmit
 
 /-!
 # Triton-Generated Matmul (CUDA PTX)
 
-Loads a precompiled PTX kernel (from Triton) and runs a fixed-shape matmul.
-This mirrors `extra/gemm/triton_nv_matmul.py` and is intentionally narrow:
+Loads a precompiled PTX kernel and runs a fixed-shape matmul.
+By default, PTX is emitted by Lean for correctness; Triton PTX can override via env.
+This mirrors `extra/gemm/triton_nv_matmul.py` at the interface level and is intentionally narrow:
 - float16 inputs/outputs
 - fixed M/N/K and block sizes from the compiled kernel
 
@@ -31,6 +32,7 @@ inductive TritonPreset where
   | linearSmall
   | linear
   | linearLarge
+  | leanBasic
   deriving Repr, DecidableEq, Inhabited
 
 structure TritonPresetParams where
@@ -44,11 +46,7 @@ private def presetParams : TritonPreset → TritonPresetParams
   | .linearSmall => { blockM := 64, blockN := 64, blockK := 32, numWarps := 4, numStages := 2 }
   | .linear => { blockM := 64, blockN := 128, blockK := 64, numWarps := 4, numStages := 2 }
   | .linearLarge => { blockM := 128, blockN := 128, blockK := 32, numWarps := 8, numStages := 3 }
-
-private def presetTag : TritonPreset → String
-  | .linearSmall => "linear_small"
-  | .linear => "linear"
-  | .linearLarge => "linear_large"
+  | .leanBasic => { blockM := 1, blockN := 1, blockK := 1, numWarps := 1, numStages := 1 }
 
 private structure CudaTarget where
   sm : Nat
@@ -69,33 +67,19 @@ private def getCudaTarget : IO CudaTarget := do
   let ptxVersion := ptxVersionFromDriver driver
   pure { sm, ptxVersion }
 
-private def kernelTag (withBias : Bool) : String :=
-  if withBias then "_bias" else ""
-
 private def ptxDir : IO System.FilePath := do
   match ← IO.getEnv "TG4_TRITON_PTX_DIR" with
   | some dir => pure (System.FilePath.mk dir)
   | none => pure (System.FilePath.mk "tmp")
 
-private def defaultPtxPath (dir : System.FilePath) (preset : TritonPreset) (target : CudaTarget)
-    (m n k : Nat) (withBias : Bool) : System.FilePath :=
-  dir / s!"triton_{presetTag preset}{kernelTag withBias}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}.ptx"
+private def leanKernelName (withBias : Bool) : String :=
+  if withBias then "tg4_matmul_bias" else "tg4_matmul_basic"
 
-private def emitConfigForPreset (dir : System.FilePath) (preset : TritonPreset) (target : CudaTarget) (m n k : Nat)
-    (kernelName : String) (withBias : Bool) : TinyGrad4.Backend.TritonEmit.EmitConfig :=
-  let params := presetParams preset
-  { ptxPath := defaultPtxPath dir preset target m n k withBias,
-    kernelName := kernelName,
-    blockM := params.blockM,
-    blockN := params.blockN,
-    blockK := params.blockK,
-    numWarps := params.numWarps,
-    numStages := params.numStages,
-    m := m,
-    n := n,
-    k := k,
-    ptxVersion := some target.ptxVersion,
-    withBias := withBias }
+private def leanPtxPath (dir : System.FilePath) (target : CudaTarget) (m n k : Nat) (withBias : Bool) : System.FilePath :=
+  let tag := if withBias then "lean_bias" else "lean"
+  dir / s!"{tag}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}.ptx"
+
+-- Triton PTX emit helpers removed; Lean PTX generator is the default path now.
 
 private def divisible (x y : Nat) : Bool :=
   x % y == 0
@@ -111,7 +95,7 @@ def choosePreset (dtype : DType) (m n k : Nat) : Option TritonPreset :=
   else if divisible m 64 && divisible n 64 && divisible k 32 then
     some TritonPreset.linearSmall
   else
-    none
+    some TritonPreset.leanBasic
 
 /-- Configuration for a Triton-generated matmul kernel. -/
 structure TritonMatmulConfig where
@@ -341,7 +325,7 @@ def getDefaultPreset : IO (Option TritonPreset) :=
   tritonPresetCache.get
 
 /-- Emit PTX + configure Triton based on a preset when env config is missing. -/
-def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmulConfig) := do
+def ensureConfig (_preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmulConfig) := do
   match ← tritonConfigCache.get with
   | some (some cfg) => return some cfg
   | _ => pure ()
@@ -352,23 +336,31 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
     setConfig (some cfg)
     return some cfg
   | none =>
-    let params := presetParams preset
-    if m % params.blockM != 0 || n % params.blockN != 0 || k % params.blockK != 0 then
-      return none
     let target ← getCudaTarget
-    let kernelName := "matmul_kernel"
+    let kernelName := leanKernelName false
     let dir ← ptxDir
-    let emitCfg := emitConfigForPreset dir preset target m n k kernelName false
-    if !(← emitCfg.ptxPath.pathExists) then
-      let rc ← TinyGrad4.Backend.TritonEmit.emit emitCfg
+    let ptxPath := leanPtxPath dir target m n k false
+    if !(← ptxPath.pathExists) || (← envFlag "TG4_TRITON_FORCE") then
+      let emitCfg : TinyGrad4.Backend.LeanPtxEmit.EmitConfig := {
+        ptxPath,
+        kernelName,
+        m,
+        n,
+        k,
+        ptxVersion := target.ptxVersion,
+        sm := target.sm,
+        withBias := false
+      }
+      let rc ← TinyGrad4.Backend.LeanPtxEmit.emit emitCfg
       if rc != 0 then
         return none
-    if !(← emitCfg.ptxPath.pathExists) then
+    if !(← ptxPath.pathExists) then
       return none
-    let paramCount ← kernelParamCount emitCfg.ptxPath kernelName
+    let paramCount ← kernelParamCount ptxPath kernelName
+    let params := presetParams .leanBasic
     let cfg : TritonMatmulConfig := {
       kernelName,
-      ptxPath := emitCfg.ptxPath,
+      ptxPath,
       blockM := params.blockM,
       blockN := params.blockN,
       blockK := params.blockK,
@@ -383,7 +375,7 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
     return some cfg
 
 /-- Emit PTX + configure Triton for a fused bias kernel. -/
-def ensureConfigBias (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmulConfig) := do
+def ensureConfigBias (_preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmulConfig) := do
   match ← tritonBiasConfigCache.get with
   | some (some cfg) => return some cfg
   | _ => pure ()
@@ -395,23 +387,33 @@ def ensureConfigBias (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMa
     return some cfg
   | none => pure ()
 
-  let params := presetParams preset
-  if m % params.blockM != 0 || n % params.blockN != 0 || k % params.blockK != 0 then
-    return none
   let target ← getCudaTarget
-  let kernelName := "linear_kernel"
+  let kernelName := leanKernelName true
   let dir ← ptxDir
-  let emitCfg := emitConfigForPreset dir preset target m n k kernelName true
-  if !(← emitCfg.ptxPath.pathExists) then
-    let rc ← TinyGrad4.Backend.TritonEmit.emit emitCfg
+  let ptxPath := leanPtxPath dir target m n k true
+  if !(← ptxPath.pathExists) || (← envFlag "TG4_TRITON_FORCE") then
+    let emitCfg : TinyGrad4.Backend.LeanPtxEmit.EmitConfig := {
+      ptxPath,
+      kernelName,
+      m,
+      n,
+      k,
+      ptxVersion := target.ptxVersion,
+      sm := target.sm,
+      withBias := true
+    }
+    let rc ← TinyGrad4.Backend.LeanPtxEmit.emit emitCfg
     if rc != 0 then
       return none
-  if !(← emitCfg.ptxPath.pathExists) then
+  if !(← ptxPath.pathExists) then
     return none
-  let paramCount ← kernelParamCount emitCfg.ptxPath kernelName
+  let paramCount ← kernelParamCount ptxPath kernelName
+  if paramCount < 4 then
+    return none
+  let params := presetParams .leanBasic
   let cfg : TritonMatmulConfig := {
     kernelName,
-    ptxPath := emitCfg.ptxPath,
+    ptxPath,
     blockM := params.blockM,
     blockN := params.blockN,
     blockK := params.blockK,

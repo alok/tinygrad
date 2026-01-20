@@ -527,8 +527,16 @@ private def ptxLines (cfg : EmitConfig) : List String :=
   | .smem, some (tileM, tileN) => ptxLinesSmem cfg tileM tileN
   | _, _ => ptxLinesBasic cfg
 
-private def ptxSource (cfg : EmitConfig) : String :=
+def ptxSource (cfg : EmitConfig) : String :=
   String.intercalate "\n" (ptxLines cfg)
+
+/-- Write a debug dump of the PTX source. Defaults to `{ptxPath}.dump`. -/
+def dump (cfg : EmitConfig) (path? : Option System.FilePath := none) : IO Unit := do
+  let outPath :=
+    match path? with
+    | some p => p
+    | none => System.FilePath.mk (cfg.ptxPath.toString ++ ".dump")
+  IO.FS.writeFile outPath (ptxSource cfg)
 
 /-- Emit PTX to the configured path. -/
 def emit (cfg : EmitConfig) : IO UInt32 := do
@@ -540,6 +548,8 @@ def emit (cfg : EmitConfig) : IO UInt32 := do
     | some variant => pure { cfg with variant }
     | none => pure cfg
   IO.FS.writeFile cfg.ptxPath (ptxSource cfg)
+  if (← envFlag "TG4_TRITON_DUMP") then
+    dump cfg none
   return 0
 
 end TinyGrad4.Backend.LeanPtxEmit

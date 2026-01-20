@@ -22,6 +22,7 @@ Environment config (used by `getConfigFromEnv`):
 - TG4_TRITON_M / _N / _K (expected shapes)
 - TG4_TRITON_PTX_DIR (optional cache dir for auto-emitted PTX)
 - TG4_TRITON_LEAN_VARIANT (basic|tiled|smem, optional for Lean PTX emit)
+- TG4_TRITON_DUMP (set to dump PTX to {ptxPath}.dump when emitting)
 -/
 
 namespace TinyGrad4.Backend.CudaTritonMatmul

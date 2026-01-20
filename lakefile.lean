@@ -293,6 +293,9 @@ lean_exe linear_triton_scale_relu_smoke where
 lean_exe emit_triton_ptx where
   root := `TinyGrad4.Test.EmitTritonPTXMain
 
+lean_exe emit_lean_ptx where
+  root := `TinyGrad4.Test.EmitLeanPTXMain
+
 lean_exe metal_matmul_test where
   root := `TinyGrad4.Test.MetalMatmulSmoke
   moreLinkArgs := metalLinkArgs

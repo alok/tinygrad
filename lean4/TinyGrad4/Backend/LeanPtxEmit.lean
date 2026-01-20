@@ -1,4 +1,5 @@
 import Float64
+import TinyGrad4.Backend.Cuda
 
 /-!
 # Lean PTX Emitter
@@ -63,6 +64,45 @@ private def ptxVersionString (v : Nat) : String :=
   let major := v / 10
   let minor := v % 10
   s!"{major}.{minor}"
+
+private def envNat? (name : String) : IO (Option Nat) := do
+  match ← IO.getEnv name with
+  | none => pure none
+  | some v =>
+    match v.toNat? with
+    | some n => pure (some n)
+    | none => throw (IO.userError s!"LeanPtxEmit: {name} must be Nat, got '{v}'")
+
+private def requireEnvNat (name : String) : IO Nat := do
+  match ← envNat? name with
+  | some n => pure n
+  | none => throw (IO.userError s!"LeanPtxEmit: missing {name}")
+
+private def ptxVersionFromDriver (driver : Nat) : Nat :=
+  let cudaMajor := driver / 1000
+  let cudaMinor := (driver % 1000) / 10
+  if cudaMajor < 4 then
+    50
+  else
+    (cudaMajor - 4) * 10 + cudaMinor
+
+private def getCudaTarget : IO (Nat × Nat) := do
+  let driver ← TinyGrad4.Backend.Cuda.cudaDriverVersion
+  let (major, minor) ← TinyGrad4.Backend.Cuda.cudaComputeCapability
+  let sm := major * 10 + minor
+  let ptxVersion := ptxVersionFromDriver driver
+  pure (sm, ptxVersion)
+
+private def variantTag (variant : PtxVariant) : String :=
+  match variant with
+  | .basic => "basic"
+  | .tiled => "tiled"
+  | .smem => "smem"
+
+private def ptxDir : IO System.FilePath := do
+  match ← IO.getEnv "TG4_TRITON_PTX_DIR" with
+  | some dir => pure (System.FilePath.mk dir)
+  | none => pure (System.FilePath.mk "tmp")
 
 private def paramLines (withBias : Bool) : List String :=
   let params : List String :=
@@ -605,6 +645,46 @@ def dump (cfg : EmitConfig) (path? : Option System.FilePath := none) : IO Unit :
     | none => System.FilePath.mk (cfg.ptxPath.toString ++ ".dump")
   IO.FS.writeFile outPath (ptxSource cfg)
 
+/-- Build a Lean PTX emit config from environment variables. -/
+def configFromEnv : IO EmitConfig := do
+  let kernelName := (← IO.getEnv "TG4_TRITON_KERNEL").getD "matmul_kernel"
+  let m ← requireEnvNat "TG4_TRITON_M"
+  let n ← requireEnvNat "TG4_TRITON_N"
+  let k ← requireEnvNat "TG4_TRITON_K"
+  let blockM ← requireEnvNat "TG4_TRITON_BLOCK_M"
+  let blockN ← requireEnvNat "TG4_TRITON_BLOCK_N"
+  let blockK ← requireEnvNat "TG4_TRITON_BLOCK_K"
+  let numWarps ← requireEnvNat "TG4_TRITON_NUM_WARPS"
+  let withBias ← envFlag "TG4_TRITON_WITH_BIAS"
+  let variant ←
+    match ← variantFromEnv with
+    | some v => pure v
+    | none => pure .tiled
+  let (sm, ptxVersion) ← getCudaTarget
+  let ptxPath ←
+    match ← IO.getEnv "TG4_TRITON_PTX" with
+    | some ptx => pure (System.FilePath.mk ptx)
+    | none =>
+      let dir ← ptxDir
+      let tag := if withBias then "lean_bias" else "lean"
+      let vtag := variantTag variant
+      pure (dir / s!"{tag}_{vtag}_sm{sm}_ptx{ptxVersion}_{m}x{n}x{k}_bm{blockM}bn{blockN}bk{blockK}w{numWarps}.ptx")
+  pure {
+    ptxPath,
+    kernelName,
+    m,
+    n,
+    k,
+    blockM,
+    blockN,
+    blockK,
+    numWarps,
+    ptxVersion,
+    sm,
+    withBias,
+    variant
+  }
+
 /-- Emit PTX to the configured path. -/
 def emit (cfg : EmitConfig) : IO UInt32 := do
   IO.FS.createDirAll (cfg.ptxPath.parent.getD (System.FilePath.mk "."))
@@ -618,5 +698,10 @@ def emit (cfg : EmitConfig) : IO UInt32 := do
   if (← envFlag "TG4_TRITON_DUMP") then
     dump cfg none
   return 0
+
+/-- Emit PTX using environment configuration. -/
+def emitFromEnv : IO UInt32 := do
+  let cfg ← configFromEnv
+  emit cfg
 
 end TinyGrad4.Backend.LeanPtxEmit

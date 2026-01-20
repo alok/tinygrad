@@ -21,6 +21,7 @@ Environment config (used by `getConfigFromEnv`):
 - TG4_TRITON_SHARED_BYTES (default: 0)
 - TG4_TRITON_M / _N / _K (expected shapes)
 - TG4_TRITON_PTX_DIR (optional cache dir for auto-emitted PTX)
+- TG4_TRITON_LEAN_VARIANT (basic|tiled|smem, optional for Lean PTX emit)
 -/
 
 namespace TinyGrad4.Backend.CudaTritonMatmul
@@ -75,10 +76,16 @@ private def ptxDir : IO System.FilePath := do
 private def leanKernelName (withBias : Bool) : String :=
   if withBias then "tg4_matmul_bias" else "tg4_matmul_basic"
 
+private def leanVariantTag (variant : TinyGrad4.Backend.LeanPtxEmit.PtxVariant) : String :=
+  match variant with
+  | .basic => "basic"
+  | .tiled => "tiled"
+  | .smem => "smem"
+
 private def leanPtxPath (dir : System.FilePath) (target : CudaTarget)
-    (m n k blockM blockN blockK numWarps : Nat) (withBias : Bool) : System.FilePath :=
+    (m n k blockM blockN blockK numWarps : Nat) (variantTag : String) (withBias : Bool) : System.FilePath :=
   let tag := if withBias then "lean_bias" else "lean"
-  dir / s!"{tag}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}_bm{blockM}bn{blockN}bk{blockK}w{numWarps}.ptx"
+  dir / s!"{tag}_{variantTag}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}_bm{blockM}bn{blockN}bk{blockK}w{numWarps}.ptx"
 
 -- Triton PTX emit helpers removed; Lean PTX generator is the default path now.
 
@@ -340,12 +347,23 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
     let target ← getCudaTarget
     let kernelName := leanKernelName false
     let params0 := presetParams preset
-    let params :=
+    let useLeanBasic :=
       match TinyGrad4.Backend.LeanPtxEmit.tileShape params0.blockM params0.blockN params0.numWarps with
-      | some _ => params0
-      | none => presetParams .leanBasic
+      | some _ => false
+      | none => true
+    let params := if useLeanBasic then presetParams .leanBasic else params0
+    let defaultVariant :=
+      if useLeanBasic then
+        TinyGrad4.Backend.LeanPtxEmit.PtxVariant.basic
+      else
+        TinyGrad4.Backend.LeanPtxEmit.PtxVariant.tiled
+    let variant ←
+      match ← TinyGrad4.Backend.LeanPtxEmit.variantFromEnv with
+      | some v => pure v
+      | none => pure defaultVariant
+    let variantTag := leanVariantTag variant
     let dir ← ptxDir
-    let ptxPath := leanPtxPath dir target m n k params.blockM params.blockN params.blockK params.numWarps false
+    let ptxPath := leanPtxPath dir target m n k params.blockM params.blockN params.blockK params.numWarps variantTag false
     if !(← ptxPath.pathExists) || (← envFlag "TG4_TRITON_FORCE") then
       let emitCfg : TinyGrad4.Backend.LeanPtxEmit.EmitConfig := {
         ptxPath,
@@ -359,7 +377,8 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
         numWarps := params.numWarps,
         ptxVersion := target.ptxVersion,
         sm := target.sm,
-        withBias := false
+        withBias := false,
+        variant
       }
       let rc ← TinyGrad4.Backend.LeanPtxEmit.emit emitCfg
       if rc != 0 then
@@ -399,12 +418,23 @@ def ensureConfigBias (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMa
   let target ← getCudaTarget
   let kernelName := leanKernelName true
   let params0 := presetParams preset
-  let params :=
+  let useLeanBasic :=
     match TinyGrad4.Backend.LeanPtxEmit.tileShape params0.blockM params0.blockN params0.numWarps with
-    | some _ => params0
-    | none => presetParams .leanBasic
+    | some _ => false
+    | none => true
+  let params := if useLeanBasic then presetParams .leanBasic else params0
+  let defaultVariant :=
+    if useLeanBasic then
+      TinyGrad4.Backend.LeanPtxEmit.PtxVariant.basic
+    else
+      TinyGrad4.Backend.LeanPtxEmit.PtxVariant.tiled
+  let variant ←
+    match ← TinyGrad4.Backend.LeanPtxEmit.variantFromEnv with
+    | some v => pure v
+    | none => pure defaultVariant
+  let variantTag := leanVariantTag variant
   let dir ← ptxDir
-  let ptxPath := leanPtxPath dir target m n k params.blockM params.blockN params.blockK params.numWarps true
+  let ptxPath := leanPtxPath dir target m n k params.blockM params.blockN params.blockK params.numWarps variantTag true
   if !(← ptxPath.pathExists) || (← envFlag "TG4_TRITON_FORCE") then
     let emitCfg : TinyGrad4.Backend.LeanPtxEmit.EmitConfig := {
       ptxPath,
@@ -418,7 +448,8 @@ def ensureConfigBias (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMa
       numWarps := params.numWarps,
       ptxVersion := target.ptxVersion,
       sm := target.sm,
-      withBias := true
+      withBias := true,
+      variant
     }
     let rc ← TinyGrad4.Backend.LeanPtxEmit.emit emitCfg
     if rc != 0 then

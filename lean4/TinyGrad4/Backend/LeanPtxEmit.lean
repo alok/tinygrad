@@ -330,6 +330,11 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
   let threads := cfg.numWarps * 32
   let totalA := cfg.blockM * cfg.blockK
   let totalB := cfg.blockK * cfg.blockN
+  let useVec2 := cfg.blockK % 2 == 0 && cfg.blockN % 2 == 0
+  let blockK2 := cfg.blockK / 2
+  let blockN2 := cfg.blockN / 2
+  let totalA2 := cfg.blockM * blockK2
+  let totalB2 := cfg.blockK * blockN2
   let accReg := fun i j => fReg (aBase - accCount + i * tileN + j)
   let aReg := fun i => fReg (aBase + i)
   let bReg := fun j => fReg (bBase + j)
@@ -398,46 +403,108 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
       , ""
       , "  mov.u32 %r10, %r2;"
       , "ALOAD_LOOP:"
-      , s!"  setp.ge.u32 %p1, %r10, {totalA};"
+      , s!"  setp.ge.u32 %p1, %r10, {if useVec2 then totalA2 else totalA};"
       , "  @%p1 bra ALOAD_DONE;"
-      , s!"  div.u32 %r11, %r10, {cfg.blockK};"
-      , s!"  rem.u32 %r14, %r10, {cfg.blockK};"
-      , "  add.u32 %r15, %r7, %r11;"
-      , "  add.u32 %r18, %r9, %r14;"
-      , s!"  mul.lo.u32 %r19, %r15, {cfg.k};"
-      , "  add.u32 %r19, %r19, %r18;"
-      , "  mul.wide.u32 %rd4, %r19, 2;"
-      , "  add.u64 %rd5, %rd1, %rd4;"
-      , "  ld.global.u16 %h0, [%rd5];"
-      , "  mul.wide.u32 %rd4, %r10, 2;"
-      , "  add.u64 %rd5, %rd6, %rd4;"
-      , "  st.shared.u16 [%rd5], %h0;"
-      , s!"  add.u32 %r10, %r10, {threads};"
-      , "  bra ALOAD_LOOP;"
-      , "ALOAD_DONE:"
-      , ""
-      , "  mov.u32 %r10, %r2;"
-      , "BLOAD_LOOP:"
-      , s!"  setp.ge.u32 %p1, %r10, {totalB};"
-      , "  @%p1 bra BLOAD_DONE;"
-      , s!"  div.u32 %r11, %r10, {cfg.blockN};"
-      , s!"  rem.u32 %r14, %r10, {cfg.blockN};"
-      , "  add.u32 %r15, %r9, %r11;"
-      , "  add.u32 %r18, %r8, %r14;"
-      , s!"  mul.lo.u32 %r19, %r15, {cfg.n};"
-      , "  add.u32 %r19, %r19, %r18;"
-      , "  mul.wide.u32 %rd4, %r19, 2;"
-      , "  add.u64 %rd5, %rd2, %rd4;"
-      , "  ld.global.u16 %h1, [%rd5];"
-      , "  mul.wide.u32 %rd4, %r10, 2;"
-      , "  add.u64 %rd5, %rd7, %rd4;"
-      , "  st.shared.u16 [%rd5], %h1;"
-      , s!"  add.u32 %r10, %r10, {threads};"
-      , "  bra BLOAD_LOOP;"
-      , "BLOAD_DONE:"
-      , "  bar.sync 0;"
       ] do
     lines := lines.push line
+
+  if useVec2 then
+    for line in
+        [ s!"  div.u32 %r11, %r10, {blockK2};"
+        , s!"  rem.u32 %r14, %r10, {blockK2};"
+        , "  mul.lo.u32 %r14, %r14, 2;"
+        , "  add.u32 %r15, %r7, %r11;"
+        , "  add.u32 %r18, %r9, %r14;"
+        , s!"  mul.lo.u32 %r19, %r15, {cfg.k};"
+        , "  add.u32 %r19, %r19, %r18;"
+        , "  mul.wide.u32 %rd4, %r19, 2;"
+        , "  add.u64 %rd5, %rd1, %rd4;"
+        , "  ld.global.v2.b16 {%h0, %h1}, [%rd5];"
+        , s!"  mul.lo.u32 %r19, %r11, {cfg.blockK};"
+        , "  add.u32 %r19, %r19, %r14;"
+        , "  mul.wide.u32 %rd4, %r19, 2;"
+        , "  add.u64 %rd5, %rd6, %rd4;"
+        , "  st.shared.v2.b16 [%rd5], {%h0, %h1};"
+        , s!"  add.u32 %r10, %r10, {threads};"
+        , "  bra ALOAD_LOOP;"
+        , "ALOAD_DONE:"
+        , ""
+        , "  mov.u32 %r10, %r2;"
+        , "BLOAD_LOOP:"
+        , s!"  setp.ge.u32 %p1, %r10, {totalB2};"
+        , "  @%p1 bra BLOAD_DONE;"
+        , ""
+        ] do
+      lines := lines.push line
+  else
+    for line in
+        [ s!"  div.u32 %r11, %r10, {cfg.blockK};"
+        , s!"  rem.u32 %r14, %r10, {cfg.blockK};"
+        , "  add.u32 %r15, %r7, %r11;"
+        , "  add.u32 %r18, %r9, %r14;"
+        , s!"  mul.lo.u32 %r19, %r15, {cfg.k};"
+        , "  add.u32 %r19, %r19, %r18;"
+        , "  mul.wide.u32 %rd4, %r19, 2;"
+        , "  add.u64 %rd5, %rd1, %rd4;"
+        , "  ld.global.u16 %h0, [%rd5];"
+        , "  mul.wide.u32 %rd4, %r10, 2;"
+        , "  add.u64 %rd5, %rd6, %rd4;"
+        , "  st.shared.u16 [%rd5], %h0;"
+        , s!"  add.u32 %r10, %r10, {threads};"
+        , "  bra ALOAD_LOOP;"
+        , "ALOAD_DONE:"
+        , ""
+        , "  mov.u32 %r10, %r2;"
+        , "BLOAD_LOOP:"
+        , s!"  setp.ge.u32 %p1, %r10, {totalB};"
+        , "  @%p1 bra BLOAD_DONE;"
+        , ""
+        ] do
+      lines := lines.push line
+
+  if useVec2 then
+    for line in
+        [ s!"  div.u32 %r11, %r10, {blockN2};"
+        , s!"  rem.u32 %r14, %r10, {blockN2};"
+        , "  mul.lo.u32 %r14, %r14, 2;"
+        , "  add.u32 %r15, %r9, %r11;"
+        , "  add.u32 %r18, %r8, %r14;"
+        , s!"  mul.lo.u32 %r19, %r15, {cfg.n};"
+        , "  add.u32 %r19, %r19, %r18;"
+        , "  mul.wide.u32 %rd4, %r19, 2;"
+        , "  add.u64 %rd5, %rd2, %rd4;"
+        , "  ld.global.v2.b16 {%h0, %h1}, [%rd5];"
+        , s!"  mul.lo.u32 %r19, %r11, {cfg.blockN};"
+        , "  add.u32 %r19, %r19, %r14;"
+        , "  mul.wide.u32 %rd4, %r19, 2;"
+        , "  add.u64 %rd5, %rd7, %rd4;"
+        , "  st.shared.v2.b16 [%rd5], {%h0, %h1};"
+        , s!"  add.u32 %r10, %r10, {threads};"
+        , "  bra BLOAD_LOOP;"
+        , "BLOAD_DONE:"
+        , "  bar.sync 0;"
+        ] do
+      lines := lines.push line
+  else
+    for line in
+        [ s!"  div.u32 %r11, %r10, {cfg.blockN};"
+        , s!"  rem.u32 %r14, %r10, {cfg.blockN};"
+        , "  add.u32 %r15, %r9, %r11;"
+        , "  add.u32 %r18, %r8, %r14;"
+        , s!"  mul.lo.u32 %r19, %r15, {cfg.n};"
+        , "  add.u32 %r19, %r19, %r18;"
+        , "  mul.wide.u32 %rd4, %r19, 2;"
+        , "  add.u64 %rd5, %rd2, %rd4;"
+        , "  ld.global.u16 %h1, [%rd5];"
+        , "  mul.wide.u32 %rd4, %r10, 2;"
+        , "  add.u64 %rd5, %rd7, %rd4;"
+        , "  st.shared.u16 [%rd5], %h1;"
+        , s!"  add.u32 %r10, %r10, {threads};"
+        , "  bra BLOAD_LOOP;"
+        , "BLOAD_DONE:"
+        , "  bar.sync 0;"
+        ] do
+      lines := lines.push line
 
   for line in
       [ "  mov.u32 %r10, 0;"

@@ -19,6 +19,10 @@ structure EmitConfig where
   m : Nat
   n : Nat
   k : Nat
+  blockM : Nat := 1
+  blockN : Nat := 1
+  blockK : Nat := 1
+  numWarps : Nat := 1
   ptxVersion : Nat
   sm : Nat
   withBias : Bool := false
@@ -67,7 +71,25 @@ private def biasBodyLines (cfg : EmitConfig) : List String :=
   else
     []
 
-private def ptxLines (cfg : EmitConfig) : List String :=
+def tileShape (blockM blockN numWarps : Nat) : Option (Nat × Nat) :=
+  if blockM == 64 && blockN == 64 && numWarps == 4 then
+    some (8, 4)
+  else if blockM == 64 && blockN == 128 && numWarps == 4 then
+    some (8, 8)
+  else if blockM == 128 && blockN == 128 && numWarps == 8 then
+    some (8, 8)
+  else
+    none
+
+private def tileShapeFor (cfg : EmitConfig) : Option (Nat × Nat) :=
+  tileShape cfg.blockM cfg.blockN cfg.numWarps
+
+private def fReg (idx : Nat) : String := s!"%f{idx}"
+private def rReg (idx : Nat) : String := s!"%r{idx}"
+private def rdReg (idx : Nat) : String := s!"%rd{idx}"
+private def hReg (idx : Nat) : String := s!"%h{idx}"
+
+private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   [ s!".version {ptxVersionString cfg.ptxVersion}"
   , s!".target sm_{cfg.sm}"
   , ".address_size 64"
@@ -126,6 +148,158 @@ private def ptxLines (cfg : EmitConfig) : List String :=
   , "  ret;"
   , "}"
   ]
+
+private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String := Id.run do
+  let tilesPerRow := cfg.blockN / tileN
+  let tilesPerCol := cfg.blockM / tileM
+  let accCount := tileM * tileN
+  let aBase := accCount
+  let bBase := accCount + tileM
+  let tempBase := bBase + tileN
+  let fCount := tempBase + 1
+  let rCount := 16
+  let rdCount := if cfg.withBias then 7 else 6
+  let hCount := if cfg.withBias then 3 else 2
+  let accReg := fun i j => fReg (aBase - accCount + i * tileN + j)
+  let aReg := fun i => fReg (aBase + i)
+  let bReg := fun j => fReg (bBase + j)
+  let tempReg := fReg tempBase
+  let mut lines : Array String := #[]
+  for line in
+      [ s!".version {ptxVersionString cfg.ptxVersion}"
+      , s!".target sm_{cfg.sm}"
+      , ".address_size 64"
+      , ""
+      , s!".visible .entry {cfg.kernelName}(" ] do
+    lines := lines.push line
+  for line in paramLines cfg.withBias do
+    lines := lines.push line
+  for line in
+      [ ")"
+      , "{"
+      , "  .reg .pred %p<2>;"
+      , s!"  .reg .b32 %r<{rCount}>;"
+      , s!"  .reg .b64 %rd<{rdCount}>;"
+      , s!"  .reg .f32 %f<{fCount}>;"
+      , s!"  .reg .b16 %h<{hCount}>;"
+      , ""
+      , "  ld.param.u64 %rd0, [c_ptr];"
+      , "  ld.param.u64 %rd1, [a_ptr];"
+      , "  ld.param.u64 %rd2, [b_ptr];"
+      ] do
+    lines := lines.push line
+  for line in biasParamLine cfg do
+    lines := lines.push line
+  for line in
+      [ "  mov.u32 %r0, %ctaid.x;"
+      , "  mov.u32 %r1, %ctaid.y;"
+      , "  mov.u32 %r2, %tid.x;"
+      , s!"  mov.u32 %r3, {tilesPerRow};"
+      , s!"  mov.u32 %r4, {tilesPerCol};"
+      , "  div.u32 %r5, %r2, %r3;"
+      , "  rem.u32 %r6, %r2, %r3;"
+      , "  setp.ge.u32 %p0, %r5, %r4;"
+      , "  @%p0 bra DONE;"
+      , s!"  mul.lo.u32 %r7, %r0, {cfg.blockM};"
+      , s!"  mul.lo.u32 %r15, %r5, {tileM};"
+      , "  add.u32 %r7, %r7, %r15;"
+      , s!"  mul.lo.u32 %r8, %r1, {cfg.blockN};"
+      , s!"  mul.lo.u32 %r15, %r6, {tileN};"
+      , "  add.u32 %r8, %r8, %r15;"
+      , ""
+      ] do
+    lines := lines.push line
+
+  for i in List.range accCount do
+    lines := lines.push s!"  mov.f32 {fReg i}, 0f00000000;"
+
+  for line in
+      [ "  mov.u32 %r9, 0;"
+      , "K_LOOP:"
+      , s!"  setp.ge.u32 %p1, %r9, {cfg.k};"
+      , "  @%p1 bra K_DONE;"
+      , s!"  mul.lo.u32 %r13, %r9, {cfg.n};"
+      ] do
+    lines := lines.push line
+
+  for i in List.range tileM do
+    for line in
+        [ s!"  add.u32 %r10, %r7, {i};"
+        , s!"  mul.lo.u32 %r12, %r10, {cfg.k};"
+        , "  add.u32 %r14, %r12, %r9;"
+        , "  mul.wide.u32 %rd4, %r14, 2;"
+        , "  add.u64 %rd5, %rd1, %rd4;"
+        , "  ld.global.u16 %h0, [%rd5];"
+        , s!"  cvt.f32.f16 {aReg i}, %h0;"
+        ] do
+      lines := lines.push line
+
+  for j in List.range tileN do
+    for line in
+        [ s!"  add.u32 %r11, %r8, {j};"
+        , "  add.u32 %r14, %r13, %r11;"
+        , "  mul.wide.u32 %rd4, %r14, 2;"
+        , "  add.u64 %rd5, %rd2, %rd4;"
+        , "  ld.global.u16 %h1, [%rd5];"
+        , s!"  cvt.f32.f16 {bReg j}, %h1;"
+        ] do
+      lines := lines.push line
+
+  for i in List.range tileM do
+    for j in List.range tileN do
+      lines := lines.push s!"  fma.rn.f32 {accReg i j}, {aReg i}, {bReg j}, {accReg i j};"
+
+  for line in
+      [ "  add.u32 %r9, %r9, 1;"
+      , "  bra K_LOOP;"
+      , "K_DONE:"
+      ] do
+    lines := lines.push line
+
+  if cfg.withBias then
+    for j in List.range tileN do
+      for line in
+          [ s!"  add.u32 %r11, %r8, {j};"
+          , "  mul.wide.u32 %rd4, %r11, 2;"
+          , "  add.u64 %rd5, %rd3, %rd4;"
+          , "  ld.global.u16 %h2, [%rd5];"
+          , s!"  cvt.f32.f16 {tempReg}, %h2;"
+          ] do
+        lines := lines.push line
+      for i in List.range tileM do
+        lines := lines.push s!"  add.f32 {accReg i j}, {accReg i j}, {tempReg};"
+
+  for i in List.range tileM do
+    for j in List.range tileN do
+      for line in
+          [ s!"  add.u32 %r10, %r7, {i};"
+          , s!"  add.u32 %r11, %r8, {j};"
+          , s!"  mul.lo.u32 %r12, %r10, {cfg.n};"
+          , "  add.u32 %r14, %r12, %r11;"
+          , "  mul.wide.u32 %rd4, %r14, 2;"
+          , "  add.u64 %rd5, %rd0, %rd4;"
+          , s!"  cvt.rn.f16.f32 %h0, {accReg i j};"
+          , "  st.global.u16 [%rd5], %h0;"
+          ] do
+        lines := lines.push line
+
+  for line in
+      [ "DONE:"
+      , "  ret;"
+      , "}"
+      ] do
+    lines := lines.push line
+  return lines.toList
+
+private def ptxLines (cfg : EmitConfig) : List String :=
+  match tileShapeFor cfg with
+  | some (tileM, tileN) =>
+    if cfg.blockM == 1 && cfg.blockN == 1 then
+      ptxLinesBasic cfg
+    else
+      ptxLinesTiled cfg tileM tileN
+  | none =>
+    ptxLinesBasic cfg
 
 private def ptxSource (cfg : EmitConfig) : String :=
   String.intercalate "\n" (ptxLines cfg)

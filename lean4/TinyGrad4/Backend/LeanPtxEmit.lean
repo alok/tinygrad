@@ -22,6 +22,8 @@ Environment (for `emitFromEnv`):
 - TG4_TRITON_PTX (optional path override)
 - TG4_TRITON_PTX_DIR (optional cache dir)
 - TG4_TRITON_WITH_BIAS (optional)
+- TG4_TRITON_SCALE_BITS (optional UInt32 bits for scale constant)
+- TG4_TRITON_RELU (optional)
 - TG4_TRITON_LEAN_VARIANT (basic|tiled|smem)
 - TG4_TRITON_FORCE (overwrite)
 - TG4_TRITON_DUMP (write `{ptxPath}.dump`)
@@ -57,6 +59,8 @@ structure EmitConfig where
   ptxVersion : Nat
   sm : Nat
   withBias : Bool := false
+  scaleBits : Option UInt32 := none
+  relu : Bool := false
   variant : PtxVariant := .tiled
 
 structure EmitOverride where
@@ -78,6 +82,8 @@ structure EmitOverride where
   ptxVersion? : Option Nat := none
   sm? : Option Nat := none
   withBias? : Option Bool := none
+  scaleBits? : Option UInt32 := none
+  relu? : Option Bool := none
   variant? : Option PtxVariant := none
 
 def parseVariant (value : String) : Option PtxVariant :=
@@ -149,6 +155,10 @@ private def applyOverride (base : EmitConfig) (ov : EmitOverride) : EmitConfig :
   let strideCn := match ov.strideCn? with
     | some v => v
     | none => if shapeChanged then 1 else base.strideCn
+  let scaleBits := match ov.scaleBits? with
+    | some v => some v
+    | none => base.scaleBits
+  let relu := ov.relu?.getD base.relu
   { base with
     ptxPath := ov.ptxPath?.getD base.ptxPath
     kernelName := ov.kernelName?.getD base.kernelName
@@ -168,6 +178,8 @@ private def applyOverride (base : EmitConfig) (ov : EmitOverride) : EmitConfig :
     ptxVersion := ov.ptxVersion?.getD base.ptxVersion
     sm := ov.sm?.getD base.sm
     withBias := ov.withBias?.getD base.withBias
+    scaleBits,
+    relu,
     variant := ov.variant?.getD base.variant }
 
 private def ptxVersionFromDriver (driver : Nat) : Nat :=
@@ -225,6 +237,36 @@ private def biasBodyLines (cfg : EmitConfig) : List String :=
     , "  cvt.f32.f16 %f1, %h2"
     , "  add.f32 %f0, %f0, %f1"
     ]
+  else
+    []
+
+private def hexDigit (n : Nat) : Char :=
+  if n < 10 then
+    Char.ofNat (n + 48)
+  else
+    Char.ofNat (n - 10 + 97)
+
+private def hex8 (v : UInt32) : String :=
+  let rec go (i : Nat) (n : Nat) (acc : List Char) : List Char :=
+    match i with
+    | 0 => acc
+    | i + 1 =>
+      let digit := n % 16
+      let ch := hexDigit digit
+      go i (n / 16) (ch :: acc)
+  String.ofList (go 8 v.toNat [])
+
+private def fImm (bits : UInt32) : String :=
+  s!"0f{hex8 bits}"
+
+private def scaleBodyLinesBasic (cfg : EmitConfig) : List String :=
+  match cfg.scaleBits with
+  | none => []
+  | some bits => [s!"  mul.f32 %f0, %f0, {fImm bits}"]
+
+private def reluBodyLinesBasic (cfg : EmitConfig) : List String :=
+  if cfg.relu then
+    ["  max.f32 %f0, %f0, 0f00000000"]
   else
     []
 
@@ -296,7 +338,9 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   , "  bra LOOP;"
   , "LOOP_END:"
   ]
-  ++ biasBodyLines cfg ++
+  ++ scaleBodyLinesBasic cfg ++
+  biasBodyLines cfg ++
+  reluBodyLinesBasic cfg ++
   [ s!"  mul.lo.u32 %r8, %r0, {cfg.strideCm};"
   , s!"  mul.lo.u32 %r9, %r1, {cfg.strideCn};"
   , "  add.u32 %r9, %r8, %r9;"
@@ -420,6 +464,12 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
       ] do
     lines := lines.push line
 
+  if let some bits := cfg.scaleBits then
+    let imm := fImm bits
+    for i in List.range tileM do
+      for j in List.range tileN do
+        lines := lines.push s!"  mul.f32 {accReg i j}, {accReg i j}, {imm};"
+
   if cfg.withBias then
     for j in List.range tileN do
       for line in
@@ -433,6 +483,11 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
         lines := lines.push line
       for i in List.range tileM do
         lines := lines.push s!"  add.f32 {accReg i j}, {accReg i j}, {tempReg};"
+
+  if cfg.relu then
+    for i in List.range tileM do
+      for j in List.range tileN do
+        lines := lines.push s!"  max.f32 {accReg i j}, {accReg i j}, 0f00000000;"
 
   for i in List.range tileM do
     for j in List.range tileN do
@@ -699,6 +754,12 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
       ] do
     lines := lines.push line
 
+  if let some bits := cfg.scaleBits then
+    let imm := fImm bits
+    for i in List.range tileM do
+      for j in List.range tileN do
+        lines := lines.push s!"  mul.f32 {accReg i j}, {accReg i j}, {imm};"
+
   if cfg.withBias then
     for j in List.range tileN do
       for line in
@@ -712,6 +773,11 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
         lines := lines.push line
       for i in List.range tileM do
         lines := lines.push s!"  add.f32 {accReg i j}, {accReg i j}, {tempReg};"
+
+  if cfg.relu then
+    for i in List.range tileM do
+      for j in List.range tileN do
+        lines := lines.push s!"  max.f32 {accReg i j}, {accReg i j}, 0f00000000;"
 
   for i in List.range tileM do
     for j in List.range tileN do
@@ -766,6 +832,8 @@ def configFromEnv : IO EmitConfig := do
   let strideBn ← envNatDefault "TG4_TRITON_STRIDE_BN" 1
   let strideCm ← envNatDefault "TG4_TRITON_STRIDE_CM" n
   let strideCn ← envNatDefault "TG4_TRITON_STRIDE_CN" 1
+  let scaleBits := (← envNat? "TG4_TRITON_SCALE_BITS").map UInt32.ofNat
+  let relu ← envFlag "TG4_TRITON_RELU"
   let blockM ← requireEnvNat "TG4_TRITON_BLOCK_M"
   let blockN ← requireEnvNat "TG4_TRITON_BLOCK_N"
   let blockK ← requireEnvNat "TG4_TRITON_BLOCK_K"
@@ -781,7 +849,13 @@ def configFromEnv : IO EmitConfig := do
     | some ptx => pure (System.FilePath.mk ptx)
     | none =>
       let dir ← ptxDir
-      let tag := if withBias then "lean_bias" else "lean"
+      let baseTag := if withBias then "lean_bias" else "lean"
+      let scaleTag :=
+        match scaleBits with
+        | some bits => s!"_s{hex8 bits}"
+        | none => ""
+      let reluTag := if relu then "_relu" else ""
+      let tag := s!"{baseTag}{scaleTag}{reluTag}"
       let vtag := variantTag variant
       pure (dir / s!"{tag}_{vtag}_sm{sm}_ptx{ptxVersion}_{m}x{n}x{k}_bm{blockM}bn{blockN}bk{blockK}w{numWarps}.ptx")
   pure {
@@ -803,6 +877,8 @@ def configFromEnv : IO EmitConfig := do
     ptxVersion,
     sm,
     withBias,
+    scaleBits,
+    relu,
     variant
   }
 

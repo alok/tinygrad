@@ -83,9 +83,35 @@ private def leanVariantTag (variant : TinyGrad4.Backend.LeanPtxEmit.PtxVariant) 
   | .tiled => "tiled"
   | .smem => "smem"
 
+private def hexDigit (n : Nat) : Char :=
+  if n < 10 then
+    Char.ofNat (n + 48)
+  else
+    Char.ofNat (n - 10 + 97)
+
+private def hex8 (v : UInt32) : String :=
+  let rec go (n : Nat) (count : Nat) (acc : List Char) : List Char :=
+    match count with
+    | 0 => acc
+    | count + 1 =>
+      let digit := n % 16
+      let ch := hexDigit digit
+      go (n / 16) count (ch :: acc)
+  String.ofList (go v.toNat 8 [])
+
+private def scaleTag (scaleBits : Option UInt32) : String :=
+  match scaleBits with
+  | some bits => s!"_s{hex8 bits}"
+  | none => ""
+
+private def reluTag (relu : Bool) : String :=
+  if relu then "_relu" else ""
+
 private def leanPtxPath (dir : System.FilePath) (target : CudaTarget)
-    (m n k blockM blockN blockK numWarps : Nat) (variantTag : String) (withBias : Bool) : System.FilePath :=
-  let tag := if withBias then "lean_bias" else "lean"
+    (m n k blockM blockN blockK numWarps : Nat) (variantTag : String)
+    (withBias : Bool) (scaleBits : Option UInt32) (relu : Bool) : System.FilePath :=
+  let baseTag := if withBias then "lean_bias" else "lean"
+  let tag := s!"{baseTag}{scaleTag scaleBits}{reluTag relu}"
   dir / s!"{tag}_{variantTag}_sm{target.sm}_ptx{target.ptxVersion}_{m}x{n}x{k}_bm{blockM}bn{blockN}bk{blockK}w{numWarps}.ptx"
 
 -- Triton PTX emit helpers removed; Lean PTX generator is the default path now.
@@ -119,9 +145,15 @@ structure TritonMatmulConfig where
   expectedM : Nat
   expectedN : Nat
   expectedK : Nat
+  scaleBits : Option UInt32 := none
+  relu : Bool := false
 
 private def ensure (cond : Bool) (msg : String) : IO Unit :=
   if cond then pure () else throw (IO.userError msg)
+
+private def configMatches (cfg : TritonMatmulConfig) (m n k : Nat) (scaleBits : Option UInt32) (relu : Bool) : Bool :=
+  cfg.expectedM == m && cfg.expectedN == n && cfg.expectedK == k &&
+    cfg.scaleBits == scaleBits && cfg.relu == relu
 
 private def ceilDiv (a b : Nat) : Nat :=
   (a + b - 1) / b
@@ -259,7 +291,9 @@ def loadConfigFromEnv : IO (Option TritonMatmulConfig) := do
       paramCount,
       expectedM,
       expectedN,
-      expectedK
+      expectedK,
+      scaleBits := none,
+      relu := false
     }
 
 /-- Load Triton bias config from environment variables (requires TG4_TRITON_WITH_BIAS=1). -/
@@ -296,7 +330,9 @@ def loadBiasConfigFromEnv : IO (Option TritonMatmulConfig) := do
     paramCount,
     expectedM,
     expectedN,
-    expectedK
+    expectedK,
+    scaleBits := none,
+    relu := false
   }
 
 /-- Load (and memoize) Triton config from the environment. -/
@@ -334,17 +370,28 @@ def getDefaultPreset : IO (Option TritonPreset) :=
   tritonPresetCache.get
 
 /-- Emit PTX + configure Triton based on a preset when env config is missing. -/
-def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmulConfig) := do
+def ensureConfig (preset : TritonPreset) (m n k : Nat) (scaleBits : Option UInt32 := none) (relu : Bool := false) :
+    IO (Option TritonMatmulConfig) := do
   match ← tritonConfigCache.get with
-  | some (some cfg) => return some cfg
+  | some (some cfg) =>
+    if configMatches cfg m n k scaleBits relu then
+      return some cfg
   | _ => pure ()
 
   let envCfg? ← loadConfigFromEnv
-  match envCfg? with
+  let cfgFromEnv? :=
+    match envCfg? with
+    | some cfg =>
+      if configMatches cfg m n k scaleBits relu then
+        some cfg
+      else
+        none
+    | none => none
+  match cfgFromEnv? with
   | some cfg =>
     setConfig (some cfg)
     return some cfg
-  | none =>
+  | none => do
     let target ← getCudaTarget
     let kernelName := leanKernelName false
     let params0 := presetParams preset
@@ -364,7 +411,8 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
       | none => pure defaultVariant
     let variantTag := leanVariantTag variant
     let dir ← ptxDir
-    let ptxPath := leanPtxPath dir target m n k params.blockM params.blockN params.blockK params.numWarps variantTag false
+    let ptxPath :=
+      leanPtxPath dir target m n k params.blockM params.blockN params.blockK params.numWarps variantTag false scaleBits relu
     if !(← ptxPath.pathExists) || (← envFlag "TG4_TRITON_FORCE") then
       let emitCfg : TinyGrad4.Backend.LeanPtxEmit.EmitConfig := {
         ptxPath,
@@ -385,6 +433,8 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
         ptxVersion := target.ptxVersion,
         sm := target.sm,
         withBias := false,
+        scaleBits,
+        relu,
         variant
       }
       let rc ← TinyGrad4.Backend.LeanPtxEmit.emit emitCfg
@@ -404,89 +454,106 @@ def ensureConfig (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmul
       paramCount,
       expectedM := m,
       expectedN := n,
-      expectedK := k
+      expectedK := k,
+      scaleBits,
+      relu
     }
     setConfig (some cfg)
     return some cfg
 
 /-- Emit PTX + configure Triton for a fused bias kernel. -/
-def ensureConfigBias (preset : TritonPreset) (m n k : Nat) : IO (Option TritonMatmulConfig) := do
+def ensureConfigBias (preset : TritonPreset) (m n k : Nat) (scaleBits : Option UInt32 := none) (relu : Bool := false) :
+    IO (Option TritonMatmulConfig) := do
   match ← tritonBiasConfigCache.get with
-  | some (some cfg) => return some cfg
+  | some (some cfg) =>
+    if configMatches cfg m n k scaleBits relu then
+      return some cfg
   | _ => pure ()
 
   let envCfg? ← loadBiasConfigFromEnv
-  match envCfg? with
+  let cfgFromEnv? :=
+    match envCfg? with
+    | some cfg =>
+      if configMatches cfg m n k scaleBits relu then
+        some cfg
+      else
+        none
+    | none => none
+  match cfgFromEnv? with
   | some cfg =>
     tritonBiasConfigCache.set (some (some cfg))
     return some cfg
-  | none => pure ()
-
-  let target ← getCudaTarget
-  let kernelName := leanKernelName true
-  let params0 := presetParams preset
-  let useLeanBasic :=
-    match TinyGrad4.Backend.LeanPtxEmit.tileShape params0.blockM params0.blockN params0.numWarps with
-    | some _ => false
-    | none => true
-  let params := if useLeanBasic then presetParams .leanBasic else params0
-  let defaultVariant :=
-    if useLeanBasic then
-      TinyGrad4.Backend.LeanPtxEmit.PtxVariant.basic
-    else
-      TinyGrad4.Backend.LeanPtxEmit.PtxVariant.tiled
-  let variant ←
-    match ← TinyGrad4.Backend.LeanPtxEmit.variantFromEnv with
-    | some v => pure v
-    | none => pure defaultVariant
-  let variantTag := leanVariantTag variant
-  let dir ← ptxDir
-  let ptxPath := leanPtxPath dir target m n k params.blockM params.blockN params.blockK params.numWarps variantTag true
-  if !(← ptxPath.pathExists) || (← envFlag "TG4_TRITON_FORCE") then
-    let emitCfg : TinyGrad4.Backend.LeanPtxEmit.EmitConfig := {
-      ptxPath,
+  | none => do
+    let target ← getCudaTarget
+    let kernelName := leanKernelName true
+    let params0 := presetParams preset
+    let useLeanBasic :=
+      match TinyGrad4.Backend.LeanPtxEmit.tileShape params0.blockM params0.blockN params0.numWarps with
+      | some _ => false
+      | none => true
+    let params := if useLeanBasic then presetParams .leanBasic else params0
+    let defaultVariant :=
+      if useLeanBasic then
+        TinyGrad4.Backend.LeanPtxEmit.PtxVariant.basic
+      else
+        TinyGrad4.Backend.LeanPtxEmit.PtxVariant.tiled
+    let variant ←
+      match ← TinyGrad4.Backend.LeanPtxEmit.variantFromEnv with
+      | some v => pure v
+      | none => pure defaultVariant
+    let variantTag := leanVariantTag variant
+    let dir ← ptxDir
+    let ptxPath :=
+      leanPtxPath dir target m n k params.blockM params.blockN params.blockK params.numWarps variantTag true scaleBits relu
+    if !(← ptxPath.pathExists) || (← envFlag "TG4_TRITON_FORCE") then
+      let emitCfg : TinyGrad4.Backend.LeanPtxEmit.EmitConfig := {
+        ptxPath,
+        kernelName,
+        m,
+        n,
+        k,
+        strideAm := k,
+        strideAk := 1,
+        strideBk := n,
+        strideBn := 1,
+        strideCm := n,
+        strideCn := 1,
+        blockM := params.blockM,
+        blockN := params.blockN,
+        blockK := params.blockK,
+        numWarps := params.numWarps,
+        ptxVersion := target.ptxVersion,
+        sm := target.sm,
+        withBias := true,
+        scaleBits,
+        relu,
+        variant
+      }
+      let rc ← TinyGrad4.Backend.LeanPtxEmit.emit emitCfg
+      if rc != 0 then
+        return none
+    if !(← ptxPath.pathExists) then
+      return none
+    let paramCount ← kernelParamCount ptxPath kernelName
+    if paramCount < 4 then
+      return none
+    let cfg : TritonMatmulConfig := {
       kernelName,
-      m,
-      n,
-      k,
-      strideAm := k,
-      strideAk := 1,
-      strideBk := n,
-      strideBn := 1,
-      strideCm := n,
-      strideCn := 1,
+      ptxPath,
       blockM := params.blockM,
       blockN := params.blockN,
       blockK := params.blockK,
       numWarps := params.numWarps,
-      ptxVersion := target.ptxVersion,
-      sm := target.sm,
-      withBias := true,
-      variant
+      sharedBytes := 0,
+      paramCount,
+      expectedM := m,
+      expectedN := n,
+      expectedK := k,
+      scaleBits,
+      relu
     }
-    let rc ← TinyGrad4.Backend.LeanPtxEmit.emit emitCfg
-    if rc != 0 then
-      return none
-  if !(← ptxPath.pathExists) then
-    return none
-  let paramCount ← kernelParamCount ptxPath kernelName
-  if paramCount < 4 then
-    return none
-  let cfg : TritonMatmulConfig := {
-    kernelName,
-    ptxPath,
-    blockM := params.blockM,
-    blockN := params.blockN,
-    blockK := params.blockK,
-    numWarps := params.numWarps,
-    sharedBytes := 0,
-    paramCount,
-    expectedM := m,
-    expectedN := n,
-    expectedK := k
-  }
-  tritonBiasConfigCache.set (some (some cfg))
-  return some cfg
+    tritonBiasConfigCache.set (some (some cfg))
+    return some cfg
 
 /-- Load a PTX module from disk and bind the kernel. -/
 private def loadKernel (cfg : TritonMatmulConfig) : IO CUDAProgram := do
@@ -726,7 +793,7 @@ def tryMatmulF32ViaF16 (a b : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) :
   match cfg? with
   | none => return none
   | some cfg =>
-    if m != cfg.expectedM || n != cfg.expectedN || k != cfg.expectedK then
+    if !configMatches cfg m n k none false then
       return none
     if m % cfg.blockM != 0 || n % cfg.blockN != 0 || k % cfg.blockK != 0 then
       return none
@@ -736,28 +803,25 @@ def tryMatmulF32ViaF16 (a b : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) :
     catch _ =>
       return none
 
-/-- Attempt Triton matmul with bias for float32 inputs if CUDA is available. -/
-def tryMatmulF32ViaF16Bias (a b bias : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) := do
+/-- Attempt Triton matmul with bias + optional scale/relu for float32 inputs if CUDA is available. -/
+def tryMatmulF32ViaF16BiasScaleRelu (a b bias : RawBuffer) (m k n : Nat)
+    (scaleBits : Option UInt32) (relu : Bool) : IO (Option RawBuffer) := do
   if a.dtype != .float32 || b.dtype != .float32 || bias.dtype != .float32 then
     return none
   let available ← TinyGrad4.Backend.Cuda.isAvailable
   if !available then
     return none
-  let cfgEnv? ← getBiasConfigFromEnv
   let cfg? ←
-    match cfgEnv? with
-    | some cfg => pure (some cfg)
+    match ← getDefaultPreset with
+    | some preset => ensureConfigBias preset m n k scaleBits relu
     | none =>
-      match ← getDefaultPreset with
-      | some preset => ensureConfigBias preset m n k
-      | none =>
-        match choosePreset .float32 m n k with
-        | none => pure none
-        | some preset => ensureConfigBias preset m n k
+      match choosePreset .float32 m n k with
+      | none => pure none
+      | some preset => ensureConfigBias preset m n k scaleBits relu
   match cfg? with
   | none => return none
   | some cfg =>
-    if m != cfg.expectedM || n != cfg.expectedN || k != cfg.expectedK then
+    if !configMatches cfg m n k scaleBits relu then
       return none
     if m % cfg.blockM != 0 || n % cfg.blockN != 0 || k % cfg.blockK != 0 then
       return none
@@ -766,6 +830,10 @@ def tryMatmulF32ViaF16Bias (a b bias : RawBuffer) (m k n : Nat) : IO (Option Raw
       return some out
     catch _ =>
       return none
+
+/-- Attempt Triton matmul with bias for float32 inputs if CUDA is available. -/
+def tryMatmulF32ViaF16Bias (a b bias : RawBuffer) (m k n : Nat) : IO (Option RawBuffer) :=
+  tryMatmulF32ViaF16BiasScaleRelu a b bias m k n none false
 
 /-- Attempt batched Triton matmul for float32 inputs if configured and CUDA is available. -/
 def tryMatmulBatchedF32ViaF16 (a b : RawBuffer) (m k n : Nat)

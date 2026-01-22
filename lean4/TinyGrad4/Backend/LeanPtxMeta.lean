@@ -41,6 +41,17 @@ private def fieldType (name : Name) : Option Expr :=
   | "strideBn" => some (mkConst ``Nat)
   | "strideCm" => some (mkConst ``Nat)
   | "strideCn" => some (mkConst ``Nat)
+  | "aOffset" => some (mkConst ``Nat)
+  | "bOffset" => some (mkConst ``Nat)
+  | "cOffset" => some (mkConst ``Nat)
+  | "biasOffset" => some (mkConst ``Nat)
+  | "bias2Offset" => some (mkConst ``Nat)
+  | "maskMStart" => some (mkConst ``Nat)
+  | "maskMEnd" => some (mkConst ``Nat)
+  | "maskNStart" => some (mkConst ``Nat)
+  | "maskNEnd" => some (mkConst ``Nat)
+  | "maskKStart" => some (mkConst ``Nat)
+  | "maskKEnd" => some (mkConst ``Nat)
   | "blockM" => some (mkConst ``Nat)
   | "blockN" => some (mkConst ``Nat)
   | "blockK" => some (mkConst ``Nat)
@@ -67,6 +78,17 @@ private def overrideField (name : Name) : Option Name :=
   | "strideBn" => some `strideBn?
   | "strideCm" => some `strideCm?
   | "strideCn" => some `strideCn?
+  | "aOffset" => some `aOffset?
+  | "bOffset" => some `bOffset?
+  | "cOffset" => some `cOffset?
+  | "biasOffset" => some `biasOffset?
+  | "bias2Offset" => some `bias2Offset?
+  | "maskMStart" => some `maskMStart?
+  | "maskMEnd" => some `maskMEnd?
+  | "maskNStart" => some `maskNStart?
+  | "maskNEnd" => some `maskNEnd?
+  | "maskKStart" => some `maskKStart?
+  | "maskKEnd" => some `maskKEnd?
   | "blockM" => some `blockM?
   | "blockN" => some `blockN?
   | "blockK" => some `blockK?
@@ -114,6 +136,17 @@ private def buildOverrideExpr (fields : Array Syntax) : TermElabM Expr := do
     , (`strideBn?, mkNone (mkConst ``Nat))
     , (`strideCm?, mkNone (mkConst ``Nat))
     , (`strideCn?, mkNone (mkConst ``Nat))
+    , (`aOffset?, mkNone (mkConst ``Nat))
+    , (`bOffset?, mkNone (mkConst ``Nat))
+    , (`cOffset?, mkNone (mkConst ``Nat))
+    , (`biasOffset?, mkNone (mkConst ``Nat))
+    , (`bias2Offset?, mkNone (mkConst ``Nat))
+    , (`maskMStart?, mkNone (mkConst ``Nat))
+    , (`maskMEnd?, mkNone (mkConst ``Nat))
+    , (`maskNStart?, mkNone (mkConst ``Nat))
+    , (`maskNEnd?, mkNone (mkConst ``Nat))
+    , (`maskKStart?, mkNone (mkConst ``Nat))
+    , (`maskKEnd?, mkNone (mkConst ``Nat))
     , (`blockM?, mkNone (mkConst ``Nat))
     , (`blockN?, mkNone (mkConst ``Nat))
     , (`blockK?, mkNone (mkConst ``Nat))

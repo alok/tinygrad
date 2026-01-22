@@ -53,6 +53,17 @@ structure EmitConfig where
   strideBn : Nat
   strideCm : Nat
   strideCn : Nat
+  aOffset : Nat := 0
+  bOffset : Nat := 0
+  cOffset : Nat := 0
+  biasOffset : Nat := 0
+  bias2Offset : Nat := 0
+  maskMStart : Nat := 0
+  maskMEnd : Nat := 0
+  maskNStart : Nat := 0
+  maskNEnd : Nat := 0
+  maskKStart : Nat := 0
+  maskKEnd : Nat := 0
   blockM : Nat := 1
   blockN : Nat := 1
   blockK : Nat := 1
@@ -77,6 +88,17 @@ structure EmitOverride where
   strideBn? : Option Nat := none
   strideCm? : Option Nat := none
   strideCn? : Option Nat := none
+  aOffset? : Option Nat := none
+  bOffset? : Option Nat := none
+  cOffset? : Option Nat := none
+  biasOffset? : Option Nat := none
+  bias2Offset? : Option Nat := none
+  maskMStart? : Option Nat := none
+  maskMEnd? : Option Nat := none
+  maskNStart? : Option Nat := none
+  maskNEnd? : Option Nat := none
+  maskKStart? : Option Nat := none
+  maskKEnd? : Option Nat := none
   blockM? : Option Nat := none
   blockN? : Option Nat := none
   blockK? : Option Nat := none
@@ -158,6 +180,23 @@ private def applyOverride (base : EmitConfig) (ov : EmitOverride) : EmitConfig :
   let strideCn := match ov.strideCn? with
     | some v => v
     | none => if shapeChanged then 1 else base.strideCn
+  let aOffset := ov.aOffset?.getD base.aOffset
+  let bOffset := ov.bOffset?.getD base.bOffset
+  let cOffset := ov.cOffset?.getD base.cOffset
+  let biasOffset := ov.biasOffset?.getD base.biasOffset
+  let bias2Offset := ov.bias2Offset?.getD base.bias2Offset
+  let maskMStart := ov.maskMStart?.getD base.maskMStart
+  let maskMEnd := match ov.maskMEnd? with
+    | some v => v
+    | none => if shapeChanged then m else base.maskMEnd
+  let maskNStart := ov.maskNStart?.getD base.maskNStart
+  let maskNEnd := match ov.maskNEnd? with
+    | some v => v
+    | none => if shapeChanged then n else base.maskNEnd
+  let maskKStart := ov.maskKStart?.getD base.maskKStart
+  let maskKEnd := match ov.maskKEnd? with
+    | some v => v
+    | none => if shapeChanged then k else base.maskKEnd
   let scaleBits := match ov.scaleBits? with
     | some v => some v
     | none => base.scaleBits
@@ -177,6 +216,17 @@ private def applyOverride (base : EmitConfig) (ov : EmitOverride) : EmitConfig :
     strideBn,
     strideCm,
     strideCn,
+    aOffset,
+    bOffset,
+    cOffset,
+    biasOffset,
+    bias2Offset,
+    maskMStart,
+    maskMEnd,
+    maskNStart,
+    maskNEnd,
+    maskKStart,
+    maskKEnd,
     blockM := ov.blockM?.getD base.blockM
     blockN := ov.blockN?.getD base.blockN
     blockK := ov.blockK?.getD base.blockK
@@ -317,6 +367,20 @@ private def hReg (idx : Nat) : String := s!"%h{idx}"
 
 private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   let rdCount := if cfg.withBias2 then 11 else 10
+  let maskLines :=
+    [ s!"  setp.ge.u32 %p1, %r0, {cfg.maskMStart};"
+    , s!"  setp.lt.u32 %p2, %r0, {cfg.maskMEnd};"
+    , "  and.pred %p1, %p1, %p2;"
+    , s!"  setp.ge.u32 %p2, %r1, {cfg.maskNStart};"
+    , s!"  setp.lt.u32 %p3, %r1, {cfg.maskNEnd};"
+    , "  and.pred %p2, %p2, %p3;"
+    , "  and.pred %p1, %p1, %p2;"
+    , "  @!%p1 bra DONE;"
+    , ""
+    ]
+  let aOffsetLines := if cfg.aOffset == 0 then [] else [s!"  add.u32 %r5, %r5, {cfg.aOffset};"]
+  let bOffsetLines := if cfg.bOffset == 0 then [] else [s!"  add.u32 %r7, %r7, {cfg.bOffset};"]
+  let cOffsetLines := if cfg.cOffset == 0 then [] else [s!"  add.u32 %r9, %r9, {cfg.cOffset};"]
   [ s!".version {ptxVersionString cfg.ptxVersion}"
   , s!".target sm_{cfg.sm}"
   , ".address_size 64"
@@ -325,7 +389,7 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   ++ paramLines cfg ++
   [ ")"
   , "{"
-  , "  .reg .pred %p<2>;"
+  , "  .reg .pred %p<4>;"
   , "  .reg .b32 %r<12>;"
   , s!"  .reg .b64 %rd<{rdCount}>;"
   , "  .reg .f32 %f<3>;"
@@ -342,19 +406,24 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   , "  mov.u32 %r2, %tid.x;"
   , "  setp.ne.u32 %p0, %r2, 0;"
   , "  @%p0 bra DONE;"
-  , ""
-  , "  mov.f32 %f0, 0f00000000;"
-  , "  mov.u32 %r3, 0;"
+  ]
+  ++ maskLines ++
+  [ "  mov.f32 %f0, 0f00000000;"
+  , s!"  mov.u32 %r3, {cfg.maskKStart};"
   , "LOOP:"
-  , s!"  setp.ge.u32 %p1, %r3, {cfg.k};"
+  , s!"  setp.ge.u32 %p1, %r3, {cfg.maskKEnd};"
   , "  @%p1 bra LOOP_END;"
   , s!"  mul.lo.u32 %r4, %r0, {cfg.strideAm};"
   , s!"  mul.lo.u32 %r5, %r3, {cfg.strideAk};"
   , "  add.u32 %r5, %r4, %r5;"
-  , s!"  mul.lo.u32 %r6, %r3, {cfg.strideBk};"
+  ]
+  ++ aOffsetLines ++
+  [ s!"  mul.lo.u32 %r6, %r3, {cfg.strideBk};"
   , s!"  mul.lo.u32 %r7, %r1, {cfg.strideBn};"
   , "  add.u32 %r7, %r6, %r7;"
-  , "  mul.wide.u32 %rd4, %r5, 2;"
+  ]
+  ++ bOffsetLines ++
+  [ "  mul.wide.u32 %rd4, %r5, 2;"
   , "  add.u64 %rd5, %rd1, %rd4;"
   , "  ld.global.u16 %h0, [%rd5];"
   , "  cvt.f32.f16 %f1, %h0;"
@@ -374,7 +443,9 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   [ s!"  mul.lo.u32 %r8, %r0, {cfg.strideCm};"
   , s!"  mul.lo.u32 %r9, %r1, {cfg.strideCn};"
   , "  add.u32 %r9, %r8, %r9;"
-  , "  mul.wide.u32 %rd4, %r9, 2;"
+  ]
+  ++ cOffsetLines ++
+  [ "  mul.wide.u32 %rd4, %r9, 2;"
   , "  add.u64 %rd5, %rd0, %rd4;"
   , "  cvt.rn.f16.f32 %h0, %f0;"
   , "  st.global.u16 [%rd5], %h0;"
@@ -894,6 +965,17 @@ def configFromEnv : IO EmitConfig := do
   let strideBn ← envNatDefault "TG4_TRITON_STRIDE_BN" 1
   let strideCm ← envNatDefault "TG4_TRITON_STRIDE_CM" n
   let strideCn ← envNatDefault "TG4_TRITON_STRIDE_CN" 1
+  let aOffset ← envNatDefault "TG4_TRITON_A_OFFSET" 0
+  let bOffset ← envNatDefault "TG4_TRITON_B_OFFSET" 0
+  let cOffset ← envNatDefault "TG4_TRITON_C_OFFSET" 0
+  let biasOffset ← envNatDefault "TG4_TRITON_BIAS_OFFSET" 0
+  let bias2Offset ← envNatDefault "TG4_TRITON_BIAS2_OFFSET" 0
+  let maskMStart ← envNatDefault "TG4_TRITON_MASK_M_START" 0
+  let maskMEnd ← envNatDefault "TG4_TRITON_MASK_M_END" m
+  let maskNStart ← envNatDefault "TG4_TRITON_MASK_N_START" 0
+  let maskNEnd ← envNatDefault "TG4_TRITON_MASK_N_END" n
+  let maskKStart ← envNatDefault "TG4_TRITON_MASK_K_START" 0
+  let maskKEnd ← envNatDefault "TG4_TRITON_MASK_K_END" k
   let scaleBits := (← envNat? "TG4_TRITON_SCALE_BITS").map UInt32.ofNat
   let relu ← envFlag "TG4_TRITON_RELU"
   let blockM ← requireEnvNat "TG4_TRITON_BLOCK_M"
@@ -934,6 +1016,17 @@ def configFromEnv : IO EmitConfig := do
     strideBn,
     strideCm,
     strideCn,
+    aOffset,
+    bOffset,
+    cOffset,
+    biasOffset,
+    bias2Offset,
+    maskMStart,
+    maskMEnd,
+    maskNStart,
+    maskNEnd,
+    maskKStart,
+    maskKEnd,
     blockM,
     blockN,
     blockK,

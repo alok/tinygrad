@@ -54,7 +54,7 @@ def grad {s : List Nat} {d : DType} (loss : Scalar d) (param : StaticTensor s d)
     : UOpM (Option (StaticTensor s d)) := do
   let gradMap ← Autodiff.computeGradient loss.uop [param.uop]
   match gradMap[param.uop.uid]? with
-  | some gradUop => pure (some { uop := gradUop, h_shape := sorry_proof })
+  | some gradUop => pure (some (StaticTensor.ofUOp gradUop))
   | none => pure none
 
 end StaticTensor

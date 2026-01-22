@@ -214,7 +214,7 @@ def testWhereGradient : IO Unit := do
     let c ← Tensor.buffer [2] .bool
     let outUop ← UOp.where_ c.uop x.uop y.uop
     let lossUop ← UOp.sum outUop [] false
-    let loss : Scalar .float32 := { uop := lossUop, h_shape := sorry_proof }
+    let loss : Scalar .float32 := StaticTensor.ofUOp lossUop
     let gradMap ← StaticTensor.backward loss [x.uop, y.uop]
     pure (x.uop, y.uop, c.uop, gradMap)
 

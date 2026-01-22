@@ -110,10 +110,10 @@ private def buildProgram (cfg : SGD) : IO Program := do
     let gradW2U := gradMap.getD w2Buf.uop.uid w2Buf.uop
     let gradB1U := gradMap.getD b1Buf.uop.uid b1Buf.uop
     let gradB2U := gradMap.getD b2Buf.uop.uid b2Buf.uop
-    let gradW1 : Matrix InDim Hidden .float32 := { uop := gradW1U, h_shape := sorry_proof }
-    let gradW2 : Matrix Hidden OutDim .float32 := { uop := gradW2U, h_shape := sorry_proof }
-    let gradB1 : Vector Hidden .float32 := { uop := gradB1U, h_shape := sorry_proof }
-    let gradB2 : Vector OutDim .float32 := { uop := gradB2U, h_shape := sorry_proof }
+    let gradW1 : Matrix InDim Hidden .float32 := StaticTensor.ofUOp gradW1U
+    let gradW2 : Matrix Hidden OutDim .float32 := StaticTensor.ofUOp gradW2U
+    let gradB1 : Vector Hidden .float32 := StaticTensor.ofUOp gradB1U
+    let gradB2 : Vector OutDim .float32 := StaticTensor.ofUOp gradB2U
 
     let stepRes1 ← SGD.optimizer.step w1Buf gradW1 [v1Buf] cfg
     let stepRes2 ← SGD.optimizer.step w2Buf gradW2 [v2Buf] cfg

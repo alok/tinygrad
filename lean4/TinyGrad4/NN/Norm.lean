@@ -42,7 +42,7 @@ def create (dim : Nat) (dt : DType := .float32) (eps : Float32 := 1e-6)
 /-- Coerce tensor to target shape (uses sorry_proof for shape equality) -/
 private def coerceShape {s1 s2 : List Nat} {d : DType}
     (t : StaticTensor s1 d) : StaticTensor s2 d :=
-  { uop := t.uop, h_shape := sorry_proof, requiresGrad := t.requiresGrad }
+  StaticTensor.ofUOp t.uop (requiresGrad := t.requiresGrad)
 
 /-- Compute RMS norm: x / sqrt(mean(x^2) + eps) -/
 private def rmsNormInternal {s : List Nat} {d : DType} (x : StaticTensor s d) (eps : Float32)
@@ -111,7 +111,7 @@ def create (normalizedShape : List Nat) (dt : DType := .float32) (eps : Float32 
 /-- Coerce tensor to target shape (uses sorry_proof for shape equality) -/
 private def coerceShape {s1 s2 : List Nat} {d : DType}
     (t : StaticTensor s1 d) : StaticTensor s2 d :=
-  { uop := t.uop, h_shape := sorry_proof, requiresGrad := t.requiresGrad }
+  StaticTensor.ofUOp t.uop (requiresGrad := t.requiresGrad)
 
 /-- Compute layer norm: (x - mean) / sqrt(var + eps)
     Simplified: normalizes over the last axis -/
@@ -216,7 +216,7 @@ def create (numFeatures : Nat) (dt : DType := .float32)
 /-- Coerce tensor to target shape -/
 private def coerceShape {s1 s2 : List Nat} {d : DType}
     (t : StaticTensor s1 d) : StaticTensor s2 d :=
-  { uop := t.uop, h_shape := sorry_proof, requiresGrad := t.requiresGrad }
+  StaticTensor.ofUOp t.uop (requiresGrad := t.requiresGrad)
 
 /-- Forward pass for BatchNorm2d: Input [N, C, H, W]
     Normalizes over N, H, W dimensions, separately for each channel C.

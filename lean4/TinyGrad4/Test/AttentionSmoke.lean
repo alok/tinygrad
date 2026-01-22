@@ -82,7 +82,7 @@ private def testAttentionB2T3D2 : IO Unit := do
     let scoresScaled ← UOp.mul scores scale
     let scoresMasked ← UOp.add scoresScaled mask.uop
     let scoresMaskedT : Float32^[b, t, t] :=
-      { uop := scoresMasked, requiresGrad := false, h_shape := sorry_proof }
+      StaticTensor.ofUOp scoresMasked (requiresGrad := false)
     let probs ← StaticTensor.softmax scoresMaskedT
     let out ← UOp.contract2D probs.uop v.uop
     pure (q.uop, k.uop, v.uop, mask.uop, scoresMasked, probs.uop, out)

@@ -9,7 +9,7 @@ def reshapeUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (newShape : List Nat)
     : TensorM (StaticTensor newShape d) := do
   let reshaped ← UOp.reshape t.uop newShape
-  pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp reshaped (requiresGrad := t.requiresGrad))
 
 def reshape {s : List Nat} {d : DType} (t : StaticTensor s d)
     (newShape : List Nat) (h : Shape.reshapeValid s newShape = true)
@@ -20,13 +20,13 @@ def reshape {s : List Nat} {d : DType} (t : StaticTensor s d)
 def flatten {s : List Nat} {d : DType} (t : StaticTensor s d)
     : TensorM (StaticTensor [listProd s] d) := do
   let reshaped ← UOp.reshape t.uop [listProd s]
-  pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp reshaped (requiresGrad := t.requiresGrad))
 
 def expandUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (newShape : List Nat)
     : TensorM (StaticTensor newShape d) := do
   let expanded ← UOp.expand t.uop newShape
-  pure { uop := expanded, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp expanded (requiresGrad := t.requiresGrad))
 
 def expand {s : List Nat} {d : DType} (t : StaticTensor s d)
     (newShape : List Nat) (h : Shape.expandValid s newShape = true)
@@ -39,7 +39,7 @@ def unsqueezeUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     : TensorM (StaticTensor (Shape.insertDim s axis 1) d) := do
   let newShape := Shape.insertDim s axis 1
   let reshaped ← UOp.reshape t.uop newShape
-  pure { uop := reshaped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp reshaped (requiresGrad := t.requiresGrad))
 
 def unsqueeze {s : List Nat} {d : DType} (t : StaticTensor s d)
     (axis : Nat) (h : Shape.insertDimValid s axis = true)
@@ -51,7 +51,7 @@ def permuteUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (perm : List Nat)
     : TensorM (StaticTensor (Shape.permute s perm) d) := do
   let permuted ← UOp.permute t.uop perm
-  pure { uop := permuted, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp permuted (requiresGrad := t.requiresGrad))
 
 def permute {s : List Nat} {d : DType} (t : StaticTensor s d)
     (perm : List Nat) (h : Shape.permuteValid s perm = true)
@@ -66,7 +66,7 @@ def padUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (padding : List (Nat × Nat))
     : TensorM (StaticTensor (Shape.pad s padding) d) := do
   let padded ← UOp.pad t.uop padding
-  pure { uop := padded, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp padded (requiresGrad := t.requiresGrad))
 
 def pad {s : List Nat} {d : DType} (t : StaticTensor s d)
     (padding : List (Nat × Nat)) (h : Shape.padValid s padding = true)
@@ -78,7 +78,7 @@ def shrinkUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (bounds : List (Nat × Nat))
     : TensorM (StaticTensor (Shape.shrink s bounds) d) := do
   let shrunk ← UOp.shrink t.uop bounds
-  pure { uop := shrunk, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp shrunk (requiresGrad := t.requiresGrad))
 
 def shrink {s : List Nat} {d : DType} (t : StaticTensor s d)
     (bounds : List (Nat × Nat)) (h : Shape.shrinkValid s bounds = true)
@@ -90,7 +90,7 @@ def flipUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
     (axes : List Nat)
     : TensorM (StaticTensor s d) := do
   let flipped ← UOp.flip t.uop axes
-  pure { uop := flipped, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp flipped (requiresGrad := t.requiresGrad))
 
 def flip {s : List Nat} {d : DType} (t : StaticTensor s d)
     (axes : List Nat) (h : Shape.flipValid s axes = true)
@@ -113,7 +113,7 @@ def stackUnsafe {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (ax
     let uops ← go ts
     let out ← UOp.cat uops axis
     let reqGrad := TensorList.anyRequiresGrad ts
-    pure { uop := out, requiresGrad := reqGrad, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp out (requiresGrad := reqGrad))
 
 def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
     (h : Shape.stackValid shapes axis = true)
@@ -154,7 +154,7 @@ def tile {s : List Nat} {d : DType} (t : StaticTensor s d)
   let t1 ← reshapeUnsafe t unsqueezedShape
   let t2 ← expandUnsafe t1 expandedShape
   let t3 ← reshapeUnsafe t2 finalShape
-  pure { uop := t3.uop, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp t3.uop (requiresGrad := t.requiresGrad))
 
 /-- Shrink tensor to target shape (each dim becomes min of current and target).
     This is a convenience wrapper over shrink with computed bounds. -/
@@ -164,7 +164,7 @@ def shrinkTo {s : List Nat} {d : DType} (t : StaticTensor s d)
   -- Compute bounds: (0, min(s[i], target[i]))
   let bounds := listZipWith (fun si ti => (0, min si ti)) s targetShape
   let shrunk ← shrinkUnsafe t bounds
-  pure { uop := shrunk.uop, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp shrunk.uop (requiresGrad := t.requiresGrad))
 
 /-- Ceiling division -/
 private def ceildiv (a b : Nat) : Nat :=
@@ -252,7 +252,7 @@ def pool {s : List Nat} {d : DType} (t : StaticTensor s d)
   let perm := noopPerm ++ outPerm ++ kernelPerm
 
   let result ← permuteUnsafe x perm
-  pure { uop := result.uop, requiresGrad := t.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp result.uop (requiresGrad := t.requiresGrad))
 
 end StaticTensor
 

@@ -59,7 +59,7 @@ private def buildLinearBias2ScaleRelu (batch inFeatures outFeatures : Nat)
   let yBias ← TinyGrad4.StaticTensor.addB yScaled b0
   let yBias2 ← TinyGrad4.StaticTensor.addB yBias b1
   let yRelu ← TinyGrad4.StaticTensor.relu yBias2
-  pure { uop := yRelu.uop, requiresGrad := yRelu.requiresGrad, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp yRelu.uop (requiresGrad := yRelu.requiresGrad))
 
 /-- Smoke test: build a linear layer with bias2 + scale + relu and eval via IO path. -/
 def main : IO UInt32 := do

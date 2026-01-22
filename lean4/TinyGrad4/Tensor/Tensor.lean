@@ -12,7 +12,7 @@ structure StaticTensor (shape : List Nat) (dtype : DType) where
   deriving Repr
 
 instance {s : List Nat} {d : DType} : Inhabited (StaticTensor s d) :=
-  ⟨{ uop := default, h_shape := sorry_proof, requiresGrad := false }⟩
+  ⟨{ uop := {(default : UOp) with shape := s, dtype := d}, h_shape := by rfl, requiresGrad := false }⟩
 
 inductive TensorList (d : DType) : List Shape → Type where
   | nil : TensorList d []
@@ -39,6 +39,17 @@ def rank {s : List Nat} {d : DType} (_ : StaticTensor s d) : Nat := s.length
 def elementSize {s : List Nat} {d : DType} (_ : StaticTensor s d) : Nat := d.itemsize
 def nbytes {s : List Nat} {d : DType} (_ : StaticTensor s d) : Nat := listProd s * d.itemsize
 
+/-- Build a StaticTensor from a UOp, checking shape + dtype at runtime. -/
+def ofUOp {s : List Nat} {d : DType} (u : UOp) (requiresGrad : Bool := false) : StaticTensor s d :=
+  if hShape : u.shape = s then
+    if hType : u.dtype = d then
+      let _ := hType
+      { uop := u, h_shape := hShape, requiresGrad }
+    else
+      panic! s!"StaticTensor dtype mismatch: expected {repr d}, got {repr u.dtype}"
+  else
+    panic! s!"StaticTensor shape mismatch: expected {repr s}, got {repr u.shape}"
+
 end StaticTensor
 
 abbrev TensorM := UOpM
@@ -54,22 +65,22 @@ namespace Tensor
 def full (shape : List Nat) (dtype : DType) (value : Float32) : TensorM (StaticTensor shape dtype) := do
   let const ← UOp.const dtype value
   let expanded ← UOp.expand const shape
-  pure { uop := expanded, requiresGrad := false, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp expanded)
 
 def fullInt (shape : List Nat) (dtype : DType) (value : Int) : TensorM (StaticTensor shape dtype) := do
   let const ← UOp.constInt dtype value
   let expanded ← UOp.expand const shape
-  pure { uop := expanded, requiresGrad := false, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp expanded)
 
 def fullNat (shape : List Nat) (dtype : DType) (value : Nat) : TensorM (StaticTensor shape dtype) := do
   let const ← UOp.constNat dtype value
   let expanded ← UOp.expand const shape
-  pure { uop := expanded, requiresGrad := false, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp expanded)
 
 def fullBool (shape : List Nat) (value : Bool) : TensorM (StaticTensor shape .bool) := do
   let const ← UOp.constBool value
   let expanded ← UOp.expand const shape
-  pure { uop := expanded, requiresGrad := false, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp expanded)
 
 def zeros (shape : List Nat) (dtype : DType := .float32) : TensorM (StaticTensor shape dtype) :=
   full shape dtype 0.0
@@ -79,9 +90,9 @@ def ones (shape : List Nat) (dtype : DType := .float32) : TensorM (StaticTensor 
 
 private def fromArrayF32 (shape : Shape) (vals : Array Float32) : TensorM (StaticTensor shape .float32) := do
   let u ← UOp.vconstF32 vals
-  let base : StaticTensor [vals.size] .float32 := { uop := u, h_shape := sorry_proof }
+  let base : StaticTensor [vals.size] .float32 := StaticTensor.ofUOp u
   let reshaped ← UOp.reshape base.uop shape
-  pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp reshaped)
 
 private def intToFloat (v : Int) : Float64 :=
   if v >= 0 then
@@ -141,10 +152,10 @@ def arange (n : Nat) (dtype : DType := .float32) : TensorM (StaticTensor [n] dty
     return out
   let base ← fromArrayF32 [n] vals
   if dtype == .float32 then
-    pure { uop := base.uop, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp base.uop)
   else
     let casted ← UOp.cast base.uop dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp casted)
 
 def linspace (start stop : Float32) (steps : Nat) (dtype : DType := .float32)
     : TensorM (StaticTensor [steps] dtype) := do
@@ -161,10 +172,10 @@ def linspace (start stop : Float32) (steps : Nat) (dtype : DType := .float32)
     return out
   let base ← fromArrayF32 [steps] vals
   if dtype == .float32 then
-    pure { uop := base.uop, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp base.uop)
   else
     let casted ← UOp.cast base.uop dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp casted)
 
 def rand (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0)
     : TensorM (StaticTensor shape dtype) := do
@@ -173,10 +184,10 @@ def rand (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0)
   let base ← fromArrayF32 [numel] vals
   let reshaped ← UOp.reshape base.uop shape
   if dtype == .float32 then
-    pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp reshaped)
   else
     let casted ← UOp.cast reshaped dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp casted)
 
 def randn (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0)
     : TensorM (StaticTensor shape dtype) := do
@@ -185,10 +196,10 @@ def randn (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0)
   let base ← fromArrayF32 [numel] vals
   let reshaped ← UOp.reshape base.uop shape
   if dtype == .float32 then
-    pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp reshaped)
   else
     let casted ← UOp.cast reshaped dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp casted)
 
 def randint (shape : Shape) (low high : Int) (dtype : DType := .int32) (seed : Nat := 0)
     : TensorM (StaticTensor shape dtype) := do
@@ -197,15 +208,15 @@ def randint (shape : Shape) (low high : Int) (dtype : DType := .int32) (seed : N
   let base ← fromArrayF32 [numel] vals
   let reshaped ← UOp.reshape base.uop shape
   if dtype == .float32 then
-    pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp reshaped)
   else
     let casted ← UOp.cast reshaped dtype
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp casted)
 
 def buffer (shape : List Nat) (dtype : DType := .float32) (device : String := "CPU")
     : TensorM (StaticTensor shape dtype) := do
   let buf ← UOp.buffer dtype shape device
-  pure { uop := buf, requiresGrad := false, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp buf)
 
 /-- Set a max size for the UOp interning table (0 disables). -/
 def setInternLimit (limit : Nat) : TensorM Unit :=
@@ -225,10 +236,10 @@ def fullLike {s : List Nat} {d : DType} (_t : StaticTensor s d) (value : Float32
     : TensorM (StaticTensor s d) := do
   let base ← full s .float32 value
   if d == .float32 then
-    pure { uop := base.uop, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp base.uop)
   else
     let casted ← UOp.cast base.uop d
-    pure { uop := casted, requiresGrad := false, h_shape := sorry_proof }
+    pure (StaticTensor.ofUOp casted)
 
 def randLike {s : List Nat} {d : DType} (_t : StaticTensor s d) (seed : Nat := 0)
     : TensorM (StaticTensor s d) :=

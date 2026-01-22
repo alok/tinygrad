@@ -35,8 +35,7 @@ private def testValidateAttentionLike : IO Unit := do
     let kT ← StaticTensor.permuteUnsafe k [0, 2, 1]
     let scores ← UOp.contract2D q.uop kT.uop
     let scoresMasked ← UOp.add scores mask.uop
-    let scoresMaskedT : StaticTensor [b, t, t] .float32 :=
-      { uop := scoresMasked, requiresGrad := false, h_shape := sorry_proof }
+    let scoresMaskedT : StaticTensor [b, t, t] .float32  := StaticTensor.ofUOp scoresMasked (requiresGrad := false)
     let probs ← StaticTensor.softmax scoresMaskedT
     let out ← UOp.contract2D probs.uop v.uop
     pure (q.uop, k.uop, v.uop, mask.uop, out)

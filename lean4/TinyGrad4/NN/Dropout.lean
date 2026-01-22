@@ -41,7 +41,7 @@ def create (p : Float32 := 0.5) : DropoutParams :=
 /-- Coerce tensor to target shape -/
 private def coerceShape {s1 s2 : List Nat} {d : DType}
     (t : StaticTensor s1 d) : StaticTensor s2 d :=
-  { uop := t.uop, h_shape := sorry_proof, requiresGrad := t.requiresGrad }
+  StaticTensor.ofUOp t.uop (requiresGrad := t.requiresGrad)
 
 /-- Forward pass for dropout.
 

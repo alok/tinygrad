@@ -76,8 +76,7 @@ private def testKernelizeAttentionB2T3D2 : IO Unit := do
     let scale ← UOp.const .float32 invSqrtD
     let scoresScaled ← UOp.mul scores scale
     let scoresMasked ← UOp.add scoresScaled mask.uop
-    let scoresMaskedT : StaticTensor [b, t, t] .float32 :=
-      { uop := scoresMasked, requiresGrad := false, h_shape := sorry_proof }
+    let scoresMaskedT : StaticTensor [b, t, t] .float32  := StaticTensor.ofUOp scoresMasked (requiresGrad := false)
     let probs ← StaticTensor.softmax scoresMaskedT
     let out ← UOp.contract2D probs.uop v.uop
     pure (q.uop, k.uop, v.uop, mask.uop, scoresMasked, out)

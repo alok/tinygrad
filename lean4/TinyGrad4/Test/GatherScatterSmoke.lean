@@ -17,9 +17,9 @@ open StaticTensor
 
 private def fromArrayF32 (shape : Shape) (vals : Array Float32) : TensorM (StaticTensor shape .float32) := do
   let u ← UOp.vconstF32 vals
-  let base : StaticTensor [vals.size] .float32 := { uop := u, h_shape := sorry_proof }
+  let base : StaticTensor [vals.size] .float32  := StaticTensor.ofUOp u
   let reshaped ← UOp.reshape base.uop shape
-  pure { uop := reshaped, requiresGrad := false, h_shape := sorry_proof }
+  pure (StaticTensor.ofUOp reshaped (requiresGrad := false))
 
 private def fromArrayI32 (shape : Shape) (vals : Array Int) : TensorM (StaticTensor shape .int32) := do
   let valsF := vals.map (fun v => (Float64.ofInt v).toFloat32)

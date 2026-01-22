@@ -73,7 +73,7 @@ def applyUpdates {s : List Nat} {d : DType}
     -- Create new tensor from updated values
     let newUop ← UOp.vconstRaw u s
     let reshaped ← UOp.reshape newUop s
-    result := result ++ [{ uop := reshaped, h_shape := sorry_proof, requiresGrad := p.requiresGrad }]
+    result := result ++ [StaticTensor.ofUOp reshaped (requiresGrad := p.requiresGrad)]
   pure result
 
 -- Instance: Adam implements Optimizer

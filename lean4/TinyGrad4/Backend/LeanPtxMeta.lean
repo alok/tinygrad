@@ -48,6 +48,7 @@ private def fieldType (name : Name) : Option Expr :=
   | "ptxVersion" => some (mkConst ``Nat)
   | "sm" => some (mkConst ``Nat)
   | "withBias" => some (mkConst ``Bool)
+  | "withBias2" => some (mkConst ``Bool)
   | "scaleBits" => some (mkConst ``UInt32)
   | "relu" => some (mkConst ``Bool)
   | "variant" => some (mkConst ``TinyGrad4.Backend.LeanPtxEmit.PtxVariant)
@@ -73,6 +74,7 @@ private def overrideField (name : Name) : Option Name :=
   | "ptxVersion" => some `ptxVersion?
   | "sm" => some `sm?
   | "withBias" => some `withBias?
+  | "withBias2" => some `withBias2?
   | "scaleBits" => some `scaleBits?
   | "relu" => some `relu?
   | "variant" => some `variant?
@@ -119,6 +121,7 @@ private def buildOverrideExpr (fields : Array Syntax) : TermElabM Expr := do
     , (`ptxVersion?, mkNone (mkConst ``Nat))
     , (`sm?, mkNone (mkConst ``Nat))
     , (`withBias?, mkNone (mkConst ``Bool))
+    , (`withBias2?, mkNone (mkConst ``Bool))
     , (`scaleBits?, mkNone (mkConst ``UInt32))
     , (`relu?, mkNone (mkConst ``Bool))
     , (`variant?, mkNone (mkConst ``TinyGrad4.Backend.LeanPtxEmit.PtxVariant)) ]

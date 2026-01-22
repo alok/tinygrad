@@ -1169,7 +1169,12 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
       | d :: ds => d == 1 && isBiasShape ds
     let simpleBias :=
       plan.biasNumel == plan.n && plan.biasFast && isBiasShape plan.biasShape.toList
+    let simpleBias2 :=
+      match bias2Buf with
+      | some _ => plan.bias2Numel == plan.n && plan.bias2Fast && isBiasShape plan.bias2Shape.toList
+      | none => false
     let mut biasApplied := false
+    let mut bias2Applied := false
     let mut scaleApplied := false
     let mut reluApplied := false
     let mut out? : Option RawBuffer := none
@@ -1183,18 +1188,28 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
       if out?.isNone then
         out? ← CudaTritonMatmul.tryMatmulBatchedF32ViaF16 aBuf bBuf plan.m plan.k plan.n plan.aStarts plan.bStarts
     else
-      if plan.biasNumel != 0 && simpleBias && !hasBias2 then
-        if hasScale || plan.relu then
-          out? ← CudaTritonMatmul.tryMatmulF32ViaF16BiasScaleRelu
-            aBuf bBuf biasBuf plan.m plan.k plan.n plan.scaleBits plan.relu
-          if out?.isSome then
-            biasApplied := true
-            scaleApplied := hasScale
-            reluApplied := plan.relu
-        else
-          out? ← CudaTritonMatmul.tryMatmulF32ViaF16Bias aBuf bBuf biasBuf plan.m plan.k plan.n
-          if out?.isSome then
-            biasApplied := true
+      if plan.biasNumel != 0 && simpleBias then
+        if hasBias2 && simpleBias2 then
+          if let some bias2Buf := bias2Buf then
+            out? ← CudaTritonMatmul.tryMatmulF32ViaF16Bias2ScaleRelu
+              aBuf bBuf biasBuf bias2Buf plan.m plan.k plan.n plan.scaleBits plan.relu
+            if out?.isSome then
+              biasApplied := true
+              bias2Applied := true
+              scaleApplied := hasScale
+              reluApplied := plan.relu
+        else if !hasBias2 then
+          if hasScale || plan.relu then
+            out? ← CudaTritonMatmul.tryMatmulF32ViaF16BiasScaleRelu
+              aBuf bBuf biasBuf plan.m plan.k plan.n plan.scaleBits plan.relu
+            if out?.isSome then
+              biasApplied := true
+              scaleApplied := hasScale
+              reluApplied := plan.relu
+          else
+            out? ← CudaTritonMatmul.tryMatmulF32ViaF16Bias aBuf bBuf biasBuf plan.m plan.k plan.n
+            if out?.isSome then
+              biasApplied := true
       if out?.isNone then
         out? ← CudaTritonMatmul.tryMatmulF32ViaF16 aBuf bBuf plan.m plan.k plan.n
 
@@ -1220,10 +1235,11 @@ private def evalFusedReduce (u : UOp) (plan : FusedReduce.Plan) (env : Env) (cac
       out := { dtype := .float32, data := outBytes }
 
     if let some bias2 := bias2Buf then
-      let outBytes := Native.addBcastF32 out.data bias2.data outShape plan.bias2Shape outShape
-      if outBytes.isEmpty then
-        return RawBuffer.zeros u.dtype (listProd u.shape)
-      out := { dtype := .float32, data := outBytes }
+      if !bias2Applied then
+        let outBytes := Native.addBcastF32 out.data bias2.data outShape plan.bias2Shape outShape
+        if outBytes.isEmpty then
+          return RawBuffer.zeros u.dtype (listProd u.shape)
+        out := { dtype := .float32, data := outBytes }
 
     if plan.relu && !reluApplied then
       let outBytes := Native.reluF32 out.data

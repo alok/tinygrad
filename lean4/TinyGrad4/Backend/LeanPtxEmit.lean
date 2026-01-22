@@ -9,7 +9,7 @@ Variants:
 - basic: one output element per block, one thread does the full K loop.
 - tiled: register-tiled microtiles per thread.
 - smem: shared-memory staging + register-tiled microtiles per thread.
-- Supports optional FP16 bias add.
+- Supports optional FP16 bias adds.
 - Uses compile-time constants for M/N/K baked into the PTX.
 - Intended as a correctness-first fallback.
 
@@ -22,6 +22,7 @@ Environment (for `emitFromEnv`):
 - TG4_TRITON_PTX (optional path override)
 - TG4_TRITON_PTX_DIR (optional cache dir)
 - TG4_TRITON_WITH_BIAS (optional)
+- TG4_TRITON_WITH_BIAS2 (optional)
 - TG4_TRITON_SCALE_BITS (optional UInt32 bits for scale constant)
 - TG4_TRITON_RELU (optional)
 - TG4_TRITON_LEAN_VARIANT (basic|tiled|smem)
@@ -59,6 +60,7 @@ structure EmitConfig where
   ptxVersion : Nat
   sm : Nat
   withBias : Bool := false
+  withBias2 : Bool := false
   scaleBits : Option UInt32 := none
   relu : Bool := false
   variant : PtxVariant := .tiled
@@ -82,6 +84,7 @@ structure EmitOverride where
   ptxVersion? : Option Nat := none
   sm? : Option Nat := none
   withBias? : Option Bool := none
+  withBias2? : Option Bool := none
   scaleBits? : Option UInt32 := none
   relu? : Option Bool := none
   variant? : Option PtxVariant := none
@@ -159,6 +162,9 @@ private def applyOverride (base : EmitConfig) (ov : EmitOverride) : EmitConfig :
     | some v => some v
     | none => base.scaleBits
   let relu := ov.relu?.getD base.relu
+  let withBias := ov.withBias?.getD base.withBias
+  let withBias2 := ov.withBias2?.getD base.withBias2
+  let withBias := if withBias2 then true else withBias
   { base with
     ptxPath := ov.ptxPath?.getD base.ptxPath
     kernelName := ov.kernelName?.getD base.kernelName
@@ -177,7 +183,8 @@ private def applyOverride (base : EmitConfig) (ov : EmitOverride) : EmitConfig :
     numWarps := ov.numWarps?.getD base.numWarps
     ptxVersion := ov.ptxVersion?.getD base.ptxVersion
     sm := ov.sm?.getD base.sm
-    withBias := ov.withBias?.getD base.withBias
+    withBias,
+    withBias2,
     scaleBits,
     relu,
     variant := ov.variant?.getD base.variant }
@@ -208,10 +215,13 @@ private def ptxDir : IO System.FilePath := do
   | some dir => pure (System.FilePath.mk dir)
   | none => pure (System.FilePath.mk "tmp")
 
-private def paramLines (withBias : Bool) : List String :=
+private def paramLines (cfg : EmitConfig) : List String :=
   let params : List String :=
-    if withBias then
-      ["c_ptr", "a_ptr", "b_ptr", "bias_ptr"]
+    if cfg.withBias then
+      if cfg.withBias2 then
+        ["c_ptr", "a_ptr", "b_ptr", "bias_ptr", "bias2_ptr"]
+      else
+        ["c_ptr", "a_ptr", "b_ptr", "bias_ptr"]
     else
       ["c_ptr", "a_ptr", "b_ptr"]
   let len := params.length
@@ -229,10 +239,27 @@ private def biasParamLine (cfg : EmitConfig) : List String :=
   else
     []
 
+private def bias2ParamLine (cfg : EmitConfig) : List String :=
+  if cfg.withBias2 then
+    ["  ld.param.u64 %rd10, [bias2_ptr];"]
+  else
+    []
+
 private def biasBodyLines (cfg : EmitConfig) : List String :=
   if cfg.withBias then
     [ s!"  mul.wide.u32 %rd8, %r1, 2"
     , "  add.u64 %rd9, %rd3, %rd8"
+    , "  ld.global.u16 %h2, [%rd9]"
+    , "  cvt.f32.f16 %f1, %h2"
+    , "  add.f32 %f0, %f0, %f1"
+    ]
+  else
+    []
+
+private def bias2BodyLines (cfg : EmitConfig) : List String :=
+  if cfg.withBias2 then
+    [ s!"  mul.wide.u32 %rd8, %r1, 2"
+    , "  add.u64 %rd9, %rd10, %rd8"
     , "  ld.global.u16 %h2, [%rd9]"
     , "  cvt.f32.f16 %f1, %h2"
     , "  add.f32 %f0, %f0, %f1"
@@ -289,17 +316,18 @@ private def rdReg (idx : Nat) : String := s!"%rd{idx}"
 private def hReg (idx : Nat) : String := s!"%h{idx}"
 
 private def ptxLinesBasic (cfg : EmitConfig) : List String :=
+  let rdCount := if cfg.withBias2 then 11 else 10
   [ s!".version {ptxVersionString cfg.ptxVersion}"
   , s!".target sm_{cfg.sm}"
   , ".address_size 64"
   , ""
   , s!".visible .entry {cfg.kernelName}(" ]
-  ++ paramLines cfg.withBias ++
+  ++ paramLines cfg ++
   [ ")"
   , "{"
   , "  .reg .pred %p<2>;"
   , "  .reg .b32 %r<12>;"
-  , "  .reg .b64 %rd<10>;"
+  , s!"  .reg .b64 %rd<{rdCount}>;"
   , "  .reg .f32 %f<3>;"
   , "  .reg .b16 %h<3>;"
   , ""
@@ -308,6 +336,7 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   , "  ld.param.u64 %rd2, [b_ptr];"
   ]
   ++ biasParamLine cfg ++
+  bias2ParamLine cfg ++
   [ "  mov.u32 %r0, %ctaid.x;"
   , "  mov.u32 %r1, %ctaid.y;"
   , "  mov.u32 %r2, %tid.x;"
@@ -340,6 +369,7 @@ private def ptxLinesBasic (cfg : EmitConfig) : List String :=
   ]
   ++ scaleBodyLinesBasic cfg ++
   biasBodyLines cfg ++
+  bias2BodyLines cfg ++
   reluBodyLinesBasic cfg ++
   [ s!"  mul.lo.u32 %r8, %r0, {cfg.strideCm};"
   , s!"  mul.lo.u32 %r9, %r1, {cfg.strideCn};"
@@ -362,7 +392,7 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
   let tempBase := bBase + tileN
   let fCount := tempBase + 1
   let rCount := 16
-  let rdCount := if cfg.withBias then 7 else 6
+  let rdCount := if cfg.withBias2 then 11 else if cfg.withBias then 7 else 6
   let hCount := if cfg.withBias then 3 else 2
   let accReg := fun i j => fReg (aBase - accCount + i * tileN + j)
   let aReg := fun i => fReg (aBase + i)
@@ -376,7 +406,7 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
       , ""
       , s!".visible .entry {cfg.kernelName}(" ] do
     lines := lines.push line
-  for line in paramLines cfg.withBias do
+  for line in paramLines cfg do
     lines := lines.push line
   for line in
       [ ")"
@@ -393,6 +423,10 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
       ] do
     lines := lines.push line
   for line in biasParamLine cfg do
+    lines := lines.push line
+  for line in bias2ParamLine cfg do
+    lines := lines.push line
+  for line in bias2ParamLine cfg do
     lines := lines.push line
   for line in
       [ "  mov.u32 %r0, %ctaid.x;"
@@ -484,6 +518,20 @@ private def ptxLinesTiled (cfg : EmitConfig) (tileM tileN : Nat) : List String :
       for i in List.range tileM do
         lines := lines.push s!"  add.f32 {accReg i j}, {accReg i j}, {tempReg};"
 
+  if cfg.withBias2 then
+    for j in List.range tileN do
+      for line in
+          [ s!"  add.u32 %r11, %r8, {j};"
+          , s!"  rem.u32 %r11, %r11, {cfg.n};"
+          , "  mul.wide.u32 %rd4, %r11, 2;"
+          , "  add.u64 %rd5, %rd10, %rd4;"
+          , "  ld.global.u16 %h2, [%rd5];"
+          , s!"  cvt.f32.f16 {tempReg}, %h2;"
+          ] do
+        lines := lines.push line
+      for i in List.range tileM do
+        lines := lines.push s!"  add.f32 {accReg i j}, {accReg i j}, {tempReg};"
+
   if cfg.relu then
     for i in List.range tileM do
       for j in List.range tileN do
@@ -521,7 +569,7 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
   let tempBase := bBase + tileN
   let fCount := tempBase + 1
   let rCount := 20
-  let rdCount := if cfg.withBias then 8 else 7
+  let rdCount := if cfg.withBias2 then 11 else if cfg.withBias then 8 else 7
   let hCount := if cfg.withBias then 3 else 2
   let threads := cfg.numWarps * 32
   let totalA := cfg.blockM * cfg.blockK
@@ -544,7 +592,7 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
       , ""
       , s!".visible .entry {cfg.kernelName}(" ] do
     lines := lines.push line
-  for line in paramLines cfg.withBias do
+  for line in paramLines cfg do
     lines := lines.push line
   for line in
       [ ")"
@@ -774,6 +822,20 @@ private def ptxLinesSmem (cfg : EmitConfig) (tileM tileN : Nat) : List String :=
       for i in List.range tileM do
         lines := lines.push s!"  add.f32 {accReg i j}, {accReg i j}, {tempReg};"
 
+  if cfg.withBias2 then
+    for j in List.range tileN do
+      for line in
+          [ s!"  add.u32 %r11, %r13, {j};"
+          , s!"  rem.u32 %r11, %r11, {cfg.n};"
+          , "  mul.wide.u32 %rd4, %r11, 2;"
+          , "  add.u64 %rd5, %rd10, %rd4;"
+          , "  ld.global.u16 %h2, [%rd5];"
+          , s!"  cvt.f32.f16 {tempReg}, %h2;"
+          ] do
+        lines := lines.push line
+      for i in List.range tileM do
+        lines := lines.push s!"  add.f32 {accReg i j}, {accReg i j}, {tempReg};"
+
   if cfg.relu then
     for i in List.range tileM do
       for j in List.range tileN do
@@ -839,6 +901,8 @@ def configFromEnv : IO EmitConfig := do
   let blockK ← requireEnvNat "TG4_TRITON_BLOCK_K"
   let numWarps ← requireEnvNat "TG4_TRITON_NUM_WARPS"
   let withBias ← envFlag "TG4_TRITON_WITH_BIAS"
+  let withBias2 ← envFlag "TG4_TRITON_WITH_BIAS2"
+  let withBias := if withBias2 then true else withBias
   let variant ←
     match ← variantFromEnv with
     | some v => pure v
@@ -849,7 +913,7 @@ def configFromEnv : IO EmitConfig := do
     | some ptx => pure (System.FilePath.mk ptx)
     | none =>
       let dir ← ptxDir
-      let baseTag := if withBias then "lean_bias" else "lean"
+      let baseTag := if withBias2 then "lean_bias2" else if withBias then "lean_bias" else "lean"
       let scaleTag :=
         match scaleBits with
         | some bits => s!"_s{hex8 bits}"
@@ -877,6 +941,7 @@ def configFromEnv : IO EmitConfig := do
     ptxVersion,
     sm,
     withBias,
+    withBias2,
     scaleBits,
     relu,
     variant

@@ -15,13 +15,15 @@ open TinyGrad4
 open Interpreter
 open StaticTensor
 
-private def fromArrayF32 (shape : Shape) (vals : Array Float32) : TensorM (StaticTensor shape .float32) := do
+private def fromArrayF32 (device : Backend.DeviceType := .CPU) (shape : Shape) (vals : Array Float32)
+    : TensorM (StaticTensor shape .float32 device) := do
   let u ← UOp.vconstF32 vals
-  let base : StaticTensor [vals.size] .float32  := StaticTensor.ofUOp u
+  let base : StaticTensor [vals.size] .float32 device  := StaticTensor.ofUOp u
   let reshaped ← UOp.reshape base.uop shape
   pure (StaticTensor.ofUOp reshaped (requiresGrad := false))
 
-private def fromArrayI32 (shape : Shape) (vals : Array Int) : TensorM (StaticTensor shape .int32) := do
+private def fromArrayI32 (device : Backend.DeviceType := .CPU) (shape : Shape) (vals : Array Int)
+    : TensorM (StaticTensor shape .int32 device) := do
   let valsF := vals.map (fun v => (Float64.ofInt v).toFloat32)
   let baseF ← fromArrayF32 shape valsF
   cast baseF .int32

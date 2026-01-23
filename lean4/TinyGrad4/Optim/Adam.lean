@@ -196,9 +196,9 @@ end Adam
 
 /-- Compute gradients and apply Adam updates.
     Returns updated parameter values as RawBuffers. -/
-def adamStep {s : List Nat} {d : DType}
-    (loss : Scalar d)
-    (params : List (StaticTensor s d))
+def adamStep {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (loss : Scalar d device)
+    (params : List (StaticTensor s d device))
     (opt : Adam)
     (env : Env := ∅)
     : TensorM (List RawBuffer × Adam) := do

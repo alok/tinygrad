@@ -35,7 +35,8 @@ class Optimizer (O : Type) where
 
   /-- Perform a single optimization step.
       Returns: (updated parameter values as RawBuffers, updated optimizer state) -/
-  step : O → (loss : Scalar d) → (params : List (StaticTensor s d)) → (env : Env)
+  step : O → {s : List Nat} → {d : DType} → {device : Backend.DeviceType}
+       → (loss : Scalar d device) → (params : List (StaticTensor s d device)) → (env : Env)
        → TensorM (List RawBuffer × O)
 
 /-- Get learning rate from optimizer config -/
@@ -64,11 +65,11 @@ def collectParams (layers : List (List UOp)) : List UOp :=
 
 /-- Helper: apply updates to parameters (returns new tensors).
     Creates new StaticTensors from RawBuffer values. -/
-def applyUpdates {s : List Nat} {d : DType}
-    (params : List (StaticTensor s d))
+def applyUpdates {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (params : List (StaticTensor s d device))
     (updates : List RawBuffer)
-    : TensorM (List (StaticTensor s d)) := do
-  let mut result : List (StaticTensor s d) := []
+    : TensorM (List (StaticTensor s d device)) := do
+  let mut result : List (StaticTensor s d device) := []
   for (p, u) in params.zip updates do
     -- Create new tensor from updated values
     let newUop ← UOp.vconstRaw u s
@@ -79,7 +80,8 @@ def applyUpdates {s : List Nat} {d : DType}
 -- Instance: Adam implements Optimizer
 instance : Optimizer Adam where
   zeroGrad opt := opt  -- Adam doesn't store gradients, nothing to zero
-  step opt loss params env := adamStep loss params opt env
+  step opt {s} {d} {device} loss params env :=
+    adamStep (s := s) (d := d) (device := device) loss params opt env
 
 -- Instance: Adam has learning rate
 instance : HasLearningRate Adam where

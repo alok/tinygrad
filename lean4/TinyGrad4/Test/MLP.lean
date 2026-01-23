@@ -44,7 +44,7 @@ def mlpForward {batch : Nat}
 def mseLoss {batch : Nat}
     (pred : Matrix batch 1 .float32)
     (target : Matrix batch 1 .float32)
-    : TensorM (Scalar .float32) := do
+    : TensorM (Scalar .float32 device) := do
   -- (pred - target)^2
   let diff ← sub pred target
   let sq ← mul diff diff

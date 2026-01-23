@@ -47,11 +47,11 @@ end Autodiff
 
 namespace StaticTensor
 
-def backward {d : DType} (loss : Scalar d) (params : List UOp) : UOpM GradMap :=
+def backward {d : DType} {device : Backend.DeviceType} (loss : Scalar d device) (params : List UOp) : UOpM GradMap :=
   Autodiff.computeGradient loss.uop params
 
-def grad {s : List Nat} {d : DType} (loss : Scalar d) (param : StaticTensor s d)
-    : UOpM (Option (StaticTensor s d)) := do
+def grad {s : List Nat} {d : DType} {device : Backend.DeviceType} (loss : Scalar d device) (param : StaticTensor s d device)
+    : UOpM (Option (StaticTensor s d device)) := do
   let gradMap ← Autodiff.computeGradient loss.uop [param.uop]
   match gradMap[param.uop.uid]? with
   | some gradUop => pure (some (StaticTensor.ofUOp gradUop))

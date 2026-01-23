@@ -39,8 +39,8 @@ def create (p : Float32 := 0.5) : DropoutParams :=
   { p, training := true }
 
 /-- Coerce tensor to target shape -/
-private def coerceShape {s1 s2 : List Nat} {d : DType}
-    (t : StaticTensor s1 d) : StaticTensor s2 d :=
+private def coerceShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s1 d device) : StaticTensor s2 d device :=
   StaticTensor.ofUOp t.uop (requiresGrad := t.requiresGrad)
 
 /-- Forward pass for dropout.
@@ -54,9 +54,9 @@ private def coerceShape {s1 s2 : List Nat} {d : DType}
 
     The `seed` parameter controls the random mask generation.
     Different seeds produce different dropout patterns. -/
-def forward {s : List Nat} {d : DType}
-    (params : DropoutParams) (x : StaticTensor s d) (seed : Nat)
-    : TensorM (StaticTensor s d) := do
+def forward {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (params : DropoutParams) (x : StaticTensor s d device) (seed : Nat)
+    : TensorM (StaticTensor s d device) := do
   -- Eval mode or p=0: no dropout, return input as-is
   if !params.training || params.p == 0.0 then
     return x
@@ -66,24 +66,24 @@ def forward {s : List Nat} {d : DType}
     return ← Tensor.zerosLike x
 
   -- Generate random values in [0, 1)
-  let randT ← Tensor.rand s d seed
+  let randT ← Tensor.rand (device := device) s d seed
 
   -- Create threshold tensor
-  let pT ← Tensor.full s d params.p
+  let pT ← Tensor.full (device := device) s d params.p
 
   -- mask = (rand > p), i.e., keep element if rand > p
   -- This drops ~p fraction of elements
   let mask ← cmpgtB randT pT
 
   -- Convert bool mask to float: where(mask, 1.0, 0.0)
-  let one ← Tensor.full s d 1.0
-  let zero ← Tensor.full s d 0.0
+  let one ← Tensor.full (device := device) s d 1.0
+  let zero ← Tensor.full (device := device) s d 0.0
   let maskF ← where_ mask one zero
-  let maskF : StaticTensor s d := coerceShape maskF
+  let maskF : StaticTensor s d device := coerceShape maskF
 
   -- Scale factor: 1 / (1 - p) to maintain expected values
   let scale := 1.0 / (1.0 - params.p)
-  let scaleT ← Tensor.full s d scale
+  let scaleT ← Tensor.full (device := device) s d scale
 
   -- output = x * mask * scale
   let masked ← mul x maskF
@@ -111,9 +111,9 @@ def dropout (p : Float32 := 0.5) : DropoutParams :=
 
 /-- Apply dropout directly to a tensor (functional API).
     Uses global training flag from params. -/
-def dropoutForward {s : List Nat} {d : DType}
-    (x : StaticTensor s d) (p : Float32 := 0.5) (training : Bool := true) (seed : Nat := 0)
-    : TensorM (StaticTensor s d) := do
+def dropoutForward {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s d device) (p : Float32 := 0.5) (training : Bool := true) (seed : Nat := 0)
+    : TensorM (StaticTensor s d device) := do
   let params := { p, training : DropoutParams }
   DropoutParams.forward params x seed
 

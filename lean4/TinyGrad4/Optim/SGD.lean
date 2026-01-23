@@ -20,9 +20,9 @@ as tensor operations (UOps), letting codegen handle all dtypes automatically.
 -/
 
 /-- Parameter with its gradient -/
-structure Parameter (shape : List Nat) (dtype : DType) where
-  tensor : StaticTensor shape dtype
-  grad : Option (StaticTensor shape dtype) := none
+structure Parameter (shape : List Nat) (dtype : DType) (device : Backend.DeviceType) where
+  tensor : StaticTensor shape dtype device
+  grad : Option (StaticTensor shape dtype device) := none
 
 /-- SGD optimizer state -/
 structure SGD where
@@ -86,9 +86,9 @@ end SGD
 
 /-- Compute gradients and return updated parameter values using UOps.
     This is the tinygrad way: express updates as UOps, let codegen handle dtypes. -/
-def sgdStep {s : List Nat} {d : DType}
-    (loss : Scalar d)
-    (params : List (StaticTensor s d))
+def sgdStep {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (loss : Scalar d device)
+    (params : List (StaticTensor s d device))
     (lr : Float64)
     (env : Env := ∅)
     : TensorM (List RawBuffer) := do
@@ -111,9 +111,9 @@ def sgdStep {s : List Nat} {d : DType}
   pure (updateUops.map fun u => results.getD u.uid (RawBuffer.zeros u.dtype (listProd u.shape)))
 
 /-- Like `sgdStep`, but uses native float32 update kernel (faster for float32). -/
-def sgdStepRaw {s : List Nat} {d : DType}
-    (loss : Scalar d)
-    (params : List (StaticTensor s d))
+def sgdStepRaw {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (loss : Scalar d device)
+    (params : List (StaticTensor s d device))
     (lr : Float64)
     (env : Env := ∅)
     : TensorM (List RawBuffer) := do

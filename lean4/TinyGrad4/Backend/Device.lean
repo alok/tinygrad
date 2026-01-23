@@ -4,6 +4,7 @@ import TinyGrad4.DType
 import TinyGrad4.UOp.UOp
 import TinyGrad4.UOp.Graph
 import TinyGrad4.Backend.Buffer
+import TinyGrad4.Backend.DeviceType
 
 /-!
 # Device Abstraction Layer
@@ -169,19 +170,3 @@ def cpuDevice : Device CPUProgram CPUBuffer where
   compiler := inferInstance
   runtime := inferInstance
   renderer := cpuRenderer
-
-/-! ## Device Selection -/
-
-inductive DeviceType where
-  | CPU
-  | METAL
-  | CUDA
-  deriving Repr, DecidableEq, Inhabited
-
-/-- Parse device string like "CPU", "METAL", "CUDA:0" -/
-def parseDeviceType (s : String) : DeviceType :=
-  if s.startsWith "METAL" then .METAL
-  else if s.startsWith "CUDA" then .CUDA
-  else .CPU
-
-end TinyGrad4.Backend

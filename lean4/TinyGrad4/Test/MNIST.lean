@@ -35,7 +35,7 @@ def mlpForward {batch inputDim hiddenDim : Nat}
 /-- Compute loss: mean of negative log-softmax (simplified cross-entropy) -/
 def computeLoss {batch : Nat}
     (logits : Matrix batch 10 .float32)
-    : TensorM (Scalar .float32) := do
+    : TensorM (Scalar .float32 device) := do
   let logProbs ← logSoftmax logits
   let negLogProbs ← neg logProbs
   mean negLogProbs
@@ -45,7 +45,7 @@ def trainStep {batch inputDim hiddenDim : Nat}
     (x : Matrix batch inputDim .float32)
     (w1 : Matrix inputDim hiddenDim .float32)
     (w2 : Matrix hiddenDim 10 .float32)
-    : TensorM (Scalar .float32 × GradMap) := do
+    : TensorM (Scalar .float32 device × GradMap) := do
   let logits ← mlpForward x w1 w2
   let loss ← computeLoss logits
   let gradMap ← backward loss [w1.uop, w2.uop]

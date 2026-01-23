@@ -27,11 +27,11 @@ open TinyGrad4
 open StaticTensor
 
 /-- Conv2d layer parameters -/
-structure Conv2dParams (inChannels outChannels kernelH kernelW : Nat) (dt : DType) where
+structure Conv2dParams (inChannels outChannels kernelH kernelW : Nat) (dt : DType) (device : Backend.DeviceType) where
   /-- Weight tensor [outChannels, inChannels, kernelH, kernelW] -/
-  weight : StaticTensor [outChannels, inChannels, kernelH, kernelW] dt
+  weight : StaticTensor [outChannels, inChannels, kernelH, kernelW] dt device
   /-- Optional bias [outChannels] -/
-  bias : Option (Vector outChannels dt)
+  bias : Option (Vector outChannels dt device)
   /-- Padding (same on all sides) -/
   padding : Nat
   /-- Stride -/
@@ -43,20 +43,20 @@ namespace Conv2dParams
 
 /-- Create Conv2d layer with Kaiming uniform initialization.
     bound = 1 / sqrt(in_channels * kernel_h * kernel_w), matching tinygrad's nn.Conv2d -/
-def create (inChannels outChannels : Nat) (kernelSize : Nat := 3)
+def create (device : Backend.DeviceType := .CPU) (inChannels outChannels : Nat) (kernelSize : Nat := 3)
     (dt : DType := .float32) (useBias : Bool := true)
     (padding : Nat := 0) (stride : Nat := 1) (dilation : Nat := 1)
-    (seed : Nat := 42) : TensorM (Conv2dParams inChannels outChannels kernelSize kernelSize dt) := do
+    (seed : Nat := 42) : TensorM (Conv2dParams inChannels outChannels kernelSize kernelSize dt device) := do
   -- Fan-in = in_channels * kernel_h * kernel_w
   let fanIn := inChannels * kernelSize * kernelSize
   let bound := (1.0 / Float64.sqrt (Float64.ofNat fanIn)).toFloat32
 
   -- Weight: uniform(-bound, bound) shaped [outChannels, inChannels, kernelSize, kernelSize]
-  let weight ← uniformInit [outChannels, inChannels, kernelSize, kernelSize] dt (-bound) bound seed
+  let weight ← uniformInit (device := device) [outChannels, inChannels, kernelSize, kernelSize] dt (-bound) bound seed
 
   -- Bias: uniform(-bound, bound) shaped [outChannels]
   let bias ← if useBias then
-    let b ← uniformInit [outChannels] dt (-bound) bound (seed + 1)
+    let b ← uniformInit (device := device) [outChannels] dt (-bound) bound (seed + 1)
     pure (some b)
   else
     pure none
@@ -64,17 +64,17 @@ def create (inChannels outChannels : Nat) (kernelSize : Nat := 3)
   pure { weight, bias, padding, stride, dilation }
 
 /-- Create Conv2d layer with asymmetric kernel size -/
-def createAsym (inChannels outChannels kernelH kernelW : Nat)
+def createAsym (device : Backend.DeviceType := .CPU) (inChannels outChannels kernelH kernelW : Nat)
     (dt : DType := .float32) (useBias : Bool := true)
     (padding : Nat := 0) (stride : Nat := 1) (dilation : Nat := 1)
-    (seed : Nat := 42) : TensorM (Conv2dParams inChannels outChannels kernelH kernelW dt) := do
+    (seed : Nat := 42) : TensorM (Conv2dParams inChannels outChannels kernelH kernelW dt device) := do
   let fanIn := inChannels * kernelH * kernelW
   let bound := (1.0 / Float64.sqrt (Float64.ofNat fanIn)).toFloat32
 
-  let weight ← uniformInit [outChannels, inChannels, kernelH, kernelW] dt (-bound) bound seed
+  let weight ← uniformInit (device := device) [outChannels, inChannels, kernelH, kernelW] dt (-bound) bound seed
 
   let bias ← if useBias then
-    let b ← uniformInit [outChannels] dt (-bound) bound (seed + 1)
+    let b ← uniformInit (device := device) [outChannels] dt (-bound) bound (seed + 1)
     pure (some b)
   else
     pure none
@@ -84,23 +84,23 @@ def createAsym (inChannels outChannels kernelH kernelW : Nat)
 /-- Forward pass: apply convolution
     Input:  [batch, inChannels, height, width]
     Output: [batch, outChannels, outHeight, outWidth] -/
-def forward {batch height width : Nat}
-    (params : Conv2dParams inChannels outChannels kernelH kernelW dt)
-    (x : StaticTensor [batch, inChannels, height, width] dt)
+def forward {batch height width : Nat} {device : Backend.DeviceType}
+    (params : Conv2dParams inChannels outChannels kernelH kernelW dt device)
+    (x : StaticTensor [batch, inChannels, height, width] dt device)
     : TensorM (StaticTensor (Shape.conv2dOut [batch, inChannels, height, width]
                                              [outChannels, inChannels, kernelH, kernelW]
-                                             params.padding params.stride params.dilation) dt) := do
+                                             params.padding params.stride params.dilation) dt device) := do
   conv2d x params.weight params.bias params.padding params.stride params.dilation
 
 /-- Get all trainable parameters -/
-def parameters (params : Conv2dParams inChannels outChannels kernelH kernelW dt)
+def parameters {device : Backend.DeviceType} (params : Conv2dParams inChannels outChannels kernelH kernelW dt device)
     : List UOp :=
   match params.bias with
   | none => [params.weight.uop]
   | some b => [params.weight.uop, b.uop]
 
 /-- Number of parameters -/
-def numParams (params : Conv2dParams inChannels outChannels kernelH kernelW dt) : Nat :=
+def numParams {device : Backend.DeviceType} (params : Conv2dParams inChannels outChannels kernelH kernelW dt device) : Nat :=
   let weightParams := outChannels * inChannels * kernelH * kernelW
   match params.bias with
   | none => weightParams
@@ -109,8 +109,9 @@ def numParams (params : Conv2dParams inChannels outChannels kernelH kernelW dt) 
 end Conv2dParams
 
 /-- Convenience: Create common square-kernel Conv2d -/
-abbrev Conv2d (inChannels outChannels kernelSize : Nat) (dt : DType := .float32) :=
-  Conv2dParams inChannels outChannels kernelSize kernelSize dt
+abbrev Conv2d (inChannels outChannels kernelSize : Nat) (dt : DType := .float32)
+    (device : Backend.DeviceType := .CPU) :=
+  Conv2dParams inChannels outChannels kernelSize kernelSize dt device
 
 /-- MaxPool2d layer (stateless, just parameters) -/
 structure MaxPool2dParams where
@@ -123,11 +124,11 @@ namespace MaxPool2dParams
 def create (kernelSize : Nat) (stride : Nat := 0) (padding : Nat := 0) : MaxPool2dParams :=
   { kernelSize, stride := if stride == 0 then kernelSize else stride, padding }
 
-def forward {batch channels height width : Nat} {dt : DType}
+def forward {batch channels height width : Nat} {dt : DType} {device : Backend.DeviceType}
     (params : MaxPool2dParams)
-    (x : StaticTensor [batch, channels, height, width] dt)
+    (x : StaticTensor [batch, channels, height, width] dt device)
     : TensorM (StaticTensor (Shape.pool2dShape [batch, channels, height, width]
-                                               params.kernelSize params.padding params.stride) dt) := do
+                                               params.kernelSize params.padding params.stride) dt device) := do
   maxPool2d x params.kernelSize params.stride params.padding
 
 end MaxPool2dParams
@@ -143,11 +144,11 @@ namespace AvgPool2dParams
 def create (kernelSize : Nat) (stride : Nat := 0) (padding : Nat := 0) : AvgPool2dParams :=
   { kernelSize, stride := if stride == 0 then kernelSize else stride, padding }
 
-def forward {batch channels height width : Nat} {dt : DType}
+def forward {batch channels height width : Nat} {dt : DType} {device : Backend.DeviceType}
     (params : AvgPool2dParams)
-    (x : StaticTensor [batch, channels, height, width] dt)
+    (x : StaticTensor [batch, channels, height, width] dt device)
     : TensorM (StaticTensor (Shape.pool2dShape [batch, channels, height, width]
-                                               params.kernelSize params.padding params.stride) dt) := do
+                                               params.kernelSize params.padding params.stride) dt device) := do
   avgPool2d x params.kernelSize params.stride params.padding
 
 end AvgPool2dParams

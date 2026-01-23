@@ -129,7 +129,7 @@ def testCatEval : IO Unit := do
     let a ← Tensor.full [2, 1] .float32 1.0
     let b ← Tensor.full [2, 2] .float32 2.0
     let c ← Tensor.full [2, 1] .float32 3.0
-    let ts : TensorList .float32 [[2, 1], [2, 2], [2, 1]] :=
+    let ts : TensorList .float32 .CPU [[2, 1], [2, 2], [2, 1]] :=
       .cons a (.cons b (.cons c .nil))
     catList ts 1
   let catB := runTensorM do
@@ -139,7 +139,7 @@ def testCatEval : IO Unit := do
   let catBList := runTensorM do
     let c ← Tensor.full [2] .bool 1.0
     let d ← Tensor.full [2] .bool 0.0
-    let ts : TensorList .bool [[2], [2]] :=
+    let ts : TensorList .bool .CPU [[2], [2]] :=
       .cons c (.cons d .nil)
     catList ts 0
   let fVals := evalTensor catF
@@ -168,14 +168,14 @@ def testStackEval : IO Unit := do
   let stacked0 := runTensorM do
     let a ← Tensor.full [2] .float32 1.0
     let b ← Tensor.full [2] .float32 2.0
-    let ts : TensorList .float32 [[2], [2]] := .cons a (.cons b .nil)
+    let ts : TensorList .float32 .CPU [[2], [2]] := .cons a (.cons b .nil)
     stackUnsafe ts 0
   let vals0 := evalTensor stacked0
   assertEqF32 vals0 #[1.0, 1.0, 2.0, 2.0] "stackUnsafe axis0"
   let stacked1 := runTensorM do
     let a ← Tensor.full [2] .float32 1.0
     let b ← Tensor.full [2] .float32 2.0
-    let ts : TensorList .float32 [[2], [2]] := .cons a (.cons b .nil)
+    let ts : TensorList .float32 .CPU [[2], [2]] := .cons a (.cons b .nil)
     stackUnsafe ts 1
   let vals1 := evalTensor stacked1
   assertEqF32 vals1 #[1.0, 2.0, 1.0, 2.0] "stackUnsafe axis1"
@@ -234,7 +234,7 @@ def testGatherScatter : IO Unit := do
     let idx ← cast idxF .int32
     let gathered ← gatherLast base2 idx
     let vals ← Tensor.full [2] .float32 5.0
-    let scattered : StaticTensor [2, 3] .float32 ← scatterLast vals idx
+    let scattered : StaticTensor [2, 3] .float32 .CPU ← scatterLast vals idx
     pure (gathered, scattered)
   let gVals := evalTensor gathered
   assertEqF32 gVals #[0.0, 4.0] "gatherLast"

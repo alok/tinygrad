@@ -5,6 +5,7 @@ import TinyGrad4.Shape
 import TinyGrad4.Ops
 import TinyGrad4.Tags
 import TinyGrad4.Backend.Buffer
+import TinyGrad4.Backend.DeviceType
 import Std.Data.HashMap
 
 -- ByteArray needs Repr for UArg deriving
@@ -215,9 +216,10 @@ def vconst (bytes : ByteArray) (dtype : DType) (shape : Shape) : UOpM UOp := do
 def vconstRaw (buf : RawBuffer) (shape : Shape) : UOpM UOp := do
   mkUOp .VCONST buf.dtype [] (.constBytesArray buf.data) shape
 
-def buffer (dtype : DType) (shape : Shape) (dev : String := "CPU") : UOpM UOp := do
-  let u ← mkUOp .BUFFER dtype [] (.device dev) shape
-  pure (device[dev] u)
+def buffer (dtype : DType) (shape : Shape) (dev : Backend.DeviceType := .CPU) : UOpM UOp := do
+  let devName := Backend.deviceTypeName dev
+  let u ← mkUOp .BUFFER dtype [] (.device devName) shape
+  pure (device[devName] u)
 
 def range (end_ : UOp) (axisId : Nat) (axisType : AxisType := .LOOP) (args : List Nat := []) : UOpM UOp := do
   mkUOp .RANGE .index [end_] (.rangeSpec axisId axisType args) []

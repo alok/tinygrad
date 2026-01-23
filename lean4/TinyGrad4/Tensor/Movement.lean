@@ -5,102 +5,102 @@ namespace TinyGrad4
 
 namespace StaticTensor
 
-def reshapeUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
+def reshapeUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (newShape : List Nat)
-    : TensorM (StaticTensor newShape d) := do
+    : TensorM (StaticTensor newShape d device) := do
   let reshaped ← UOp.reshape t.uop newShape
   pure (StaticTensor.ofUOp reshaped (requiresGrad := t.requiresGrad))
 
-def reshape {s : List Nat} {d : DType} (t : StaticTensor s d)
+def reshape {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (newShape : List Nat) (h : Shape.reshapeValid s newShape = true)
-    : TensorM (StaticTensor newShape d) := do
+    : TensorM (StaticTensor newShape d device) := do
   let _ := h
   reshapeUnsafe t newShape
 
-def flatten {s : List Nat} {d : DType} (t : StaticTensor s d)
-    : TensorM (StaticTensor [listProd s] d) := do
+def flatten {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
+    : TensorM (StaticTensor [listProd s] d device) := do
   let reshaped ← UOp.reshape t.uop [listProd s]
   pure (StaticTensor.ofUOp reshaped (requiresGrad := t.requiresGrad))
 
-def expandUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
+def expandUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (newShape : List Nat)
-    : TensorM (StaticTensor newShape d) := do
+    : TensorM (StaticTensor newShape d device) := do
   let expanded ← UOp.expand t.uop newShape
   pure (StaticTensor.ofUOp expanded (requiresGrad := t.requiresGrad))
 
-def expand {s : List Nat} {d : DType} (t : StaticTensor s d)
+def expand {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (newShape : List Nat) (h : Shape.expandValid s newShape = true)
-    : TensorM (StaticTensor newShape d) := do
+    : TensorM (StaticTensor newShape d device) := do
   let _ := h
   expandUnsafe t newShape
 
-def unsqueezeUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
+def unsqueezeUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (axis : Nat)
-    : TensorM (StaticTensor (Shape.insertDim s axis 1) d) := do
+    : TensorM (StaticTensor (Shape.insertDim s axis 1) d device) := do
   let newShape := Shape.insertDim s axis 1
   let reshaped ← UOp.reshape t.uop newShape
   pure (StaticTensor.ofUOp reshaped (requiresGrad := t.requiresGrad))
 
-def unsqueeze {s : List Nat} {d : DType} (t : StaticTensor s d)
+def unsqueeze {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (axis : Nat) (h : Shape.insertDimValid s axis = true)
-    : TensorM (StaticTensor (Shape.insertDim s axis 1) d) := do
+    : TensorM (StaticTensor (Shape.insertDim s axis 1) d device) := do
   let _ := h
   unsqueezeUnsafe t axis
 
-def permuteUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
+def permuteUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (perm : List Nat)
-    : TensorM (StaticTensor (Shape.permute s perm) d) := do
+    : TensorM (StaticTensor (Shape.permute s perm) d device) := do
   let permuted ← UOp.permute t.uop perm
   pure (StaticTensor.ofUOp permuted (requiresGrad := t.requiresGrad))
 
-def permute {s : List Nat} {d : DType} (t : StaticTensor s d)
+def permute {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (perm : List Nat) (h : Shape.permuteValid s perm = true)
-    : TensorM (StaticTensor (Shape.permute s perm) d) := do
+    : TensorM (StaticTensor (Shape.permute s perm) d device) := do
   let _ := h
   permuteUnsafe t perm
 
-def T {m n : Nat} {d : DType} (t : Matrix m n d) : TensorM (Matrix n m d) :=
+def T {m n : Nat} {d : DType} {device : Backend.DeviceType} (t : Matrix m n d device) : TensorM (Matrix n m d device) :=
   permute t [1, 0] (by simp [Shape.permuteValid, listAll, listRange])
 
-def padUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
+def padUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (padding : List (Nat × Nat))
-    : TensorM (StaticTensor (Shape.pad s padding) d) := do
+    : TensorM (StaticTensor (Shape.pad s padding) d device) := do
   let padded ← UOp.pad t.uop padding
   pure (StaticTensor.ofUOp padded (requiresGrad := t.requiresGrad))
 
-def pad {s : List Nat} {d : DType} (t : StaticTensor s d)
+def pad {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (padding : List (Nat × Nat)) (h : Shape.padValid s padding = true)
-    : TensorM (StaticTensor (Shape.pad s padding) d) := do
+    : TensorM (StaticTensor (Shape.pad s padding) d device) := do
   let _ := h
   padUnsafe t padding
 
-def shrinkUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
+def shrinkUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (bounds : List (Nat × Nat))
-    : TensorM (StaticTensor (Shape.shrink s bounds) d) := do
+    : TensorM (StaticTensor (Shape.shrink s bounds) d device) := do
   let shrunk ← UOp.shrink t.uop bounds
   pure (StaticTensor.ofUOp shrunk (requiresGrad := t.requiresGrad))
 
-def shrink {s : List Nat} {d : DType} (t : StaticTensor s d)
+def shrink {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (bounds : List (Nat × Nat)) (h : Shape.shrinkValid s bounds = true)
-    : TensorM (StaticTensor (Shape.shrink s bounds) d) := do
+    : TensorM (StaticTensor (Shape.shrink s bounds) d device) := do
   let _ := h
   shrinkUnsafe t bounds
 
-def flipUnsafe {s : List Nat} {d : DType} (t : StaticTensor s d)
+def flipUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (axes : List Nat)
-    : TensorM (StaticTensor s d) := do
+    : TensorM (StaticTensor s d device) := do
   let flipped ← UOp.flip t.uop axes
   pure (StaticTensor.ofUOp flipped (requiresGrad := t.requiresGrad))
 
-def flip {s : List Nat} {d : DType} (t : StaticTensor s d)
+def flip {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (axes : List Nat) (h : Shape.flipValid s axes = true)
-    : TensorM (StaticTensor s d) := do
+    : TensorM (StaticTensor s d device) := do
   let _ := h
   flipUnsafe t axes
 
-def stackUnsafe {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
-    : TensorM (StaticTensor (Shape.stackOut shapes axis) d) := do
-  let rec go {shapes : List Shape} (ts : TensorList d shapes) : TensorM (List UOp) := do
+def stackUnsafe {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : TensorList d device shapes) (axis : Nat)
+    : TensorM (StaticTensor (Shape.stackOut shapes axis) d device) := do
+  let rec go {shapes : List Shape} (ts : TensorList d device shapes) : TensorM (List UOp) := do
     match ts with
     | .nil => pure []
     | .cons t rest =>
@@ -115,9 +115,9 @@ def stackUnsafe {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (ax
     let reqGrad := TensorList.anyRequiresGrad ts
     pure (StaticTensor.ofUOp out (requiresGrad := reqGrad))
 
-def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : Nat)
+def stack {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : TensorList d device shapes) (axis : Nat)
     (h : Shape.stackValid shapes axis = true)
-    : TensorM (StaticTensor (Shape.stackOut shapes axis) d) := do
+    : TensorM (StaticTensor (Shape.stackOut shapes axis) d device) := do
   let _ := h
   stackUnsafe ts axis
 
@@ -128,9 +128,9 @@ def stack {d : DType} {shapes : List Shape} (ts : TensorList d shapes) (axis : N
     For example, shape [2, 3] with repeats [4, 5]:
       [2, 3] → [1, 2, 1, 3] → [4, 2, 5, 3] → [8, 15]
 -/
-def tile {s : List Nat} {d : DType} (t : StaticTensor s d)
+def tile {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (repeats : List Nat)
-    : TensorM (StaticTensor (Shape.repeatOut s repeats) d) := do
+    : TensorM (StaticTensor (Shape.repeatOut s repeats) d device) := do
   -- Align repeats with shape (pad with 1s on left)
   let len := max s.length repeats.length
   let s' := List.replicate (len - s.length) 1 ++ s
@@ -158,9 +158,9 @@ def tile {s : List Nat} {d : DType} (t : StaticTensor s d)
 
 /-- Shrink tensor to target shape (each dim becomes min of current and target).
     This is a convenience wrapper over shrink with computed bounds. -/
-def shrinkTo {s : List Nat} {d : DType} (t : StaticTensor s d)
+def shrinkTo {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (targetShape : List Nat)
-    : TensorM (StaticTensor targetShape d) := do
+    : TensorM (StaticTensor targetShape d device) := do
   -- Compute bounds: (0, min(s[i], target[i]))
   let bounds := listZipWith (fun si ti => (0, min si ti)) s targetShape
   let shrunk ← shrinkUnsafe t bounds
@@ -187,16 +187,14 @@ private def smax (a b : Nat) : Nat := max a b
     2. Shrink and reshape to create patch dimension
     3. Permute to move kernel dims to the end
 -/
-def pool {s : List Nat} {d : DType} (t : StaticTensor s d)
+def pool {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (kernelSize : List Nat)
     (stride : List Nat := [1, 1])
     (dilation : List Nat := [1, 1])
-    : TensorM (StaticTensor (Shape.poolOut s kernelSize stride dilation) d) := do
+    : TensorM (StaticTensor (Shape.poolOut s kernelSize stride dilation) d device) := do
   let k := kernelSize.length
-  -- Use actual UOp shape in case type parameter doesn't match (e.g. after sorry_proof cast)
-  let actualShape := t.uop.shape
-  let noop := actualShape.take (actualShape.length - k)  -- prefix dimensions (batch, channels)
-  let i_ := actualShape.drop (actualShape.length - k)    -- spatial dimensions
+  let noop := s.take (s.length - k)  -- prefix dimensions (batch, channels)
+  let i_ := s.drop (s.length - k)    -- spatial dimensions
 
   -- Output spatial dimensions
   let o_ := listZipWith4 (fun i di ki si =>

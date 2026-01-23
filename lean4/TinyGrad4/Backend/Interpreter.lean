@@ -2429,10 +2429,10 @@ def eval (u : UOp) (env : Env) : RawBuffer :=
   let cache := evalMany [u] env
   cache.getD u.uid (RawBuffer.zeros u.dtype (listProd u.shape))
 
-def evalTensor {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : RawBuffer :=
+def evalTensor {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (env : Env := ∅) : RawBuffer :=
   eval t.uop env
 
-def evalTensorCached {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer :=
+def evalTensorCached {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (env : Env := ∅) : IO RawBuffer :=
   evalCached t.uop env
 
 def setBuffer (env : Env) (u : UOp) (data : RawBuffer) : Env :=
@@ -2584,7 +2584,7 @@ def evalIO (u : UOp) (env : Env) : IO RawBuffer := do
   return cache.getD u.uid (RawBuffer.zeros u.dtype (listProd u.shape))
 
 /-- IO-based tensor evaluation with GPU preference -/
-def evalTensorIO {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer :=
+def evalTensorIO {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (env : Env := ∅) : IO RawBuffer :=
   evalIO t.uop env
 
 /-- Evaluate multiple UOps concurrently using IO.asTask -/
@@ -2871,7 +2871,7 @@ def evalIOGPU (u : UOp) (env : Env) : IO RawBuffer := do
   return cache.getD u.uid (RawBuffer.zeros u.dtype (listProd u.shape))
 
 /-- IO-based tensor evaluation with GPU residency -/
-def evalTensorIOGPU {s : List Nat} {d : DType} (t : StaticTensor s d) (env : Env := ∅) : IO RawBuffer :=
+def evalTensorIOGPU {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (env : Env := ∅) : IO RawBuffer :=
   evalIOGPU t.uop env
 
 end Interpreter

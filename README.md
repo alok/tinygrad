@@ -117,6 +117,13 @@ To check default accelerator run: `python3 -c "from tinygrad import Device; prin
 
 The current recommended way to install tinygrad is from source.
 
+Host platform support:
+
+- Linux is the primary target.
+- macOS is supported on a best-effort basis (CPU/Metal).
+- Windows is not a supported target for this repo.
+- The `triton` extra is Linux-only.
+
 ### From source
 
 ```sh

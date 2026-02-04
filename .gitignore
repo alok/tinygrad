@@ -67,3 +67,4 @@ mutants
 .mutmut-cache.claude/
 lean4/.lake/
 tinygrad_all.py
+data/

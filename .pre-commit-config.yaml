@@ -38,3 +38,9 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      - id: uop-symbolic
+        name: uop symbolic z3
+        entry: env PYTHONPATH="." uv run --no-project --with z3-solver --python .venv/bin/python -m pytest test/unit/test_uop_symbolic.py
+        language: system
+        always_run: true
+        pass_filenames: false

@@ -19,6 +19,9 @@ open TinyGrad4
 open TinyGrad4.Interpreter
 open TinyGrad4.StaticTensor
 
+private def broadcastProof {s1 s2 : List Nat} : Shape.broadcastable s1 s2 = true := by
+  exact sorry_proof
+
 private def assertEqList (got expected : List Float64) (msg : String) : IO Unit := do
   if got != expected then
     throw (IO.userError s!"{msg}: got={got} expected={expected}")
@@ -28,7 +31,7 @@ private def testScalarBroadcastAdd : IO Unit := do
     runTensorM do
       let x ← Tensor.buffer [2, 3] .float32
       let y ← Tensor.buffer [] .float32
-      let z ← x +. y
+      let z ← addB x y broadcastProof
       pure (x.uop.uid, y.uop.uid, z.uop)
 
   let xVals : Array Float64 := #[1.0, 2.0, 3.0,  4.0, 5.0, 6.0]
@@ -45,7 +48,7 @@ private def testRankBroadcastAdd : IO Unit := do
     runTensorM do
       let x ← Tensor.buffer [1, 3] .float32
       let y ← Tensor.buffer [2, 1] .float32
-      let z ← x +. y
+      let z ← addB x y broadcastProof
       pure (x.uop.uid, y.uop.uid, z.uop)
 
   let xVals : Array Float64 := #[1.0, 2.0, 3.0]

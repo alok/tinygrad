@@ -249,9 +249,33 @@ def binaryOp (op : Ops) (x y : UOp) : UOpM UOp := do
   let dtype := if op.producesBoolean then .bool else DType.promote x.dtype y.dtype
   mkUOp op dtype [x, y] .empty shape
 
+def binaryOpSame (op : Ops) (x y : UOp) (hShape : x.shape = y.shape) (hType : x.dtype = y.dtype) : UOpM UOp := do
+  let _ := hShape
+  let _ := hType
+  let dtype := if op.producesBoolean then .bool else x.dtype
+  mkUOp op dtype [x, y] .empty x.shape
+
+def binaryOpOfBroadcast (op : Ops) (x y : UOp) (h : Shape.broadcastable x.shape y.shape = true) : UOpM UOp := do
+  let _ := h
+  let shape := Shape.broadcastOut x.shape y.shape
+  let dtype := if op.producesBoolean then .bool else DType.promote x.dtype y.dtype
+  mkUOp op dtype [x, y] .empty shape
+
+def binaryOpOfBroadcastSame (op : Ops) (x y : UOp)
+    (hShape : Shape.broadcastable x.shape y.shape = true) (hType : x.dtype = y.dtype) : UOpM UOp := do
+  let _ := hShape
+  let _ := hType
+  let shape := Shape.broadcastOut x.shape y.shape
+  let dtype := if op.producesBoolean then .bool else x.dtype
+  mkUOp op dtype [x, y] .empty shape
+
 def reshape (x : UOp) (newShape : Shape) : UOpM UOp := do
   if !Shape.reshapeValid x.shape newShape then
     panic! s!"Invalid reshape {x.shape} -> {newShape}"
+  mkUOp .RESHAPE x.dtype [x] (.shape newShape) newShape
+
+def reshapeOfValid (x : UOp) (newShape : Shape) (h : Shape.reshapeValid x.shape newShape = true) : UOpM UOp := do
+  let _ := h
   mkUOp .RESHAPE x.dtype [x] (.shape newShape) newShape
 
 def expand (x : UOp) (newShape : Shape) : UOpM UOp := do
@@ -259,9 +283,18 @@ def expand (x : UOp) (newShape : Shape) : UOpM UOp := do
     panic! s!"Invalid expand {x.shape} -> {newShape}"
   mkUOp .EXPAND x.dtype [x] (.shape newShape) newShape
 
+def expandOfValid (x : UOp) (newShape : Shape) (h : Shape.expandValid x.shape newShape = true) : UOpM UOp := do
+  let _ := h
+  mkUOp .EXPAND x.dtype [x] (.shape newShape) newShape
+
 def permute (x : UOp) (perm : List Nat) : UOpM UOp := do
   if !Shape.permuteValid x.shape perm then
     panic! s!"Invalid permute {perm} for shape {x.shape}"
+  let newShape := Shape.permute x.shape perm
+  mkUOp .PERMUTE x.dtype [x] (.permutation perm) newShape
+
+def permuteOfValid (x : UOp) (perm : List Nat) (h : Shape.permuteValid x.shape perm = true) : UOpM UOp := do
+  let _ := h
   let newShape := Shape.permute x.shape perm
   mkUOp .PERMUTE x.dtype [x] (.permutation perm) newShape
 
@@ -271,9 +304,19 @@ def pad (x : UOp) (padding : List (Nat × Nat)) : UOpM UOp := do
   let newShape := Shape.pad x.shape padding
   mkUOp .PAD x.dtype [x] (.padding padding) newShape
 
+def padOfValid (x : UOp) (padding : List (Nat × Nat)) (h : Shape.padValid x.shape padding = true) : UOpM UOp := do
+  let _ := h
+  let newShape := Shape.pad x.shape padding
+  mkUOp .PAD x.dtype [x] (.padding padding) newShape
+
 def shrink (x : UOp) (bounds : List (Nat × Nat)) : UOpM UOp := do
   if !Shape.shrinkValid x.shape bounds then
     panic! s!"Invalid shrink {x.shape} with bounds {bounds}"
+  let newShape := Shape.shrink x.shape bounds
+  mkUOp .SHRINK x.dtype [x] (.bounds bounds) newShape
+
+def shrinkOfValid (x : UOp) (bounds : List (Nat × Nat)) (h : Shape.shrinkValid x.shape bounds = true) : UOpM UOp := do
+  let _ := h
   let newShape := Shape.shrink x.shape bounds
   mkUOp .SHRINK x.dtype [x] (.bounds bounds) newShape
 
@@ -281,6 +324,10 @@ def flip (x : UOp) (axes : List Nat) : UOpM UOp := do
   let okAxes := axes.all (fun ax => ax < x.shape.length)
   if !okAxes then
     panic! s!"Invalid flip axes {axes} for shape {x.shape}"
+  mkUOp .FLIP x.dtype [x] (.axes axes) x.shape
+
+def flipOfValid (x : UOp) (axes : List Nat) (h : Shape.flipValid x.shape axes = true) : UOpM UOp := do
+  let _ := h
   mkUOp .FLIP x.dtype [x] (.axes axes) x.shape
 
 def reduce (x : UOp) (reduceOp : Ops) (axes : List Nat) (keepdim : Bool := true) : UOpM UOp := do
@@ -363,6 +410,22 @@ def where_ (cond x y : UOp) : UOpM UOp := do
     | some s => pure s
     | Option.none => panic! s!"Cannot broadcast shapes in where"
   mkUOp .WHERE x.dtype [cond, x, y] .empty shape
+
+def whereOfBroadcast (cond x y : UOp)
+    (hXY : Shape.broadcastable x.shape y.shape = true)
+    (hCond : Shape.broadcastable cond.shape (Shape.broadcastOut x.shape y.shape) = true) : UOpM UOp := do
+  let _ := hXY
+  let _ := hCond
+  let shapeXY := Shape.broadcastOut x.shape y.shape
+  let shape := Shape.broadcastOut cond.shape shapeXY
+  mkUOp .WHERE x.dtype [cond, x, y] .empty shape
+
+def catOfValid (xs : List UOp) (axis : Nat) (dtype : DType)
+    (h : Shape.concatListValid (xs.map (fun u => u.shape)) axis = true) : UOpM UOp := do
+  let _ := h
+  let shapes := xs.map (fun u => u.shape)
+  let outShape := Shape.concatOutList shapes axis
+  mkUOp .CAT dtype xs (.axes [axis]) outShape
 
 end UOp
 

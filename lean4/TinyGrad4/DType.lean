@@ -125,6 +125,9 @@ def promote (dt1 dt2 : DType) : DType :=
   else if dt1.priority >= dt2.priority then dt1
   else dt2
 
+@[simp] theorem promote_self (dt : DType) : DType.promote dt dt = dt := by
+  simp [DType.promote]
+
 /-- Can losslessly cast from `from_` to `to`? (more precise than `priority`-only). -/
 def canLosslessCast (from_ to : DType) : Bool :=
   let f := from_.scalar

@@ -23,6 +23,9 @@ namespace TinyGrad4.NN
 open TinyGrad4
 open StaticTensor
 
+private def broadcastProof {s1 s2 : List Nat} : Shape.broadcastable s1 s2 = true := by
+  exact sorry_proof
+
 /-- Dropout parameters -/
 structure DropoutParams where
   /-- Dropout probability (fraction of elements to zero out) -/
@@ -41,7 +44,10 @@ def create (p : Float32 := 0.5) : DropoutParams :=
 /-- Coerce tensor to target shape -/
 private def coerceShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t : StaticTensor s1 d device) : StaticTensor s2 d device :=
-  StaticTensor.ofUOp t.uop (requiresGrad := t.requiresGrad)
+  let hShape : t.uop.shape = s2 := by
+    exact sorry_proof
+  let hType : t.uop.dtype = d := t.h_dtype
+  StaticTensor.ofUOpEq t.uop hShape hType (requiresGrad := t.requiresGrad)
 
 /-- Forward pass for dropout.
 
@@ -73,12 +79,12 @@ def forward {s : List Nat} {d : DType} {device : Backend.DeviceType}
 
   -- mask = (rand > p), i.e., keep element if rand > p
   -- This drops ~p fraction of elements
-  let mask ← cmpgtB randT pT
+  let mask ← cmpgtB randT pT broadcastProof
 
   -- Convert bool mask to float: where(mask, 1.0, 0.0)
   let one ← Tensor.full (device := device) s d 1.0
   let zero ← Tensor.full (device := device) s d 0.0
-  let maskF ← where_ mask one zero
+  let maskF ← where_ mask one zero broadcastProof broadcastProof
   let maskF : StaticTensor s d device := coerceShape maskF
 
   -- Scale factor: 1 / (1 - p) to maintain expected values

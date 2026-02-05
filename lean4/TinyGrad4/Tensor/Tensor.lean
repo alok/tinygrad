@@ -65,6 +65,10 @@ def ofUOp {s : List Nat} {d : DType} {device : Backend.DeviceType} (u : UOp)
   else
     panic! s!"StaticTensor shape mismatch: expected {repr s}, got {repr u.shape}"
 
+def ofUOpEq {s : List Nat} {d : DType} {device : Backend.DeviceType} (u : UOp)
+    (hShape : u.shape = s) (hType : u.dtype = d) (requiresGrad : Bool := false) : StaticTensor s d device :=
+  { uop := u, h_shape := hShape, h_dtype := hType, requiresGrad }
+
 end StaticTensor
 
 abbrev TensorM := UOpM
@@ -77,35 +81,35 @@ def runTensorMWithInternLimit (limit : Nat) (m : TensorM α) : α :=
 
 namespace Tensor
 
-def full (device : Backend.DeviceType := .CPU) (shape : List Nat) (dtype : DType) (value : Float32)
+def full (shape : List Nat) (dtype : DType) (value : Float32) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) := do
   let const ← UOp.const dtype value
   let expanded ← UOp.expand const shape
   pure (StaticTensor.ofUOp expanded)
 
-def fullInt (device : Backend.DeviceType := .CPU) (shape : List Nat) (dtype : DType) (value : Int)
+def fullInt (shape : List Nat) (dtype : DType) (value : Int) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) := do
   let const ← UOp.constInt dtype value
   let expanded ← UOp.expand const shape
   pure (StaticTensor.ofUOp expanded)
 
-def fullNat (device : Backend.DeviceType := .CPU) (shape : List Nat) (dtype : DType) (value : Nat)
+def fullNat (shape : List Nat) (dtype : DType) (value : Nat) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) := do
   let const ← UOp.constNat dtype value
   let expanded ← UOp.expand const shape
   pure (StaticTensor.ofUOp expanded)
 
-def fullBool (device : Backend.DeviceType := .CPU) (shape : List Nat) (value : Bool)
+def fullBool (shape : List Nat) (value : Bool) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape .bool device) := do
   let const ← UOp.constBool value
   let expanded ← UOp.expand const shape
   pure (StaticTensor.ofUOp expanded)
 
-def zeros (device : Backend.DeviceType := .CPU) (shape : List Nat) (dtype : DType := .float32)
+def zeros (shape : List Nat) (dtype : DType := .float32) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) :=
   full (device := device) shape dtype 0.0
 
-def ones (device : Backend.DeviceType := .CPU) (shape : List Nat) (dtype : DType := .float32)
+def ones (shape : List Nat) (dtype : DType := .float32) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) :=
   full (device := device) shape dtype 1.0
 
@@ -166,7 +170,7 @@ private def randintArray (n : Nat) (seed : Nat) (low high : Int) : Array Float32
     out := out.push (intToFloat v).toFloat32
   return out
 
-def arange (device : Backend.DeviceType := .CPU) (n : Nat) (dtype : DType := .float32)
+def arange (n : Nat) (dtype : DType := .float32) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor [n] dtype device) := do
   let vals : Array Float32 := Id.run do
     let mut out := Array.emptyWithCapacity n
@@ -180,7 +184,7 @@ def arange (device : Backend.DeviceType := .CPU) (n : Nat) (dtype : DType := .fl
     let casted ← UOp.cast base.uop dtype
     pure (StaticTensor.ofUOp casted)
 
-def linspace (device : Backend.DeviceType := .CPU) (start stop : Float32) (steps : Nat) (dtype : DType := .float32)
+def linspace (start stop : Float32) (steps : Nat) (dtype : DType := .float32) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor [steps] dtype device) := do
   let startF := start.toFloat
   let stopF := stop.toFloat
@@ -200,7 +204,7 @@ def linspace (device : Backend.DeviceType := .CPU) (start stop : Float32) (steps
     let casted ← UOp.cast base.uop dtype
     pure (StaticTensor.ofUOp casted)
 
-def rand (device : Backend.DeviceType := .CPU) (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0)
+def rand (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) := do
   let numel := listProd shape
   let vals := randArray numel seed
@@ -212,7 +216,7 @@ def rand (device : Backend.DeviceType := .CPU) (shape : Shape) (dtype : DType :=
     let casted ← UOp.cast reshaped dtype
     pure (StaticTensor.ofUOp casted)
 
-def randn (device : Backend.DeviceType := .CPU) (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0)
+def randn (shape : Shape) (dtype : DType := .float32) (seed : Nat := 0) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) := do
   let numel := listProd shape
   let vals := randnArray numel seed
@@ -224,7 +228,7 @@ def randn (device : Backend.DeviceType := .CPU) (shape : Shape) (dtype : DType :
     let casted ← UOp.cast reshaped dtype
     pure (StaticTensor.ofUOp casted)
 
-def randint (device : Backend.DeviceType := .CPU) (shape : Shape) (low high : Int) (dtype : DType := .int32) (seed : Nat := 0)
+def randint (shape : Shape) (low high : Int) (dtype : DType := .int32) (seed : Nat := 0) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) := do
   let numel := listProd shape
   let vals := randintArray numel seed low high

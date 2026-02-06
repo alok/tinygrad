@@ -8,289 +8,232 @@ namespace TinyGrad4
 
 namespace StaticTensor
 
-private def sameShape {s : List Nat} {d : DType} {device : Backend.DeviceType}
+private def shapeEq {s : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 t2 : StaticTensor s d device) : t1.uop.shape = t2.uop.shape := by
-  simpa [t1.h_shape, t2.h_shape]
+  simp [t1.h_shape, t2.h_shape]
 
-private def sameDType {s : List Nat} {d : DType} {device : Backend.DeviceType}
+private def dtypeEq {s : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 t2 : StaticTensor s d device) : t1.uop.dtype = t2.uop.dtype := by
-  simpa [t1.h_dtype, t2.h_dtype]
+  simp [t1.h_dtype, t2.h_dtype]
 
-private def broadcastableProof {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+private def liftBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true) : Shape.broadcastable t1.uop.shape t2.uop.shape = true := by
   simpa [t1.h_shape, t2.h_shape] using h
 
-private def ofUOpSame {s : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t : StaticTensor s d device) (u : UOp) (requiresGrad : Bool := t.requiresGrad)
-    : StaticTensor s d device :=
-  let hShape : u.shape = s := by
-    exact sorry_proof
-  let hType : u.dtype = d := by
-    exact sorry_proof
-  StaticTensor.ofUOpEq u hShape hType (requiresGrad := requiresGrad)
-
-private def ofUOpSameBool {s : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t : StaticTensor s d device) (u : UOp) (requiresGrad : Bool := t.requiresGrad)
-    : StaticTensor s .bool device :=
-  let hShape : u.shape = s := by
-    exact sorry_proof
-  let hType : u.dtype = .bool := by
-    exact sorry_proof
-  StaticTensor.ofUOpEq u hShape hType (requiresGrad := requiresGrad)
-
-private def ofUOpBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
-    (u : UOp) (requiresGrad : Bool := t1.requiresGrad || t2.requiresGrad)
-    : StaticTensor (Shape.broadcastOut s1 s2) d device :=
-  let hShape : u.shape = Shape.broadcastOut s1 s2 := by
-    exact sorry_proof
-  let hType : u.dtype = d := by
-    exact sorry_proof
-  StaticTensor.ofUOpEq u hShape hType (requiresGrad := requiresGrad)
-
-private def ofUOpBroadcastBool {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
-    (u : UOp) (requiresGrad : Bool := t1.requiresGrad || t2.requiresGrad)
-    : StaticTensor (Shape.broadcastOut s1 s2) .bool device :=
-  let hShape : u.shape = Shape.broadcastOut s1 s2 := by
-    exact sorry_proof
-  let hType : u.dtype = .bool := by
-    exact sorry_proof
-  StaticTensor.ofUOpEq u hShape hType (requiresGrad := requiresGrad)
-
-private def broadcastProof {s1 s2 : List Nat} : Shape.broadcastable s1 s2 = true := by
-  exact sorry_proof
+private def build {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (u : UOp) (requiresGrad : Bool := false) : StaticTensor s d device :=
+  StaticTensor.ofUOpTrusted u (requiresGrad := requiresGrad)
 
 def add {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .ADD t1.uop t2.uop hShape hType
-  pure (ofUOpSame t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def addB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .ADD t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcast t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .ADD t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def mul {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .MUL t1.uop t2.uop hShape hType
-  pure (ofUOpSame t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def mulB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .MUL t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcast t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .MUL t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def sub {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .SUB t1.uop t2.uop hShape hType
-  pure (ofUOpSame t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def subB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .SUB t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcast t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .SUB t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def div {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .FDIV t1.uop t2.uop hShape hType
-  pure (ofUOpSame t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def divB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .FDIV t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcast t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .FDIV t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def pow {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .POW t1.uop t2.uop hShape hType
-  pure (ofUOpSame t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def powB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .POW t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcast t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .POW t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cmplt {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s .bool device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .CMPLT t1.uop t2.uop hShape hType
-  pure (ofUOpSameBool t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cmpltB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .CMPLT t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcastBool t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .CMPLT t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cmpgt {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s .bool device) := do
   cmplt t2 t1
 
 def cmpgtB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
+    (_h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
   let hShape : Shape.broadcastable t2.uop.shape t1.uop.shape = true := by
     exact sorry_proof
   let hType : t2.uop.dtype = t1.uop.dtype := by
-    simpa [t2.h_dtype, t1.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .CMPLT t2.uop t1.uop hShape hType
-  let hResShape : result.shape = Shape.broadcastOut s1 s2 := by
-    exact sorry_proof
-  let hResType : result.dtype = .bool := by
-    exact sorry_proof
-  pure (StaticTensor.ofUOpEq result hResShape hResType (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t2.h_dtype, t1.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .CMPLT t2.uop t1.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cmpeq {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s .bool device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .CMPEQ t1.uop t2.uop hShape hType
-  pure (ofUOpSameBool t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cmpeqB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .CMPEQ t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcastBool t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .CMPEQ t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cmpne {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s .bool device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .CMPNE t1.uop t2.uop hShape hType
-  pure (ofUOpSameBool t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cmpneB {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .CMPNE t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcastBool t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .CMPNE t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cat {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
-    (axis : Nat) (h : Shape.concatValid s1 s2 axis = true) : TensorM (StaticTensor (Shape.concatOut s1 s2 axis) d device) := do
+    (axis : Nat) (_h : Shape.concatValid s1 s2 axis = true) : TensorM (StaticTensor (Shape.concatOut s1 s2 axis) d device) := do
   let hList : Shape.concatListValid [s1, s2] axis = true := by
     exact sorry_proof
   let hList' : Shape.concatListValid [t1.uop.shape, t2.uop.shape] axis = true := by
     simpa [t1.h_shape, t2.h_shape] using hList
-  let out ← UOp.catOfValid [t1.uop, t2.uop] axis d hList'
-  let hShape : out.shape = Shape.concatOut s1 s2 axis := by
-    exact sorry_proof
-  let hType : out.dtype = d := by
-    exact sorry_proof
-  pure (StaticTensor.ofUOpEq out hShape hType (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  let out ← UOp.catValid [t1.uop, t2.uop] axis d hList'
+  pure (build out (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def catList {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : TensorList d device shapes) (axis : Nat)
-    (h : Shape.concatListValid shapes axis = true)
+    (_h : Shape.concatListValid shapes axis = true)
     : TensorM (StaticTensor (Shape.concatOutList shapes axis) d device) := do
   let uops := TensorList.toUOps ts
   let h' : Shape.concatListValid (uops.map (fun u => u.shape)) axis = true := by
     exact sorry_proof
-  let out ← UOp.catOfValid uops axis d h'
+  let out ← UOp.catValid uops axis d h'
   let reqGrad := TensorList.anyRequiresGrad ts
-  let hShape : out.shape = Shape.concatOutList shapes axis := by
-    exact sorry_proof
-  let hType : out.dtype = d := by
-    exact sorry_proof
-  pure (StaticTensor.ofUOpEq out hShape hType (requiresGrad := reqGrad))
+  pure (build out (requiresGrad := reqGrad))
 
 def bitand {s : List Nat} {device : Backend.DeviceType} (t1 t2 : StaticTensor s .bool device)
     : TensorM (StaticTensor s .bool device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .AND t1.uop t2.uop hShape hType
-  pure (ofUOpSame t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def bitandB {s1 s2 : List Nat} {device : Backend.DeviceType} (t1 : StaticTensor s1 .bool device) (t2 : StaticTensor s2 .bool device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .AND t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcast t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .AND t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def bitor {s : List Nat} {device : Backend.DeviceType} (t1 t2 : StaticTensor s .bool device)
     : TensorM (StaticTensor s .bool device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .OR t1.uop t2.uop hShape hType
-  pure (ofUOpSame t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def bitorB {s1 s2 : List Nat} {device : Backend.DeviceType} (t1 : StaticTensor s1 .bool device) (t2 : StaticTensor s2 .bool device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .OR t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcast t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .OR t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def bitxor {s : List Nat} {device : Backend.DeviceType} (t1 t2 : StaticTensor s .bool device)
     : TensorM (StaticTensor s .bool device) := do
-  let hShape := sameShape t1 t2
-  let hType := sameDType t1 t2
+  let hShape := shapeEq t1 t2
+  let hType := dtypeEq t1 t2
   let result ← UOp.binaryOpSame .XOR t1.uop t2.uop hShape hType
-  pure (ofUOpSame t1 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def bitxorB {s1 s2 : List Nat} {device : Backend.DeviceType} (t1 : StaticTensor s1 .bool device) (t2 : StaticTensor s2 .bool device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
-  let hShape := broadcastableProof t1 t2 h
+  let hShape := liftBroadcast t1 t2 h
   let hType : t1.uop.dtype = t2.uop.dtype := by
-    simpa [t1.h_dtype, t2.h_dtype]
-  let result ← UOp.binaryOpOfBroadcastSame .XOR t1.uop t2.uop hShape hType
-  pure (ofUOpBroadcast t1 t2 result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
+    simp [t1.h_dtype, t2.h_dtype]
+  let result ← UOp.binaryOpBroadcastSame .XOR t1.uop t2.uop hShape hType
+  pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cast {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (dtype : DType)
     : TensorM (StaticTensor s dtype device) := do
   let result ← UOp.cast t.uop dtype
-  let hShape : result.shape = s := by
-    exact sorry_proof
-  let hType : result.dtype = dtype := by
-    exact sorry_proof
-  pure (StaticTensor.ofUOpEq result hShape hType (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 def bitcast {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (dtype : DType)
     : TensorM (StaticTensor s dtype device) := do
   let result ← UOp.bitcast t.uop dtype
-  let hShape : result.shape = s := by
-    exact sorry_proof
-  let hType : result.dtype = dtype := by
-    exact sorry_proof
-  pure (StaticTensor.ofUOpEq result hShape hType (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 def to {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (dtype : DType)
     : TensorM (StaticTensor s dtype device) :=
@@ -309,12 +252,44 @@ def where_ {s1 s2 s3 : List Nat} {d : DType} {device : Backend.DeviceType}
     simpa [x.h_shape, y.h_shape] using hXY
   let hCond' : Shape.broadcastable cond.uop.shape (Shape.broadcastOut x.uop.shape y.uop.shape) = true := by
     simpa [cond.h_shape, x.h_shape, y.h_shape] using hCond
-  let out ← UOp.whereOfBroadcast cond.uop x.uop y.uop hXY' hCond'
-  let hShape : out.shape = Shape.broadcastOut s1 (Shape.broadcastOut s2 s3) := by
-    exact sorry_proof
-  let hType : out.dtype = d := by
-    exact sorry_proof
-  pure (StaticTensor.ofUOpEq out hShape hType (requiresGrad := x.requiresGrad || y.requiresGrad))
+  let out ← UOp.whereBroadcast cond.uop x.uop y.uop hXY' hCond'
+  pure (build out (requiresGrad := x.requiresGrad || y.requiresGrad))
+
+/-- Readable alias for broadcasted add. -/
+def addBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
+  addB x y h
+
+/-- Readable alias for broadcasted subtraction. -/
+def subBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
+  subB x y h
+
+/-- Readable alias for broadcasted multiplication. -/
+def mulBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
+  mulB x y h
+
+/-- Readable alias for broadcasted greater-than comparison. -/
+def cmpgtBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
+  cmpgtB x y h
+
+/-- Readable alias for ternary select (`cond ? x : y`) with broadcasting. -/
+def select {s1 s2 s3 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (cond : StaticTensor s1 .bool device) (x : StaticTensor s2 d device) (y : StaticTensor s3 d device)
+    (hXY : Shape.broadcastable s2 s3 = true)
+    (hCond : Shape.broadcastable s1 (Shape.broadcastOut s2 s3) = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 (Shape.broadcastOut s2 s3)) d device) :=
+  where_ cond x y hXY hCond
 
 infixl:65 " +. " => addB
 infixl:65 " -. " => subB
@@ -323,11 +298,11 @@ infixl:70 " /. " => divB
 
 def neg {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.neg t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 def trunc {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.trunc t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 def floor {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let truncT ← trunc t
@@ -335,7 +310,7 @@ def floor {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTe
   let one ← UOp.const d 1.0
   let truncMinusOne ← UOp.sub truncT.uop one
   let out ← UOp.where_ isNeg truncMinusOne truncT.uop
-  pure (ofUOpSame t out (requiresGrad := t.requiresGrad))
+  pure (build out (requiresGrad := t.requiresGrad))
 
 def ceil {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let truncT ← trunc t
@@ -343,44 +318,44 @@ def ceil {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTen
   let one ← UOp.const d 1.0
   let truncPlusOne ← UOp.add truncT.uop one
   let out ← UOp.where_ isPos truncPlusOne truncT.uop
-  pure (ofUOpSame t out (requiresGrad := t.requiresGrad))
+  pure (build out (requiresGrad := t.requiresGrad))
 
 def sqrt {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.sqrt t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 def rsqrt {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let sqrtT ← sqrt t
   let result ← UOp.recip sqrtT.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 def exp2 {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.exp2 t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 def log2 {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.log2 t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 /-- Sine function -/
 def sin {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.sin t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 /-- Cosine function -/
 def cos {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.cos t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 /-- Tangent function -/
 def tan {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.tan t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 /-- Reciprocal (1/x) -/
 def recip {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.recip t.uop
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 def sum {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (Scalar d device) := do
   let axes := listRange s.length
@@ -419,7 +394,7 @@ def exp {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTens
   let log2eConst ← UOp.const d log2ef32
   let scaled ← UOp.mul t.uop log2eConst
   let result ← UOp.exp2 scaled
-  pure (ofUOpSame t result (requiresGrad := t.requiresGrad))
+  pure (build result (requiresGrad := t.requiresGrad))
 
 /-- Natural logarithm: ln(x) = log2(x) * ln(2) -/
 def log {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
@@ -1177,10 +1152,8 @@ def linearOpt {batch inDim outDim : Nat} {d : DType} {device : Backend.DeviceTyp
   match bias with
   | none => pure y
   | some b =>
-    let yb ← addB y b broadcastProof
-    let yb' : Matrix batch outDim d device :=
-      StaticTensor.ofUOpEq yb.uop (by exact sorry_proof) (by exact sorry_proof) (requiresGrad := yb.requiresGrad)
-    pure yb'
+    let yb ← addB y b (by exact sorry_proof)
+    pure (build yb.uop (requiresGrad := yb.requiresGrad))
 
 /-- Fully-connected layer with bias: X @ W + b (broadcasted over batch). -/
 def linearBias {batch inDim outDim : Nat} {d : DType} {device : Backend.DeviceType}

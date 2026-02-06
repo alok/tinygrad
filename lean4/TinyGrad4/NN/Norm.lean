@@ -42,14 +42,6 @@ def create (device : Backend.DeviceType := .CPU) (dim : Nat) (dt : DType := .flo
     pure none
   pure { weight, eps }
 
-/-- Coerce tensor to target shape (uses sorry_proof for shape equality) -/
-private def coerceShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t : StaticTensor s1 d device) : StaticTensor s2 d device :=
-  let hShape : t.uop.shape = s2 := by
-    exact sorry_proof
-  let hType : t.uop.dtype = d := t.h_dtype
-  StaticTensor.ofUOpEq t.uop hShape hType (requiresGrad := t.requiresGrad)
-
 /-- Compute RMS norm: x / sqrt(mean(x^2) + eps) -/
 private def rmsNormInternal {s : List Nat} {d : DType} {device : Backend.DeviceType} (x : StaticTensor s d device) (eps : Float32)
     : TensorM (StaticTensor s d device) := do
@@ -60,12 +52,12 @@ private def rmsNormInternal {s : List Nat} {d : DType} {device : Backend.DeviceT
   let meanSq ← meanAxis xSq axis true
   -- mean + eps
   let epsT ← Tensor.full (device := device) (Shape.reduce s [axis] true) d eps
-  let meanEps ← addB meanSq epsT broadcastProof
+  let meanEps ← addBroadcast meanSq epsT broadcastProof
   -- rsqrt(mean + eps)
   let scale ← rsqrt meanEps
   -- x * scale (broadcast) - coerce back to original shape
-  let result ← mulB x scale broadcastProof
-  pure (coerceShape result)
+  let result ← mulBroadcast x scale broadcastProof
+  pure (StaticTensor.assumeShape result)
 
 /-- Forward pass -/
 def forward {s : List Nat} {device : Backend.DeviceType} (params : RMSNormParams dim dt device)
@@ -79,8 +71,8 @@ def forward {s : List Nat} {device : Backend.DeviceType} (params : RMSNormParams
   | none => pure normalized
   | some w =>
     -- Broadcast weight [dim] to match input shape
-    let result ← mulB normalized w broadcastProof
-    pure (coerceShape result)
+    let result ← mulBroadcast normalized w broadcastProof
+    pure (StaticTensor.assumeShape result)
 
 /-- Get trainable parameters -/
 def parameters {device : Backend.DeviceType} (params : RMSNormParams dim dt device) : List UOp :=
@@ -114,14 +106,6 @@ def create (device : Backend.DeviceType := .CPU) (normalizedShape : List Nat) (d
     pure (none, none)
   pure { weight, bias, eps }
 
-/-- Coerce tensor to target shape (uses sorry_proof for shape equality) -/
-private def coerceShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t : StaticTensor s1 d device) : StaticTensor s2 d device :=
-  let hShape : t.uop.shape = s2 := by
-    exact sorry_proof
-  let hType : t.uop.dtype = d := t.h_dtype
-  StaticTensor.ofUOpEq t.uop hShape hType (requiresGrad := t.requiresGrad)
-
 /-- Compute layer norm: (x - mean) / sqrt(var + eps)
     Simplified: normalizes over the last axis -/
 private def layerNormInternal {s : List Nat} {d : DType} {device : Backend.DeviceType} (x : StaticTensor s d device)
@@ -130,19 +114,19 @@ private def layerNormInternal {s : List Nat} {d : DType} {device : Backend.Devic
   -- mean
   let m ← meanAxis x axis true
   -- x - mean
-  let diff ← subB x m broadcastProof
-  let diff : StaticTensor s d device := coerceShape diff
+  let diff ← subBroadcast x m broadcastProof
+  let diff : StaticTensor s d device := StaticTensor.assumeShape diff
   -- variance = mean((x - mean)^2)
   let diffSq ← mul diff diff
   let v ← meanAxis diffSq axis true
   -- add epsilon
   let epsT ← Tensor.full (device := device) (Shape.reduce s [axis] true) d eps
-  let vEps ← addB v epsT broadcastProof
+  let vEps ← addBroadcast v epsT broadcastProof
   -- 1 / sqrt(var + eps)
   let invStd ← rsqrt vEps
   -- normalize
-  let result ← mulB diff invStd broadcastProof
-  pure (coerceShape result)
+  let result ← mulBroadcast diff invStd broadcastProof
+  pure (StaticTensor.assumeShape result)
 
 /-- Forward pass -/
 def forward {s : List Nat} {device : Backend.DeviceType} (params : LayerNormParams normalizedShape dt device)
@@ -154,16 +138,16 @@ def forward {s : List Nat} {device : Backend.DeviceType} (params : LayerNormPara
   match params.weight, params.bias with
   | none, none => pure normalized
   | some w, none =>
-    let result ← mulB normalized w broadcastProof
-    pure (coerceShape result)
+    let result ← mulBroadcast normalized w broadcastProof
+    pure (StaticTensor.assumeShape result)
   | none, some b =>
-    let result ← addB normalized b broadcastProof
-    pure (coerceShape result)
+    let result ← addBroadcast normalized b broadcastProof
+    pure (StaticTensor.assumeShape result)
   | some w, some b =>
-    let scaled ← mulB normalized w broadcastProof
-    let scaled : StaticTensor s dt device := coerceShape scaled
-    let result ← addB scaled b broadcastProof
-    pure (coerceShape result)
+    let scaled ← mulBroadcast normalized w broadcastProof
+    let scaled : StaticTensor s dt device := StaticTensor.assumeShape scaled
+    let result ← addBroadcast scaled b broadcastProof
+    pure (StaticTensor.assumeShape result)
 
 /-- Get trainable parameters -/
 def parameters {device : Backend.DeviceType} (params : LayerNormParams normalizedShape dt device) : List UOp :=
@@ -222,14 +206,6 @@ def create (device : Backend.DeviceType := .CPU) (numFeatures : Nat) (dt : DType
     training := true
   }
 
-/-- Coerce tensor to target shape -/
-private def coerceShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t : StaticTensor s1 d device) : StaticTensor s2 d device :=
-  let hShape : t.uop.shape = s2 := by
-    exact sorry_proof
-  let hType : t.uop.dtype = d := t.h_dtype
-  StaticTensor.ofUOpEq t.uop hShape hType (requiresGrad := t.requiresGrad)
-
 /-- Forward pass for BatchNorm2d: Input [N, C, H, W]
     Normalizes over N, H, W dimensions, separately for each channel C.
 
@@ -247,8 +223,8 @@ def forward2d {batch channels height width : Nat} {device : Backend.DeviceType}
     let batchMean ← meanAxis m2 0 true -- [1, C, 1, 1]
 
     -- Compute variance: var = mean((x - mean)^2)
-    let diff ← subB x batchMean broadcastProof
-    let diff : StaticTensor [batch, channels, height, width] dt device := coerceShape diff
+    let diff ← subBroadcast x batchMean broadcastProof
+    let diff : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape diff
     let diffSq ← mul diff diff
     let v1 ← meanAxis diffSq 3 true
     let v2 ← meanAxis v1 2 true
@@ -256,39 +232,39 @@ def forward2d {batch channels height width : Nat} {device : Backend.DeviceType}
 
     -- Normalize: (x - mean) / sqrt(var + eps)
     let epsT ← Tensor.full (device := device) [1, channels, 1, 1] dt params.eps
-    let varEps ← addB batchVar epsT broadcastProof
-    let varEps : StaticTensor [1, channels, 1, 1] dt device := coerceShape varEps
+    let varEps ← addBroadcast batchVar epsT broadcastProof
+    let varEps : StaticTensor [1, channels, 1, 1] dt device := StaticTensor.assumeShape varEps
     let invStd ← rsqrt varEps
-    let normalized ← mulB diff invStd broadcastProof
-    let normalized : StaticTensor [batch, channels, height, width] dt device := coerceShape normalized
+    let normalized ← mulBroadcast diff invStd broadcastProof
+    let normalized : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape normalized
 
     -- Apply affine: y = gamma * normalized + beta
     let weightB ← reshapeUnsafe params.weight [1, channels, 1, 1]
     let biasB ← reshapeUnsafe params.bias [1, channels, 1, 1]
-    let scaled ← mulB normalized weightB broadcastProof
-    let scaled : StaticTensor [batch, channels, height, width] dt device := coerceShape scaled
-    let result ← addB scaled biasB broadcastProof
-    pure (coerceShape result)
+    let scaled ← mulBroadcast normalized weightB broadcastProof
+    let scaled : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape scaled
+    let result ← addBroadcast scaled biasB broadcastProof
+    pure (StaticTensor.assumeShape result)
   else
     -- Eval mode: use running statistics
     let meanB ← reshapeUnsafe params.runningMean [1, channels, 1, 1]
-    let diff ← subB x meanB broadcastProof
-    let diff : StaticTensor [batch, channels, height, width] dt device := coerceShape diff
+    let diff ← subBroadcast x meanB broadcastProof
+    let diff : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape diff
 
     let epsT ← Tensor.full (device := device) [1, channels, 1, 1] dt params.eps
     let varB ← reshapeUnsafe params.runningVar [1, channels, 1, 1]
-    let varEps ← addB varB epsT broadcastProof
-    let varEps : StaticTensor [1, channels, 1, 1] dt device := coerceShape varEps
+    let varEps ← addBroadcast varB epsT broadcastProof
+    let varEps : StaticTensor [1, channels, 1, 1] dt device := StaticTensor.assumeShape varEps
     let invStd ← rsqrt varEps
-    let normalized ← mulB diff invStd broadcastProof
-    let normalized : StaticTensor [batch, channels, height, width] dt device := coerceShape normalized
+    let normalized ← mulBroadcast diff invStd broadcastProof
+    let normalized : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape normalized
 
     let weightB ← reshapeUnsafe params.weight [1, channels, 1, 1]
     let biasB ← reshapeUnsafe params.bias [1, channels, 1, 1]
-    let scaled ← mulB normalized weightB broadcastProof
-    let scaled : StaticTensor [batch, channels, height, width] dt device := coerceShape scaled
-    let result ← addB scaled biasB broadcastProof
-    pure (coerceShape result)
+    let scaled ← mulBroadcast normalized weightB broadcastProof
+    let scaled : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape scaled
+    let result ← addBroadcast scaled biasB broadcastProof
+    pure (StaticTensor.assumeShape result)
 
 /-- Forward pass for BatchNorm1d: Input [N, C] or [N, C, L]
     Normalizes over N (and L if present), separately for each channel C -/
@@ -301,46 +277,46 @@ def forward1d {batch channels : Nat} {device : Backend.DeviceType}
     let batchMean ← meanAxis x 0 true  -- [1, C]
 
     -- Compute variance
-    let diff ← subB x batchMean broadcastProof
-    let diff : StaticTensor [batch, channels] dt device := coerceShape diff
+    let diff ← subBroadcast x batchMean broadcastProof
+    let diff : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape diff
     let diffSq ← mul diff diff
     let batchVar ← meanAxis diffSq 0 true -- [1, C]
 
     -- Normalize
     let epsT ← Tensor.full (device := device) [1, channels] dt params.eps
-    let varEps ← addB batchVar epsT broadcastProof
-    let varEps : StaticTensor [1, channels] dt device := coerceShape varEps
+    let varEps ← addBroadcast batchVar epsT broadcastProof
+    let varEps : StaticTensor [1, channels] dt device := StaticTensor.assumeShape varEps
     let invStd ← rsqrt varEps
-    let normalized ← mulB diff invStd broadcastProof
-    let normalized : StaticTensor [batch, channels] dt device := coerceShape normalized
+    let normalized ← mulBroadcast diff invStd broadcastProof
+    let normalized : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape normalized
 
     -- Apply affine
     let weightB ← reshapeUnsafe params.weight [1, channels]
     let biasB ← reshapeUnsafe params.bias [1, channels]
-    let scaled ← mulB normalized weightB broadcastProof
-    let scaled : StaticTensor [batch, channels] dt device := coerceShape scaled
-    let result ← addB scaled biasB broadcastProof
-    pure (coerceShape result)
+    let scaled ← mulBroadcast normalized weightB broadcastProof
+    let scaled : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape scaled
+    let result ← addBroadcast scaled biasB broadcastProof
+    pure (StaticTensor.assumeShape result)
   else
     -- Eval mode: use running statistics
     let meanB ← reshapeUnsafe params.runningMean [1, channels]
-    let diff ← subB x meanB broadcastProof
-    let diff : StaticTensor [batch, channels] dt device := coerceShape diff
+    let diff ← subBroadcast x meanB broadcastProof
+    let diff : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape diff
 
     let epsT ← Tensor.full (device := device) [1, channels] dt params.eps
     let varB ← reshapeUnsafe params.runningVar [1, channels]
-    let varEps ← addB varB epsT broadcastProof
-    let varEps : StaticTensor [1, channels] dt device := coerceShape varEps
+    let varEps ← addBroadcast varB epsT broadcastProof
+    let varEps : StaticTensor [1, channels] dt device := StaticTensor.assumeShape varEps
     let invStd ← rsqrt varEps
-    let normalized ← mulB diff invStd broadcastProof
-    let normalized : StaticTensor [batch, channels] dt device := coerceShape normalized
+    let normalized ← mulBroadcast diff invStd broadcastProof
+    let normalized : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape normalized
 
     let weightB ← reshapeUnsafe params.weight [1, channels]
     let biasB ← reshapeUnsafe params.bias [1, channels]
-    let scaled ← mulB normalized weightB broadcastProof
-    let scaled : StaticTensor [batch, channels] dt device := coerceShape scaled
-    let result ← addB scaled biasB broadcastProof
-    pure (coerceShape result)
+    let scaled ← mulBroadcast normalized weightB broadcastProof
+    let scaled : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape scaled
+    let result ← addBroadcast scaled biasB broadcastProof
+    pure (StaticTensor.assumeShape result)
 
 /-- Set training mode -/
 def train {device : Backend.DeviceType} (params : BatchNormParams numFeatures dt device)

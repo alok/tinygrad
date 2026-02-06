@@ -5,13 +5,9 @@ namespace TinyGrad4
 
 namespace StaticTensor
 
-private def ofUOpSameDType {s s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
-    (u : UOp) (requiresGrad : Bool := t.requiresGrad) : StaticTensor s2 d device :=
-  let hShape : u.shape = s2 := by
-    exact sorry_proof
-  let hType : u.dtype = d := by
-    exact sorry_proof
-  StaticTensor.ofUOpEq u hShape hType (requiresGrad := requiresGrad)
+private def build {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (u : UOp) (requiresGrad : Bool := false) : StaticTensor s d device :=
+  StaticTensor.ofUOpTrusted u (requiresGrad := requiresGrad)
 
 def reshapeUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (newShape : List Nat)
@@ -24,8 +20,8 @@ def reshape {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Static
     : TensorM (StaticTensor newShape d device) := do
   let h' : Shape.reshapeValid t.uop.shape newShape = true := by
     simpa [t.h_shape] using h
-  let reshaped ← UOp.reshapeOfValid t.uop newShape h'
-  pure (ofUOpSameDType t reshaped)
+  let reshaped ← UOp.reshapeValid t.uop newShape h'
+  pure (build reshaped (requiresGrad := t.requiresGrad))
 
 def flatten {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     : TensorM (StaticTensor [listProd s] d device) := do
@@ -33,8 +29,8 @@ def flatten {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Static
     simp [Shape.reshapeValid, Shape.numel, listProd]
   let h' : Shape.reshapeValid t.uop.shape [listProd s] = true := by
     simpa [t.h_shape] using h
-  let reshaped ← UOp.reshapeOfValid t.uop [listProd s] h'
-  pure (ofUOpSameDType t reshaped)
+  let reshaped ← UOp.reshapeValid t.uop [listProd s] h'
+  pure (build reshaped (requiresGrad := t.requiresGrad))
 
 def expandUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (newShape : List Nat)
@@ -47,8 +43,8 @@ def expand {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticT
     : TensorM (StaticTensor newShape d device) := do
   let h' : Shape.expandValid t.uop.shape newShape = true := by
     simpa [t.h_shape] using h
-  let expanded ← UOp.expandOfValid t.uop newShape h'
-  pure (ofUOpSameDType t expanded)
+  let expanded ← UOp.expandValid t.uop newShape h'
+  pure (build expanded (requiresGrad := t.requiresGrad))
 
 def unsqueezeUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (axis : Nat)
@@ -58,16 +54,15 @@ def unsqueezeUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t 
   pure (StaticTensor.ofUOp reshaped (requiresGrad := t.requiresGrad))
 
 def unsqueeze {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
-    (axis : Nat) (h : Shape.insertDimValid s axis = true)
+    (axis : Nat) (_h : Shape.insertDimValid s axis = true)
     : TensorM (StaticTensor (Shape.insertDim s axis 1) d device) := do
-  let _ := h
   let newShape := Shape.insertDim s axis 1
   have hBase : Shape.reshapeValid s newShape = true := by
     exact sorry_proof
   let hReshape : Shape.reshapeValid t.uop.shape newShape = true := by
     simpa [t.h_shape] using hBase
-  let reshaped ← UOp.reshapeOfValid t.uop newShape hReshape
-  pure (ofUOpSameDType t reshaped)
+  let reshaped ← UOp.reshapeValid t.uop newShape hReshape
+  pure (build reshaped (requiresGrad := t.requiresGrad))
 
 def permuteUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (perm : List Nat)
@@ -80,8 +75,8 @@ def permute {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Static
     : TensorM (StaticTensor (Shape.permute s perm) d device) := do
   let h' : Shape.permuteValid t.uop.shape perm = true := by
     simpa [t.h_shape] using h
-  let permuted ← UOp.permuteOfValid t.uop perm h'
-  pure (ofUOpSameDType t permuted)
+  let permuted ← UOp.permuteValid t.uop perm h'
+  pure (build permuted (requiresGrad := t.requiresGrad))
 
 def T {m n : Nat} {d : DType} {device : Backend.DeviceType} (t : Matrix m n d device) : TensorM (Matrix n m d device) :=
   permute t [1, 0] (by simp [Shape.permuteValid, listAll, listRange])
@@ -97,8 +92,8 @@ def pad {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTens
     : TensorM (StaticTensor (Shape.pad s padding) d device) := do
   let h' : Shape.padValid t.uop.shape padding = true := by
     simpa [t.h_shape] using h
-  let padded ← UOp.padOfValid t.uop padding h'
-  pure (ofUOpSameDType t padded)
+  let padded ← UOp.padValid t.uop padding h'
+  pure (build padded (requiresGrad := t.requiresGrad))
 
 def shrinkUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (bounds : List (Nat × Nat))
@@ -111,8 +106,8 @@ def shrink {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticT
     : TensorM (StaticTensor (Shape.shrink s bounds) d device) := do
   let h' : Shape.shrinkValid t.uop.shape bounds = true := by
     simpa [t.h_shape] using h
-  let shrunk ← UOp.shrinkOfValid t.uop bounds h'
-  pure (ofUOpSameDType t shrunk)
+  let shrunk ← UOp.shrinkValid t.uop bounds h'
+  pure (build shrunk (requiresGrad := t.requiresGrad))
 
 def flipUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (axes : List Nat)
@@ -125,8 +120,8 @@ def flip {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTen
     : TensorM (StaticTensor s d device) := do
   let h' : Shape.flipValid t.uop.shape axes = true := by
     simpa [t.h_shape] using h
-  let flipped ← UOp.flipOfValid t.uop axes h'
-  pure (ofUOpSameDType t flipped)
+  let flipped ← UOp.flipValid t.uop axes h'
+  pure (build flipped (requiresGrad := t.requiresGrad))
 
 def stackUnsafe {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : TensorList d device shapes) (axis : Nat)
     : TensorM (StaticTensor (Shape.stackOut shapes axis) d device) := do
@@ -146,9 +141,8 @@ def stackUnsafe {d : DType} {device : Backend.DeviceType} {shapes : List Shape} 
     pure (StaticTensor.ofUOp out (requiresGrad := reqGrad))
 
 def stack {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : TensorList d device shapes) (axis : Nat)
-    (h : Shape.stackValid shapes axis = true)
+    (_h : Shape.stackValid shapes axis = true)
     : TensorM (StaticTensor (Shape.stackOut shapes axis) d device) := do
-  let _ := h
   let rec go {shapes : List Shape} (ts : TensorList d device shapes) : TensorM (List UOp) := do
     match ts with
     | .nil => pure []
@@ -162,13 +156,9 @@ def stack {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : 
     let uops ← go ts
     let hCat : Shape.concatListValid (uops.map (fun u => u.shape)) axis = true := by
       exact sorry_proof
-    let out ← UOp.catOfValid uops axis d hCat
+    let out ← UOp.catValid uops axis d hCat
     let reqGrad := TensorList.anyRequiresGrad ts
-    let hShape : out.shape = Shape.stackOut shapes axis := by
-      exact sorry_proof
-    let hType : out.dtype = d := by
-      exact sorry_proof
-    pure (StaticTensor.ofUOpEq out hShape hType (requiresGrad := reqGrad))
+    pure (build out (requiresGrad := reqGrad))
 
 /-- Repeat tensor along each dimension.
     repeats[i] specifies how many times to repeat dimension i.

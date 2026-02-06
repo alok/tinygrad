@@ -41,14 +41,6 @@ namespace DropoutParams
 def create (p : Float32 := 0.5) : DropoutParams :=
   { p, training := true }
 
-/-- Coerce tensor to target shape -/
-private def coerceShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t : StaticTensor s1 d device) : StaticTensor s2 d device :=
-  let hShape : t.uop.shape = s2 := by
-    exact sorry_proof
-  let hType : t.uop.dtype = d := t.h_dtype
-  StaticTensor.ofUOpEq t.uop hShape hType (requiresGrad := t.requiresGrad)
-
 /-- Forward pass for dropout.
 
     Training mode:
@@ -79,13 +71,13 @@ def forward {s : List Nat} {d : DType} {device : Backend.DeviceType}
 
   -- mask = (rand > p), i.e., keep element if rand > p
   -- This drops ~p fraction of elements
-  let mask ← cmpgtB randT pT broadcastProof
+  let mask ← cmpgtBroadcast randT pT broadcastProof
 
   -- Convert bool mask to float: where(mask, 1.0, 0.0)
   let one ← Tensor.full (device := device) s d 1.0
   let zero ← Tensor.full (device := device) s d 0.0
-  let maskF ← where_ mask one zero broadcastProof broadcastProof
-  let maskF : StaticTensor s d device := coerceShape maskF
+  let maskF ← select mask one zero broadcastProof broadcastProof
+  let maskF : StaticTensor s d device := StaticTensor.assumeShape maskF
 
   -- Scale factor: 1 / (1 - p) to maintain expected values
   let scale := 1.0 / (1.0 - params.p)

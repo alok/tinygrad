@@ -64,7 +64,7 @@ def create (device : Backend.DeviceType := .CPU) (inChannels outChannels : Nat) 
   pure { weight, bias, padding, stride, dilation }
 
 /-- Create Conv2d layer with asymmetric kernel size -/
-def createAsym (device : Backend.DeviceType := .CPU) (inChannels outChannels kernelH kernelW : Nat)
+def createRect (device : Backend.DeviceType := .CPU) (inChannels outChannels kernelH kernelW : Nat)
     (dt : DType := .float32) (useBias : Bool := true)
     (padding : Nat := 0) (stride : Nat := 1) (dilation : Nat := 1)
     (seed : Nat := 42) : TensorM (Conv2dParams inChannels outChannels kernelH kernelW dt device) := do

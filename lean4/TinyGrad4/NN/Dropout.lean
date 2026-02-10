@@ -106,7 +106,7 @@ def dropout (p : Float32 := 0.5) : DropoutParams :=
 
 /-- Apply dropout directly to a tensor (functional API).
     Uses global training flag from params. -/
-def dropoutForward {s : List Nat} {d : DType} {device : Backend.DeviceType}
+def applyDropout {s : List Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor s d device) (p : Float32 := 0.5) (training : Bool := true) (seed : Nat := 0)
     : TensorM (StaticTensor s d device) := do
   let params := { p, training : DropoutParams }

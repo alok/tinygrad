@@ -290,71 +290,73 @@ def select {s1 s2 s3 : List Nat} {d : DType} {device : Backend.DeviceType}
 def addRow {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
     (x : Matrix batch dim d device) (row : StaticTensor [1, dim] d device)
     : TensorM (Matrix batch dim d device) := do
-  let out ← addBroadcast x row (Shape.broadcastable_matrix_row batch dim)
-  pure (StaticTensor.assumeShape out)
+  let rowExpanded ← expand row [batch, dim] (by simp [Shape.expandValid, listAll])
+  add x rowExpanded
 
 def addVector {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
     (x : Matrix batch dim d device) (v : Vector dim d device)
     : TensorM (Matrix batch dim d device) := do
-  let out ← addBroadcast x v (Shape.broadcastable_matrix_vector batch dim)
-  pure (StaticTensor.assumeShape out)
+  let vRow ← reshape v [1, dim] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+  let vExpanded ← expand vRow [batch, dim] (by simp [Shape.expandValid, listAll])
+  add x vExpanded
 
 def subColumn {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
     (x : Matrix batch dim d device) (col : Matrix batch 1 d device)
     : TensorM (Matrix batch dim d device) := do
-  let out ← subBroadcast x col (Shape.broadcastable_matrix_col batch dim)
-  pure (StaticTensor.assumeShape out)
+  let colExpanded ← expand col [batch, dim] (by simp [Shape.expandValid, listAll])
+  sub x colExpanded
 
 def mulColumn {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
     (x : Matrix batch dim d device) (col : Matrix batch 1 d device)
     : TensorM (Matrix batch dim d device) := do
-  let out ← mulBroadcast x col (Shape.broadcastable_matrix_col batch dim)
-  pure (StaticTensor.assumeShape out)
+  let colExpanded ← expand col [batch, dim] (by simp [Shape.expandValid, listAll])
+  mul x colExpanded
 
 def mulVector {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
     (x : Matrix batch dim d device) (v : Vector dim d device)
     : TensorM (Matrix batch dim d device) := do
-  let out ← mulBroadcast x v (Shape.broadcastable_matrix_vector batch dim)
-  pure (StaticTensor.assumeShape out)
+  let vRow ← reshape v [1, dim] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+  let vExpanded ← expand vRow [batch, dim] (by simp [Shape.expandValid, listAll])
+  mul x vExpanded
 
 def addChannelNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels, height, width] d device)
     (ch : StaticTensor [1, channels, 1, 1] d device)
     : TensorM (StaticTensor [batch, channels, height, width] d device) := do
-  let out ← addBroadcast x ch (Shape.broadcastable_nchw_channel batch channels height width)
-  pure (StaticTensor.assumeShape out)
+  let chExpanded ← expand ch [batch, channels, height, width] (by simp [Shape.expandValid, listAll])
+  add x chExpanded
 
 def subChannelNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels, height, width] d device)
     (ch : StaticTensor [1, channels, 1, 1] d device)
     : TensorM (StaticTensor [batch, channels, height, width] d device) := do
-  let out ← subBroadcast x ch (Shape.broadcastable_nchw_channel batch channels height width)
-  pure (StaticTensor.assumeShape out)
+  let chExpanded ← expand ch [batch, channels, height, width] (by simp [Shape.expandValid, listAll])
+  sub x chExpanded
 
 def mulChannelNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels, height, width] d device)
     (ch : StaticTensor [1, channels, 1, 1] d device)
     : TensorM (StaticTensor [batch, channels, height, width] d device) := do
-  let out ← mulBroadcast x ch (Shape.broadcastable_nchw_channel batch channels height width)
-  pure (StaticTensor.assumeShape out)
+  let chExpanded ← expand ch [batch, channels, height, width] (by simp [Shape.expandValid, listAll])
+  mul x chExpanded
 
 def addChannelNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels] d device) (ch : StaticTensor [1, channels] d device)
     : TensorM (StaticTensor [batch, channels] d device) := do
-  let out ← addBroadcast x ch (Shape.broadcastable_nc_channel batch channels)
-  pure (StaticTensor.assumeShape out)
+  let chExpanded ← expand ch [batch, channels] (by simp [Shape.expandValid, listAll])
+  add x chExpanded
 
 def subChannelNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels] d device) (ch : StaticTensor [1, channels] d device)
     : TensorM (StaticTensor [batch, channels] d device) := do
-  let out ← subBroadcast x ch (Shape.broadcastable_nc_channel batch channels)
-  pure (StaticTensor.assumeShape out)
+  let chExpanded ← expand ch [batch, channels] (by simp [Shape.expandValid, listAll])
+  sub x chExpanded
 
 def mulChannelNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels] d device) (ch : StaticTensor [1, channels] d device)
     : TensorM (StaticTensor [batch, channels] d device) := do
-  let out ← mulBroadcast x ch (Shape.broadcastable_nc_channel batch channels)
-  pure (StaticTensor.assumeShape out)
+  let chExpanded ← expand ch [batch, channels] (by simp [Shape.expandValid, listAll])
+  mul x chExpanded
 
 infixl:65 " +. " => addBroadcast
 infixl:65 " -. " => subBroadcast
@@ -673,35 +675,45 @@ def meanAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Stati
 def meanMatrixFeatures {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
     (x : Matrix batch dim d device) : TensorM (Matrix batch 1 d device) := do
   let out ← meanAxis x 1 true
-  pure (StaticTensor.assumeShape out)
+  have out' : Matrix batch 1 d device := by
+    simpa [Shape.reduce, listEnum, listRange] using out
+  pure out'
 
 /-- Mean over NCHW width axis: `[N, C, H, W] -> [N, C, H, 1]`. -/
 def meanNCHWWidth {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels, height, width] d device)
     : TensorM (StaticTensor [batch, channels, height, 1] d device) := do
   let out ← meanAxis x 3 true
-  pure (StaticTensor.assumeShape out)
+  have out' : StaticTensor [batch, channels, height, 1] d device := by
+    simpa [Shape.reduce, listEnum, listRange] using out
+  pure out'
 
 /-- Mean over NCHW height axis (for inputs shaped `[N, C, H, 1]`): `[N, C, H, 1] -> [N, C, 1, 1]`. -/
 def meanNCHWHeight {batch channels height : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels, height, 1] d device)
     : TensorM (StaticTensor [batch, channels, 1, 1] d device) := do
   let out ← meanAxis x 2 true
-  pure (StaticTensor.assumeShape out)
+  have out' : StaticTensor [batch, channels, 1, 1] d device := by
+    simpa [Shape.reduce, listEnum, listRange] using out
+  pure out'
 
 /-- Mean over NCHW batch axis (for inputs shaped `[N, C, 1, 1]`): `[N, C, 1, 1] -> [1, C, 1, 1]`. -/
 def meanNCHWBatch {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels, 1, 1] d device)
     : TensorM (StaticTensor [1, channels, 1, 1] d device) := do
   let out ← meanAxis x 0 true
-  pure (StaticTensor.assumeShape out)
+  have out' : StaticTensor [1, channels, 1, 1] d device := by
+    simpa [Shape.reduce, listEnum, listRange] using out
+  pure out'
 
 /-- Mean over NC batch axis: `[N, C] -> [1, C]`. -/
 def meanNCBatch {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels] d device)
     : TensorM (StaticTensor [1, channels] d device) := do
   let out ← meanAxis x 0 true
-  pure (StaticTensor.assumeShape out)
+  have out' : StaticTensor [1, channels] d device := by
+    simpa [Shape.reduce, listEnum, listRange] using out
+  pure out'
 
 /-- Variance along axis with keepdim -/
 def varAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) (keepdim : Bool := true)
@@ -1250,9 +1262,7 @@ def linearOpt {batch inDim outDim : Nat} {d : DType} {device : Backend.DeviceTyp
   let y ← matmul x w
   match bias with
   | none => pure y
-  | some b =>
-    let yb ← addBroadcast y b (Shape.broadcastable_matrix_vector batch outDim)
-    pure (build yb.uop (requiresGrad := yb.requiresGrad))
+  | some b => addVector y b
 
 /-- Fully-connected layer with bias: X @ W + b (broadcasted over batch). -/
 def linearBias {batch inDim outDim : Nat} {d : DType} {device : Backend.DeviceType}

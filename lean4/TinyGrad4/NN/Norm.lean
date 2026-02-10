@@ -51,8 +51,7 @@ private def rmsNormInternal {batch dim : Nat} {d : DType} {device : Backend.Devi
   let meanSq ← meanMatrixFeatures xSq
   let epsT ← Tensor.full (device := device) [batch, 1] d eps
   let meanEps ← add meanSq epsT
-  let scaleRaw ← rsqrt meanEps
-  let scale : Matrix batch 1 d device := StaticTensor.assumeShape scaleRaw
+  let scale ← rsqrt meanEps
   mulColumn x scale
 
 /-- Forward pass for matrix input `[batch, dim]`. -/
@@ -107,8 +106,7 @@ private def layerNormInternal {batch dim : Nat} {d : DType} {device : Backend.De
   let variance ← meanMatrixFeatures diffSq
   let epsT ← Tensor.full (device := device) [batch, 1] d eps
   let varEps ← add variance epsT
-  let invStdRaw ← rsqrt varEps
-  let invStd : Matrix batch 1 d device := StaticTensor.assumeShape invStdRaw
+  let invStd ← rsqrt varEps
   mulColumn diff invStd
 
 /-- Forward pass for matrix input `[batch, dim]`. -/

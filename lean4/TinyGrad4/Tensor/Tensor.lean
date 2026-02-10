@@ -69,12 +69,6 @@ def ofUOpEq {s : List Nat} {d : DType} {device : Backend.DeviceType} (u : UOp)
     (hShape : u.shape = s) (hType : u.dtype = d) (requiresGrad : Bool := false) : StaticTensor s d device :=
   { uop := u, h_shape := hShape, h_dtype := hType, requiresGrad }
 
-/-- Internal constructor for typed APIs that already track shape/dtype in types.
-    This is now a checked alias of `ofUOp` to avoid axiom-backed shape trust. -/
-def ofUOpTrusted {s : List Nat} {d : DType} {device : Backend.DeviceType} (u : UOp)
-    (requiresGrad : Bool := false) : StaticTensor s d device :=
-  ofUOp u (requiresGrad := requiresGrad)
-
 /-- Re-tag a tensor with a new compile-time shape while preserving dtype/device/grad.
     This performs a runtime shape check and fails fast if the new shape is invalid. -/
 def assumeShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}

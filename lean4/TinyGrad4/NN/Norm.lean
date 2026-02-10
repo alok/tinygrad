@@ -13,7 +13,7 @@ Implements:
 
 This module intentionally keeps two clear layers:
 - ergonomic typed APIs (`Matrix`, `Vector`, `StaticTensor` with shapes in types)
-- explicit low-level broadcast constraints at each callsite
+- tensor-level shape/movement helpers inside `Tensor.Math`
 -/
 
 namespace TinyGrad4.NN
@@ -194,24 +194,19 @@ def forward2d {batch channels height width : Nat} {device : Backend.DeviceType}
     let invStd ← rsqrt varEps
     let normalized ← mulChannelNCHW diff invStd
 
-    let weightB ← reshapeUnsafe params.weight [1, channels, 1, 1]
-    let biasB ← reshapeUnsafe params.bias [1, channels, 1, 1]
-    let scaled ← mulChannelNCHW normalized weightB
-    addChannelNCHW scaled biasB
+    let scaled ← mulChannelVectorNCHW normalized params.weight
+    addChannelVectorNCHW scaled params.bias
   else
-    let meanB ← reshapeUnsafe params.runningMean [1, channels, 1, 1]
-    let diff ← subChannelNCHW x meanB
+    let diff ← subChannelVectorNCHW x params.runningMean
 
     let epsT ← Tensor.full (device := device) [1, channels, 1, 1] dt params.eps
-    let varB ← reshapeUnsafe params.runningVar [1, channels, 1, 1]
+    let varB ← channelVectorNCHW params.runningVar
     let varEps ← add varB epsT
     let invStd ← rsqrt varEps
     let normalized ← mulChannelNCHW diff invStd
 
-    let weightB ← reshapeUnsafe params.weight [1, channels, 1, 1]
-    let biasB ← reshapeUnsafe params.bias [1, channels, 1, 1]
-    let scaled ← mulChannelNCHW normalized weightB
-    addChannelNCHW scaled biasB
+    let scaled ← mulChannelVectorNCHW normalized params.weight
+    addChannelVectorNCHW scaled params.bias
 
 /-- Forward pass for BatchNorm1d: input `[N, C]`. -/
 def forward1d {batch channels : Nat} {device : Backend.DeviceType}
@@ -229,24 +224,19 @@ def forward1d {batch channels : Nat} {device : Backend.DeviceType}
     let invStd ← rsqrt varEps
     let normalized ← mulChannelNC diff invStd
 
-    let weightB ← reshapeUnsafe params.weight [1, channels]
-    let biasB ← reshapeUnsafe params.bias [1, channels]
-    let scaled ← mulChannelNC normalized weightB
-    addChannelNC scaled biasB
+    let scaled ← mulChannelVectorNC normalized params.weight
+    addChannelVectorNC scaled params.bias
   else
-    let meanB ← reshapeUnsafe params.runningMean [1, channels]
-    let diff ← subChannelNC x meanB
+    let diff ← subChannelVectorNC x params.runningMean
 
     let epsT ← Tensor.full (device := device) [1, channels] dt params.eps
-    let varB ← reshapeUnsafe params.runningVar [1, channels]
+    let varB ← channelVectorNC params.runningVar
     let varEps ← add varB epsT
     let invStd ← rsqrt varEps
     let normalized ← mulChannelNC diff invStd
 
-    let weightB ← reshapeUnsafe params.weight [1, channels]
-    let biasB ← reshapeUnsafe params.bias [1, channels]
-    let scaled ← mulChannelNC normalized weightB
-    addChannelNC scaled biasB
+    let scaled ← mulChannelVectorNC normalized params.weight
+    addChannelVectorNC scaled params.bias
 
 /-- Set training mode -/
 def train {device : Backend.DeviceType} (params : BatchNormParams numFeatures dt device)

@@ -340,6 +340,32 @@ def mulChannelNCHW {batch channels height width : Nat} {d : DType} {device : Bac
   let chExpanded ← expand ch [batch, channels, height, width] (by simp [Shape.expandValid, listAll])
   mul x chExpanded
 
+def channelVectorNCHW {channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (v : Vector channels d device)
+    : TensorM (StaticTensor [1, channels, 1, 1] d device) :=
+  reshape v [1, channels, 1, 1] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+
+def addChannelVectorNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, width] d device)
+    (v : Vector channels d device)
+    : TensorM (StaticTensor [batch, channels, height, width] d device) := do
+  let ch ← channelVectorNCHW v
+  addChannelNCHW x ch
+
+def subChannelVectorNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, width] d device)
+    (v : Vector channels d device)
+    : TensorM (StaticTensor [batch, channels, height, width] d device) := do
+  let ch ← channelVectorNCHW v
+  subChannelNCHW x ch
+
+def mulChannelVectorNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, width] d device)
+    (v : Vector channels d device)
+    : TensorM (StaticTensor [batch, channels, height, width] d device) := do
+  let ch ← channelVectorNCHW v
+  mulChannelNCHW x ch
+
 def addChannelNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels] d device) (ch : StaticTensor [1, channels] d device)
     : TensorM (StaticTensor [batch, channels] d device) := do
@@ -357,6 +383,32 @@ def mulChannelNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType
     : TensorM (StaticTensor [batch, channels] d device) := do
   let chExpanded ← expand ch [batch, channels] (by simp [Shape.expandValid, listAll])
   mul x chExpanded
+
+def channelVectorNC {channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (v : Vector channels d device)
+    : TensorM (StaticTensor [1, channels] d device) :=
+  reshape v [1, channels] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+
+def addChannelVectorNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] d device)
+    (v : Vector channels d device)
+    : TensorM (StaticTensor [batch, channels] d device) := do
+  let ch ← channelVectorNC v
+  addChannelNC x ch
+
+def subChannelVectorNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] d device)
+    (v : Vector channels d device)
+    : TensorM (StaticTensor [batch, channels] d device) := do
+  let ch ← channelVectorNC v
+  subChannelNC x ch
+
+def mulChannelVectorNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] d device)
+    (v : Vector channels d device)
+    : TensorM (StaticTensor [batch, channels] d device) := do
+  let ch ← channelVectorNC v
+  mulChannelNC x ch
 
 infixl:65 " +. " => addBroadcast
 infixl:65 " -. " => subBroadcast

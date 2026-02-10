@@ -1390,25 +1390,27 @@ def avgPool2dPlaceholder {batch cin h w hOut wOut : Nat} {d : DType} {device : B
 
 /-- Pad 1D tensor with symmetric padding on W dimension.
     Input:  [batch, channels, width]
-    Output: [batch, channels, width + 2*padUnsafe] -/
+    Output: [batch, channels, width + padW + padW] -/
 def pad1d {batch cin w : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, cin, w] d device)
     (padW : Nat)
-    : TensorM (StaticTensor [batch, cin, w + 2*padW] d device) := do
-  let padding := [(0, 0), (0, 0), (padW, padW)]
-  let result ← padUnsafe x padding
-  pure (StaticTensor.ofUOp result.uop (requiresGrad := x.requiresGrad))
+    : TensorM (StaticTensor [batch, cin, w + padW + padW] d device) := do
+  let result ← pad x [(0, 0), (0, 0), (padW, padW)] (by simp [Shape.padValid])
+  have out : StaticTensor [batch, cin, w + padW + padW] d device := by
+    simpa [Shape.pad, listZipWith, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using result
+  pure out
 
 /-- Pad 2D tensor with symmetric padding on H and W dimensions.
     Input:  [batch, channels, height, width]
-    Output: [batch, channels, height + 2*padUnsafe, width + 2*padUnsafe] -/
+    Output: [batch, channels, height + padH + padH, width + padW + padW] -/
 def pad2d {batch cin h w : Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor [batch, cin, h, w] d device)
     (padH padW : Nat)
-    : TensorM (StaticTensor [batch, cin, h + 2*padH, w + 2*padW] d device) := do
-  let padding := [(0, 0), (0, 0), (padH, padH), (padW, padW)]
-  let result ← padUnsafe x padding
-  pure (StaticTensor.ofUOp result.uop (requiresGrad := x.requiresGrad))
+    : TensorM (StaticTensor [batch, cin, h + padH + padH, w + padW + padW] d device) := do
+  let result ← pad x [(0, 0), (0, 0), (padH, padH), (padW, padW)] (by simp [Shape.padValid])
+  have out : StaticTensor [batch, cin, h + padH + padH, w + padW + padW] d device := by
+    simpa [Shape.pad, listZipWith, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using result
+  pure out
 
 /-- Max pooling 2D operation using pool/im2col + reduce.
     Input:  [batch, channels, height, width]

@@ -464,3 +464,7 @@ lean_exe buffer_bench where
 lean_exe mac_e2e_train_smoke where
   root := `TinyGrad4.Test.MacEndToEndTrainSmoke
   moreLinkArgs := metalLinkArgs
+
+lean_exe mac_e2e_train_bench where
+  root := `TinyGrad4.Test.MacEndToEndTrainBench
+  moreLinkArgs := metalLinkArgs

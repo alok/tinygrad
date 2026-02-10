@@ -73,8 +73,8 @@ def forward {s : List Nat} {d : DType} {device : Backend.DeviceType}
   -- Convert bool mask to float: where(mask, 1.0, 0.0)
   let one ← Tensor.full (device := device) s d 1.0
   let zero ← Tensor.full (device := device) s d 0.0
-  let maskF ← select mask one zero (Shape.broadcastable_refl s) (Shape.broadcastable_refl (Shape.broadcastOut s s))
-  let maskF : StaticTensor s d device := StaticTensor.assumeShape maskF
+  let maskFUOp ← UOp.where_ mask.uop one.uop zero.uop
+  let maskF : StaticTensor s d device := StaticTensor.ofUOp maskFUOp
 
   -- Scale factor: 1 / (1 - p) to maintain expected values
   let scale := 1.0 / (1.0 - params.p)

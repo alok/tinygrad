@@ -56,13 +56,9 @@ private def buildLinearBias2ScaleRelu (batch inFeatures outFeatures : Nat)
   let b1 ← Tensor.full [outFeatures] .float32 bias2Val
   let y ← TinyGrad4.StaticTensor.matmul x w
   let yScaled ← TinyGrad4.StaticTensor.scale y scale
-  let yBias ← TinyGrad4.StaticTensor.addBroadcast yScaled b0 (by simp [Shape.broadcastable, listAll])
-  let yBias : Matrix batch outFeatures .float32 := StaticTensor.assumeShape yBias
-  let yBias2 ← TinyGrad4.StaticTensor.addBroadcast yBias b1 (by simp [Shape.broadcastable, listAll])
-  let yRelu ← TinyGrad4.StaticTensor.relu yBias2
-  let yOut : Matrix batch outFeatures .float32 :=
-    StaticTensor.ofUOpEq yRelu.uop (by exact sorry_proof) (by exact sorry_proof) (requiresGrad := yRelu.requiresGrad)
-  pure yOut
+  let yBias ← TinyGrad4.StaticTensor.addVector yScaled b0
+  let yBias2 ← TinyGrad4.StaticTensor.addVector yBias b1
+  TinyGrad4.StaticTensor.relu yBias2
 
 /-- Smoke test: build a linear layer with bias2 + scale + relu and eval via IO path. -/
 def main : IO UInt32 := do

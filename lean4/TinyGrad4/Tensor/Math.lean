@@ -837,7 +837,7 @@ private def lastSliceShape (s : Shape) (_i : Nat) : Shape :=
   if s.isEmpty then [1] else s.take (s.length - 1) ++ [1]
 
 /-- One-hot encoding for class indices (float32). -/
-def oneHotF32 {batch numClasses : Nat} {device : Backend.DeviceType}
+private def oneHotF32 {batch numClasses : Nat} {device : Backend.DeviceType}
     (targets : StaticTensor [batch] .float32 device)
     : TensorM (StaticTensor [batch, numClasses] .float32 device) := do
   let classUop ← UOp.vconstF32 (classRangeF32 numClasses)
@@ -851,7 +851,7 @@ def oneHotF32 {batch numClasses : Nat} {device : Backend.DeviceType}
   pure (StaticTensor.ofUOp out)
 
 /-- Gather along an axis using index values (float32 indices). -/
-def gatherF32 {s idxShape : Shape} {device : Backend.DeviceType}
+private def gatherF32 {s idxShape : Shape} {device : Backend.DeviceType}
     (t : StaticTensor s .float32 device) (dim : Nat)
     (index : StaticTensor idxShape .float32 device)
     : TensorM (StaticTensor idxShape .float32 device) := do
@@ -882,7 +882,7 @@ def gather {s idxShape : Shape} {device : Backend.DeviceType}
   gatherF32 t dim indexF
 
 /-- Gather along the last axis using class indices (float32). -/
-def gatherLastF32 {batch numClasses : Nat} {device : Backend.DeviceType}
+private def gatherLastF32 {batch numClasses : Nat} {device : Backend.DeviceType}
     (x : StaticTensor [batch, numClasses] .float32 device)
     (targets : StaticTensor [batch] .float32 device)
     : TensorM (StaticTensor [batch] .float32 device) := do
@@ -897,7 +897,7 @@ def gatherLast {batch numClasses : Nat} {device : Backend.DeviceType}
   let targetsF ← cast targets .float32
   gatherLastF32 x targetsF
 
-def scatterLastF32 {batch numClasses : Nat} {device : Backend.DeviceType}
+private def scatterLastF32 {batch numClasses : Nat} {device : Backend.DeviceType}
     (values : StaticTensor [batch] .float32 device)
     (targets : StaticTensor [batch] .float32 device)
     : TensorM (StaticTensor [batch, numClasses] .float32 device) := do
@@ -1024,7 +1024,7 @@ private def maskedSetitemLast {s vShape : Shape} {device : Backend.DeviceType}
     let accMaskOut : StaticTensor s .bool device  := StaticTensor.ofUOp accMaskS.uop
     whereSame accMaskOut accValOut target
 
-def scatterReduceF32 {s idxShape srcShape : Shape} {device : Backend.DeviceType}
+private def scatterReduceF32 {s idxShape srcShape : Shape} {device : Backend.DeviceType}
     (self : StaticTensor s .float32 device) (dim : Nat)
     (index : StaticTensor idxShape .float32 device) (src : StaticTensor srcShape .float32 device)
     (reduce : ScatterReduce) (includeSelf : Bool := true)
@@ -1098,7 +1098,7 @@ def scatterReduce {s idxShape srcShape : Shape} {device : Backend.DeviceType}
   let indexF ← cast index .float32
   scatterReduceF32 self dim indexF src reduce includeSelf
 
-def scatterF32 {s idxShape srcShape : Shape} {device : Backend.DeviceType}
+private def scatterF32 {s idxShape srcShape : Shape} {device : Backend.DeviceType}
     (self : StaticTensor s .float32 device) (dim : Nat)
     (index : StaticTensor idxShape .float32 device) (src : StaticTensor srcShape .float32 device)
     : TensorM (StaticTensor s .float32 device) := do
@@ -1196,14 +1196,14 @@ def addScalar {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Stat
   pure (StaticTensor.ofUOp result (requiresGrad := t.requiresGrad))
 
 /-- Cross-entropy loss with log-softmax
-    logits: [batch, numClasses], targets: [batch] (class indices as floats)
+    logits: [batch, numClasses], targets: [batch] (class indices)
     Returns scalar loss -/
 def crossEntropyLoss {batch numClasses : Nat} {device : Backend.DeviceType}
     (logits : StaticTensor [batch, numClasses] .float32 device)
-    (targets : StaticTensor [batch] .float32 device)
+    (targets : StaticTensor [batch] .int32 device)
     : TensorM (Scalar .float32 device) := do
   let logProbs ← logSoftmax logits
-  let picked ← gatherLastF32 logProbs targets
+  let picked ← gatherLast logProbs targets
   let negPicked ← neg picked
   mean negPicked
 
@@ -1227,9 +1227,9 @@ def crossEntropyOneHot {batch numClasses : Nat} {d : DType} {device : Backend.De
     For MVP: averages all log probs (placeholder until gather/index support) -/
 def nllLoss {batch numClasses : Nat} {device : Backend.DeviceType}
     (logProbs : StaticTensor [batch, numClasses] .float32 device)
-    (targets : StaticTensor [batch] .float32 device)
+    (targets : StaticTensor [batch] .int32 device)
     : TensorM (Scalar .float32 device) := do
-  let picked ← gatherLastF32 logProbs targets
+  let picked ← gatherLast logProbs targets
   let negPicked ← neg picked
   mean negPicked
 

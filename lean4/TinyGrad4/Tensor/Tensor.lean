@@ -65,16 +65,6 @@ def ofUOp {s : List Nat} {d : DType} {device : Backend.DeviceType} (u : UOp)
   else
     panic! s!"StaticTensor shape mismatch: expected {repr s}, got {repr u.shape}"
 
-def ofUOpEq {s : List Nat} {d : DType} {device : Backend.DeviceType} (u : UOp)
-    (hShape : u.shape = s) (hType : u.dtype = d) (requiresGrad : Bool := false) : StaticTensor s d device :=
-  { uop := u, h_shape := hShape, h_dtype := hType, requiresGrad }
-
-/-- Re-tag a tensor with a new compile-time shape while preserving dtype/device/grad.
-    This performs a runtime shape check and fails fast if the new shape is invalid. -/
-def assumeShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (t : StaticTensor s1 d device) : StaticTensor s2 d device :=
-  ofUOp t.uop (requiresGrad := t.requiresGrad)
-
 end StaticTensor
 
 abbrev TensorM := UOpM

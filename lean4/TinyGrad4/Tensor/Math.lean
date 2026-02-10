@@ -842,8 +842,8 @@ def oneHotF32 {batch numClasses : Nat} {device : Backend.DeviceType}
     : TensorM (StaticTensor [batch, numClasses] .float32 device) := do
   let classUop ← UOp.vconstF32 (classRangeF32 numClasses)
   let classes : StaticTensor [numClasses] .float32 device  := StaticTensor.ofUOp classUop
-  let targets2 ← reshapeUnsafe targets [batch, 1]
-  let classes2 ← reshapeUnsafe classes [1, numClasses]
+  let targets2 ← reshape targets [batch, 1] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+  let classes2 ← reshape classes [1, numClasses] (by simp [Shape.reshapeValid, Shape.numel, listProd])
   let cmp ← UOp.cmpeq targets2.uop classes2.uop
   let one ← UOp.const .float32 1.0
   let zero ← UOp.const .float32 0.0

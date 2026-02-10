@@ -1,6 +1,7 @@
 import Float64
 import TinyGrad4
 import TinyGrad4.NN.Dropout
+import TinyGrad4.NN.Embedding
 import TinyGrad4.NN.Linear
 import TinyGrad4.NN.Norm
 
@@ -67,6 +68,15 @@ private def testLinearForwardTyped : IO Unit := do
 
   assertShape out.uop.shape [3, 2] "linearForward"
 
+private def testEmbeddingForwardTyped : IO Unit := do
+  let out := Id.run <| runTensorM do
+    let indices ← Tensor.arange 3 .int32
+    let weight ← Tensor.full [8, 4] .float32 2.0
+    let params : EmbeddingParams 8 4 .float32 .CPU := { weight := weight }
+    EmbeddingParams.forward params indices
+
+  assertShape out.uop.shape [3, 4] "embedding forward"
+
 def runAll : IO Unit := do
   IO.println "=== ShapeTypedLayerSmoke Tests ==="
   testLayerNormDropoutStack
@@ -75,6 +85,8 @@ def runAll : IO Unit := do
   IO.println "✓ batchnorm1d typed shape"
   testLinearForwardTyped
   IO.println "✓ linearForward typed shape"
+  testEmbeddingForwardTyped
+  IO.println "✓ embedding typed shape"
   IO.println "=== ShapeTypedLayerSmoke OK ==="
 
 end TinyGrad4.Test.ShapeTypedLayerSmoke

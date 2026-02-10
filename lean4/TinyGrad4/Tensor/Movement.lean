@@ -7,7 +7,7 @@ namespace StaticTensor
 
 private def build {s : List Nat} {d : DType} {device : Backend.DeviceType}
     (u : UOp) (requiresGrad : Bool := false) : StaticTensor s d device :=
-  StaticTensor.ofUOpTrusted u (requiresGrad := requiresGrad)
+  StaticTensor.ofUOp u (requiresGrad := requiresGrad)
 
 def reshapeUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (newShape : List Nat)

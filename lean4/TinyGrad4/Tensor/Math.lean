@@ -23,7 +23,7 @@ private def liftBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.Devic
 
 private def build {s : List Nat} {d : DType} {device : Backend.DeviceType}
     (u : UOp) (requiresGrad : Bool := false) : StaticTensor s d device :=
-  StaticTensor.ofUOpTrusted u (requiresGrad := requiresGrad)
+  StaticTensor.ofUOp u (requiresGrad := requiresGrad)
 
 private theorem concatValidAxis {s1 s2 : Shape} {axis : Nat}
     (h : Shape.concatValid s1 s2 axis = true) : axis < s1.length := by

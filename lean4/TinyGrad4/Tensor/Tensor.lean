@@ -70,16 +70,16 @@ def ofUOpEq {s : List Nat} {d : DType} {device : Backend.DeviceType} (u : UOp)
   { uop := u, h_shape := hShape, h_dtype := hType, requiresGrad }
 
 /-- Internal constructor for typed APIs that already track shape/dtype in types.
-    This keeps proof-heavy layers concise in sorry-friendly code. -/
+    This is now a checked alias of `ofUOp` to avoid axiom-backed shape trust. -/
 def ofUOpTrusted {s : List Nat} {d : DType} {device : Backend.DeviceType} (u : UOp)
     (requiresGrad : Bool := false) : StaticTensor s d device :=
-  ofUOpEq u (by exact sorry_proof) (by exact sorry_proof) (requiresGrad := requiresGrad)
+  ofUOp u (requiresGrad := requiresGrad)
 
 /-- Re-tag a tensor with a new compile-time shape while preserving dtype/device/grad.
-    Use this in proof-heavy layers when shape equality is known externally. -/
+    This performs a runtime shape check and fails fast if the new shape is invalid. -/
 def assumeShape {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t : StaticTensor s1 d device) : StaticTensor s2 d device :=
-  ofUOpEq t.uop (by exact sorry_proof) t.h_dtype (requiresGrad := t.requiresGrad)
+  ofUOp t.uop (requiresGrad := t.requiresGrad)
 
 end StaticTensor
 

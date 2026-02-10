@@ -9,9 +9,6 @@ import TinyGrad4.Backend.Interpreter
 
 open TinyGrad4
 
-private def broadcastProof {s1 s2 : List Nat} : Shape.broadcastable s1 s2 = true := by
-  exact sorry_proof
-
 private def approxEq (a b : Float64) (eps : Float64 := 1.0e-2) : Bool :=
   Float64.abs (a - b) <= eps
 
@@ -59,7 +56,7 @@ private def buildLinearScaleRelu (batch inFeatures outFeatures : Nat)
   let b ← Tensor.full [outFeatures] .float32 biasVal
   let y ← TinyGrad4.StaticTensor.matmul x w
   let yScaled ← TinyGrad4.StaticTensor.scale y scale
-  let yBias ← TinyGrad4.StaticTensor.addBroadcast yScaled b broadcastProof
+  let yBias ← TinyGrad4.StaticTensor.addBroadcast yScaled b (by simp [Shape.broadcastable, listAll])
   let yRelu ← TinyGrad4.StaticTensor.relu yBias
   let yOut : Matrix batch outFeatures .float32 :=
     StaticTensor.ofUOpEq yRelu.uop (by exact sorry_proof) (by exact sorry_proof) (requiresGrad := yRelu.requiresGrad)

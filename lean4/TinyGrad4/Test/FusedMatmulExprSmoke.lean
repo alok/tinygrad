@@ -21,9 +21,6 @@ open Interpreter
 open StaticTensor
 open Kernel
 
-private def broadcastProof {s1 s2 : List Nat} : Shape.broadcastable s1 s2 = true := by
-  exact sorry_proof
-
 private def f32OpsTest : ScalarOps Float32 :=
   { neg := fun x => -x
     sqrt := fun x => x.sqrt
@@ -77,7 +74,7 @@ private def testMatmulBiasRelu : IO Unit := do
       let b ← Tensor.buffer [3, 4] .float32
       let bias ← Tensor.buffer [4] .float32
       let y ← matmul a b
-      let yb ← addBroadcast y bias broadcastProof
+      let yb ← addBroadcast y bias (by native_decide)
       let out ← relu yb
       pure (a.uop.uid, b.uop.uid, bias.uop.uid, out.uop)
 
@@ -127,7 +124,7 @@ private def testBatchedMatmulBiasBroadcastB : IO Unit := do
       let w ← Tensor.buffer [1, d, n] .float32
       let bias ← Tensor.buffer [n] .float32
       let y ← bmatmul x w
-      let out ← addBroadcast y bias broadcastProof
+      let out ← addBroadcast y bias (by simp [Shape.broadcastable, listAll])
       pure (x.uop.uid, w.uop.uid, bias.uop.uid, out.uop)
 
   let compiled ← Interpreter.compileManyCached [outU]

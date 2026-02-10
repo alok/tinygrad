@@ -276,12 +276,68 @@ def mulBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
   mulB x y h
 
+/-- Readable alias for broadcasted division. -/
+def divBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
+  divB x y h
+
+/-- Readable alias for broadcasted power. -/
+def powBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
+  powB x y h
+
+/-- Readable alias for broadcasted less-than comparison. -/
+def cmpltBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
+  cmpltB x y h
+
 /-- Readable alias for broadcasted greater-than comparison. -/
 def cmpgtBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
   cmpgtB x y h
+
+/-- Readable alias for broadcasted equality comparison. -/
+def cmpeqBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
+  cmpeqB x y h
+
+/-- Readable alias for broadcasted inequality comparison. -/
+def cmpneBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
+  cmpneB x y h
+
+/-- Readable alias for broadcasted boolean and. -/
+def bitandBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
+    (x : StaticTensor s1 .bool device) (y : StaticTensor s2 .bool device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
+  bitandB x y h
+
+/-- Readable alias for broadcasted boolean or. -/
+def bitorBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
+    (x : StaticTensor s1 .bool device) (y : StaticTensor s2 .bool device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
+  bitorB x y h
+
+/-- Readable alias for broadcasted boolean xor. -/
+def bitxorBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
+    (x : StaticTensor s1 .bool device) (y : StaticTensor s2 .bool device)
+    (h : Shape.broadcastable s1 s2 = true)
+    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
+  bitxorB x y h
 
 /-- Readable alias for ternary select (`cond ? x : y`) with broadcasting. -/
 def select {s1 s2 s3 : List Nat} {d : DType} {device : Backend.DeviceType}
@@ -1152,7 +1208,7 @@ def linearOpt {batch inDim outDim : Nat} {d : DType} {device : Backend.DeviceTyp
   match bias with
   | none => pure y
   | some b =>
-    let yb ← addB y b (by exact sorry_proof)
+    let yb ← addBroadcast y b (by exact sorry_proof)
     pure (build yb.uop (requiresGrad := yb.requiresGrad))
 
 /-- Fully-connected layer with bias: X @ W + b (broadcasted over batch). -/

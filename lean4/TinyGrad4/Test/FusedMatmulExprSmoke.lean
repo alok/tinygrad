@@ -77,7 +77,7 @@ private def testMatmulBiasRelu : IO Unit := do
       let b ← Tensor.buffer [3, 4] .float32
       let bias ← Tensor.buffer [4] .float32
       let y ← matmul a b
-      let yb ← addB y bias broadcastProof
+      let yb ← addBroadcast y bias broadcastProof
       let out ← relu yb
       pure (a.uop.uid, b.uop.uid, bias.uop.uid, out.uop)
 
@@ -127,7 +127,7 @@ private def testBatchedMatmulBiasBroadcastB : IO Unit := do
       let w ← Tensor.buffer [1, d, n] .float32
       let bias ← Tensor.buffer [n] .float32
       let y ← bmatmul x w
-      let out ← addB y bias broadcastProof
+      let out ← addBroadcast y bias broadcastProof
       pure (x.uop.uid, w.uop.uid, bias.uop.uid, out.uop)
 
   let compiled ← Interpreter.compileManyCached [outU]

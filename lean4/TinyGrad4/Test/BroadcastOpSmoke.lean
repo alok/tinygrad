@@ -31,7 +31,7 @@ private def testScalarBroadcastAdd : IO Unit := do
     runTensorM do
       let x ← Tensor.buffer [2, 3] .float32
       let y ← Tensor.buffer [] .float32
-      let z ← addB x y broadcastProof
+      let z ← addBroadcast x y broadcastProof
       pure (x.uop.uid, y.uop.uid, z.uop)
 
   let xVals : Array Float64 := #[1.0, 2.0, 3.0,  4.0, 5.0, 6.0]
@@ -48,7 +48,7 @@ private def testRankBroadcastAdd : IO Unit := do
     runTensorM do
       let x ← Tensor.buffer [1, 3] .float32
       let y ← Tensor.buffer [2, 1] .float32
-      let z ← addB x y broadcastProof
+      let z ← addBroadcast x y broadcastProof
       pure (x.uop.uid, y.uop.uid, z.uop)
 
   let xVals : Array Float64 := #[1.0, 2.0, 3.0]

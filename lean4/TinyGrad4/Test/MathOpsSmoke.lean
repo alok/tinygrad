@@ -113,9 +113,9 @@ def testBoolOpsEval : IO Unit := do
   let (andT, orT, xorT) := runTensorM do
     let ones ← Tensor.full [3] .bool 1.0
     let zero ← Tensor.full [] .bool 0.0
-    let andT ← bitandB ones zero broadcastProof
-    let orT ← bitorB ones zero broadcastProof
-    let xorT ← bitxorB ones zero broadcastProof
+    let andT ← bitandBroadcast ones zero broadcastProof
+    let orT ← bitorBroadcast ones zero broadcastProof
+    let xorT ← bitxorBroadcast ones zero broadcastProof
     pure (andT, orT, xorT)
   let andRaw := evalTensor andT
   let orRaw := evalTensor orT
@@ -196,7 +196,7 @@ def testWhereInt16 : IO Unit := do
     let cond ← cat c1 c0 0 concatProof
     let x ← Tensor.fullInt [2] .int16 5
     let y ← Tensor.fullInt [2] .int16 9
-    where_ cond x y broadcastProof broadcastProof
+    select cond x y broadcastProof broadcastProof
   let raw := evalTensor t
   assertDType raw.dtype .int16 "where int16 dtype"
   let expected ← expectI16Bytes [2] #[Int16.ofInt 5, Int16.ofInt 9] "where int16 data"

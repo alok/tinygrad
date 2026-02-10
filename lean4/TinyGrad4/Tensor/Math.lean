@@ -1512,7 +1512,7 @@ def conv1d {batch cin cout w kW : Nat} {d : DType} {device : Backend.DeviceType}
 
   -- Step 4: Reshape weight
   -- [cout, cin, kW] -> [cout, cin * kW]
-  let weightReshaped ← reshapeUnsafe weight [cout, kernelFlat]
+  let weightReshaped ← reshape weight [cout, kernelFlat] (by simp [Shape.reshapeValid, Shape.numel, listProd, kernelFlat])
 
   -- Step 5: Transpose weight for matmul: [cout, kernelFlat] -> [kernelFlat, cout]
   let weightT ← T weightReshaped
@@ -1521,16 +1521,17 @@ def conv1d {batch cin cout w kW : Nat} {d : DType} {device : Backend.DeviceType}
   let mm ← matmul patchesReshaped weightT
 
   -- Step 7: Reshape to [batch, wOut, cout]
-  let mmReshaped ← reshapeUnsafe mm [batch, wOut, cout]
+  let mmReshaped ← reshape mm [batch, wOut, cout] (by
+    simp [Shape.reshapeValid, Shape.numel, listProd, patchFlat, Nat.mul_assoc])
 
   -- Step 8: Permute to [batch, cout, wOut]
-  let result ← permuteUnsafe mmReshaped [0, 2, 1]
+  let result ← permute mmReshaped [0, 2, 1] (by simp [Shape.permuteValid, listAll, listRange])
 
   -- Step 9: Add bias if present
   let finalUop ← match bias with
   | none => pure result.uop
   | some b =>
-    let biasReshaped ← reshapeUnsafe b [1, cout, 1]
+    let biasReshaped ← reshape b [1, cout, 1] (by simp [Shape.reshapeValid, Shape.numel, listProd])
     UOp.add result.uop biasReshaped.uop
 
   let biasGrad := match bias with | none => false | some b => b.requiresGrad
@@ -1585,7 +1586,8 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType} {device : Backend.Device
 
   -- Step 4: Reshape weight
   -- [cout, cin, kH, kW] -> [cout, cin * kH * kW]
-  let weightReshaped ← reshapeUnsafe weight [cout, kernelFlat]
+  let weightReshaped ← reshape weight [cout, kernelFlat] (by
+    simp [Shape.reshapeValid, Shape.numel, listProd, kernelFlat, Nat.mul_assoc])
 
   -- Step 5: Transpose weight for matmul: [cout, kernelFlat] -> [kernelFlat, cout]
   let weightT ← T weightReshaped
@@ -1594,17 +1596,18 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType} {device : Backend.Device
   let mm ← matmul patchesReshaped weightT
 
   -- Step 7: Reshape to [batch, hOut, wOut, cout]
-  let mmReshaped ← reshapeUnsafe mm [batch, hOut, wOut, cout]
+  let mmReshaped ← reshape mm [batch, hOut, wOut, cout] (by
+    simp [Shape.reshapeValid, Shape.numel, listProd, patchFlat, Nat.mul_assoc])
 
   -- Step 8: Permute to [batch, cout, hOut, wOut]
-  let result ← permuteUnsafe mmReshaped [0, 3, 1, 2]
+  let result ← permute mmReshaped [0, 3, 1, 2] (by simp [Shape.permuteValid, listAll, listRange])
 
   -- Step 9: Add bias if present
   let finalUop ← match bias with
   | none => pure result.uop
   | some b =>
     -- Reshape bias [cout] -> [1, cout, 1, 1] for broadcasting
-    let biasReshaped ← reshapeUnsafe b [1, cout, 1, 1]
+    let biasReshaped ← reshape b [1, cout, 1, 1] (by simp [Shape.reshapeValid, Shape.numel, listProd])
     UOp.add result.uop biasReshaped.uop
 
   let biasGrad := match bias with | none => false | some b => b.requiresGrad

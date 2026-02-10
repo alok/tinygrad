@@ -44,7 +44,6 @@ examples/**/*.safetensors
 node_modules
 package.json
 package-lock.json
-uv.lock
 temp
 *.csv
 .coverage

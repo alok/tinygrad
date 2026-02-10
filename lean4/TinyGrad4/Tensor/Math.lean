@@ -886,9 +886,9 @@ def gatherLastF32 {batch numClasses : Nat} {device : Backend.DeviceType}
     (x : StaticTensor [batch, numClasses] .float32 device)
     (targets : StaticTensor [batch] .float32 device)
     : TensorM (StaticTensor [batch] .float32 device) := do
-  let targets2 ← reshapeUnsafe targets [batch, 1]
+  let targets2 ← reshape targets [batch, 1] (by simp [Shape.reshapeValid, Shape.numel, listProd])
   let gathered ← gatherF32 x 1 targets2
-  reshapeUnsafe gathered [batch]
+  reshape gathered [batch] (by simp [Shape.reshapeValid, Shape.numel, listProd])
 
 def gatherLast {batch numClasses : Nat} {device : Backend.DeviceType}
     (x : StaticTensor [batch, numClasses] .float32 device)
@@ -902,8 +902,8 @@ def scatterLastF32 {batch numClasses : Nat} {device : Backend.DeviceType}
     (targets : StaticTensor [batch] .float32 device)
     : TensorM (StaticTensor [batch, numClasses] .float32 device) := do
   let oneHot ← oneHotF32 targets
-  let values2 ← reshapeUnsafe values [batch, 1]
-  let valuesB ← expandUnsafe values2 [batch, numClasses]
+  let values2 ← reshape values [batch, 1] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+  let valuesB ← expand values2 [batch, numClasses] (by simp [Shape.expandValid, listAll])
   let out ← mul oneHot valuesB
   pure out
 

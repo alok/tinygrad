@@ -881,6 +881,13 @@ def gather {s idxShape : Shape} {device : Backend.DeviceType}
   let indexF ← cast index .float32
   gatherF32 t dim indexF
 
+/-- Axis-typed gather: axis bounds are checked by the type system. -/
+def gatherAxis {s idxShape : Shape} {device : Backend.DeviceType}
+    (t : StaticTensor s .float32 device) (dim : Fin s.length)
+    (index : StaticTensor idxShape .int32 device)
+    : TensorM (StaticTensor idxShape .float32 device) :=
+  gather t dim.1 index
+
 /-- Gather along the last axis using class indices (float32). -/
 private def gatherLastF32 {batch numClasses : Nat} {device : Backend.DeviceType}
     (x : StaticTensor [batch, numClasses] .float32 device)
@@ -1098,6 +1105,14 @@ def scatterReduce {s idxShape srcShape : Shape} {device : Backend.DeviceType}
   let indexF ← cast index .float32
   scatterReduceF32 self dim indexF src reduce includeSelf
 
+/-- Axis-typed scatterReduce: axis bounds are checked by the type system. -/
+def scatterReduceAxis {s idxShape srcShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Fin s.length)
+    (index : StaticTensor idxShape .int32 device) (src : StaticTensor srcShape .float32 device)
+    (reduce : ScatterReduce) (includeSelf : Bool := true)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatterReduce self dim.1 index src reduce includeSelf
+
 private def scatterF32 {s idxShape srcShape : Shape} {device : Backend.DeviceType}
     (self : StaticTensor s .float32 device) (dim : Nat)
     (index : StaticTensor idxShape .float32 device) (src : StaticTensor srcShape .float32 device)
@@ -1111,6 +1126,13 @@ def scatter {s idxShape srcShape : Shape} {device : Backend.DeviceType}
     : TensorM (StaticTensor s .float32 device) := do
   let indexF ← cast index .float32
   scatterF32 self dim indexF src
+
+/-- Axis-typed scatter: axis bounds are checked by the type system. -/
+def scatterAxis {s idxShape srcShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Fin s.length)
+    (index : StaticTensor idxShape .int32 device) (src : StaticTensor srcShape .float32 device)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatter self dim.1 index src
 
 /-- Log-sum-exp along axis (numerically stable). -/
 def logsumexpAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) (keepdim : Bool := true)

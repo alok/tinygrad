@@ -232,14 +232,16 @@ def testGatherScatter : IO Unit := do
     let base2 ← reshapeUnsafe base [2, 3]
     let idxF ← Tensor.arange 2
     let idx ← cast idxF .int32
-    let gathered ← gatherLast base2 idx
+    let gathered ← gatherAxis base2 ⟨1, by decide⟩ idx
     let vals ← Tensor.full [2] .float32 5.0
-    let scattered : StaticTensor [2, 3] .float32 .CPU ← scatterLast vals idx
+    let baseZ ← Tensor.full [2, 3] .float32 0.0
+    let colVals ← reshape vals [2, 1] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+    let scattered : StaticTensor [2, 3] .float32 .CPU ← scatterAxis baseZ ⟨1, by decide⟩ idx colVals
     pure (gathered, scattered)
   let gVals := evalTensor gathered
-  assertEqF32 gVals #[0.0, 4.0] "gatherLast"
+  assertEqF32 gVals #[0.0, 4.0] "gatherAxis"
   let sVals := evalTensor scattered
-  assertEqF32 sVals #[5.0, 0.0, 0.0, 0.0, 5.0, 0.0] "scatterLast"
+  assertEqF32 sVals #[5.0, 0.0, 0.0, 0.0, 5.0, 0.0] "scatterAxis"
 
 def testArangeLinspaceRand : IO Unit := do
   let (a, l, r, rn, ri, zLike, oLike, fLike) := runTensorM do

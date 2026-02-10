@@ -1,6 +1,7 @@
 import Float64
 import TinyGrad4
 import TinyGrad4.NN.Dropout
+import TinyGrad4.NN.Linear
 import TinyGrad4.NN.Norm
 
 /-!
@@ -57,12 +58,23 @@ private def testBatchNorm1dShape : IO Unit := do
 
   assertShape out.uop.shape [3, 5] "batchnorm1d"
 
+private def testLinearForwardTyped : IO Unit := do
+  let out := Id.run <| runTensorM do
+    let x ← Tensor.full [3, 4] .float32 1.0
+    let w ← Tensor.full [4, 2] .float32 0.5
+    let b ← Tensor.full [2] .float32 0.25
+    linearForward x w (some b)
+
+  assertShape out.uop.shape [3, 2] "linearForward"
+
 def runAll : IO Unit := do
   IO.println "=== ShapeTypedLayerSmoke Tests ==="
   testLayerNormDropoutStack
   IO.println "✓ layernorm + dropout typed stack"
   testBatchNorm1dShape
   IO.println "✓ batchnorm1d typed shape"
+  testLinearForwardTyped
+  IO.println "✓ linearForward typed shape"
   IO.println "=== ShapeTypedLayerSmoke OK ==="
 
 end TinyGrad4.Test.ShapeTypedLayerSmoke

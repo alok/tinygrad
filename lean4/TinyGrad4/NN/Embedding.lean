@@ -52,12 +52,14 @@ def forward {batch : Nat} {device : Backend.DeviceType} (params : EmbeddingParam
     (indices : Vector batch .int32 device)
     : TensorM (Matrix batch embedSize dt device) := do
   -- Create one-hot: [batch, vocabSize]
-  -- arange [vocabSize] broadcasted to [batch, vocabSize]
+  -- arange [vocabSize] -> [1, vocabSize] -> [batch, vocabSize]
   let arangeVocab ← Tensor.arange (device := device) vocabSize .int32
-  let arangeExpanded ← expandUnsafe arangeVocab [batch, vocabSize]
+  let arangeRow ← reshape arangeVocab [1, vocabSize] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+  let arangeExpanded ← expand arangeRow [batch, vocabSize] (by simp [Shape.expandValid, listAll])
 
-  -- indices expanded to [batch, vocabSize]
-  let indicesExpanded ← expandUnsafe indices [batch, vocabSize]
+  -- indices [batch] -> [batch, 1] -> [batch, vocabSize]
+  let indicesCol ← reshape indices [batch, 1] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+  let indicesExpanded ← expand indicesCol [batch, vocabSize] (by simp [Shape.expandValid, listAll])
 
   -- Compare: one_hot[i,j] = 1 if indices[i] == j else 0
   let oneHotBool ← cmpeq indicesExpanded arangeExpanded

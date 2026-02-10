@@ -163,9 +163,11 @@ def format_output(file_path: Path, bindings: List[LetBinding],
         output.append(f"{'─'*70}")
         for b in dont_inline:
             output.append(f"\n  {b.name} (line {b.line_number})")
-            use_locations = ", ".join(map(str, b.use_locations[:5]))
-            use_suffix = "..." if len(b.use_locations) > 5 else ""
-            output.append(f"    Used: {b.uses_count} times (lines: {use_locations}{use_suffix})")
+            use_lines = ", ".join(map(str, b.use_locations[:5]))
+            more = "..." if len(b.use_locations) > 5 else ""
+            output.append(
+                f"    Used: {b.uses_count} times (lines: {use_lines}{more})"
+            )
             output.append(f"    Definition: ~{b.definition_tokens} tokens")
             output.append(f"    Impact: {b.token_impact}")
             output.append(f"    → {b.recommendation}")

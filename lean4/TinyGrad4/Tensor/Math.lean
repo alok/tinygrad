@@ -287,6 +287,75 @@ def select {s1 s2 s3 : List Nat} {d : DType} {device : Backend.DeviceType}
   let out ← UOp.whereBroadcast cond.uop x.uop y.uop hXY' hCond'
   pure (build out (requiresGrad := x.requiresGrad || y.requiresGrad))
 
+def addRow {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : Matrix batch dim d device) (row : StaticTensor [1, dim] d device)
+    : TensorM (Matrix batch dim d device) := do
+  let out ← addBroadcast x row (Shape.broadcastable_matrix_row batch dim)
+  pure (StaticTensor.assumeShape out)
+
+def addVector {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : Matrix batch dim d device) (v : Vector dim d device)
+    : TensorM (Matrix batch dim d device) := do
+  let out ← addBroadcast x v (Shape.broadcastable_matrix_vector batch dim)
+  pure (StaticTensor.assumeShape out)
+
+def subColumn {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : Matrix batch dim d device) (col : Matrix batch 1 d device)
+    : TensorM (Matrix batch dim d device) := do
+  let out ← subBroadcast x col (Shape.broadcastable_matrix_col batch dim)
+  pure (StaticTensor.assumeShape out)
+
+def mulColumn {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : Matrix batch dim d device) (col : Matrix batch 1 d device)
+    : TensorM (Matrix batch dim d device) := do
+  let out ← mulBroadcast x col (Shape.broadcastable_matrix_col batch dim)
+  pure (StaticTensor.assumeShape out)
+
+def mulVector {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : Matrix batch dim d device) (v : Vector dim d device)
+    : TensorM (Matrix batch dim d device) := do
+  let out ← mulBroadcast x v (Shape.broadcastable_matrix_vector batch dim)
+  pure (StaticTensor.assumeShape out)
+
+def addChannelNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, width] d device)
+    (ch : StaticTensor [1, channels, 1, 1] d device)
+    : TensorM (StaticTensor [batch, channels, height, width] d device) := do
+  let out ← addBroadcast x ch (Shape.broadcastable_nchw_channel batch channels height width)
+  pure (StaticTensor.assumeShape out)
+
+def subChannelNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, width] d device)
+    (ch : StaticTensor [1, channels, 1, 1] d device)
+    : TensorM (StaticTensor [batch, channels, height, width] d device) := do
+  let out ← subBroadcast x ch (Shape.broadcastable_nchw_channel batch channels height width)
+  pure (StaticTensor.assumeShape out)
+
+def mulChannelNCHW {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, width] d device)
+    (ch : StaticTensor [1, channels, 1, 1] d device)
+    : TensorM (StaticTensor [batch, channels, height, width] d device) := do
+  let out ← mulBroadcast x ch (Shape.broadcastable_nchw_channel batch channels height width)
+  pure (StaticTensor.assumeShape out)
+
+def addChannelNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] d device) (ch : StaticTensor [1, channels] d device)
+    : TensorM (StaticTensor [batch, channels] d device) := do
+  let out ← addBroadcast x ch (Shape.broadcastable_nc_channel batch channels)
+  pure (StaticTensor.assumeShape out)
+
+def subChannelNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] d device) (ch : StaticTensor [1, channels] d device)
+    : TensorM (StaticTensor [batch, channels] d device) := do
+  let out ← subBroadcast x ch (Shape.broadcastable_nc_channel batch channels)
+  pure (StaticTensor.assumeShape out)
+
+def mulChannelNC {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] d device) (ch : StaticTensor [1, channels] d device)
+    : TensorM (StaticTensor [batch, channels] d device) := do
+  let out ← mulBroadcast x ch (Shape.broadcastable_nc_channel batch channels)
+  pure (StaticTensor.assumeShape out)
+
 infixl:65 " +. " => addBroadcast
 infixl:65 " -. " => subBroadcast
 infixl:70 " *. " => mulBroadcast

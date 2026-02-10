@@ -21,22 +21,6 @@ namespace TinyGrad4.NN
 open TinyGrad4
 open StaticTensor
 
-private theorem bcastMatrixCol (batch dim : Nat) :
-    Shape.broadcastable [batch, dim] [batch, 1] = true := by
-  simp [Shape.broadcastable, listAll]
-
-private theorem bcastMatrixVector (batch dim : Nat) :
-    Shape.broadcastable [batch, dim] [dim] = true := by
-  simp [Shape.broadcastable, listAll]
-
-private theorem bcastNCHWChannel (batch channels height width : Nat) :
-    Shape.broadcastable [batch, channels, height, width] [1, channels, 1, 1] = true := by
-  simp [Shape.broadcastable, listAll]
-
-private theorem bcastNCChannel (batch channels : Nat) :
-    Shape.broadcastable [batch, channels] [1, channels] = true := by
-  simp [Shape.broadcastable, listAll]
-
 /-! ## RMSNorm -/
 
 /-- RMSNorm parameters -/
@@ -70,7 +54,7 @@ private def rmsNormInternal {batch dim : Nat} {d : DType} {device : Backend.Devi
   let meanEps ← addBroadcast meanSq epsT (Shape.broadcastable_refl [batch, 1])
   let scaleRaw ← rsqrt meanEps
   let scale : Matrix batch 1 d device := StaticTensor.assumeShape scaleRaw
-  let result ← mulBroadcast x scale (bcastMatrixCol batch dim)
+  let result ← mulBroadcast x scale (Shape.broadcastable_matrix_col batch dim)
   pure (StaticTensor.assumeShape result)
 
 /-- Forward pass for matrix input `[batch, dim]`. -/
@@ -81,7 +65,7 @@ def forward {batch : Nat} {device : Backend.DeviceType} (params : RMSNormParams 
   match params.weight with
   | none => pure normalized
   | some w =>
-    let result ← mulBroadcast normalized w (bcastMatrixVector batch dim)
+    let result ← mulBroadcast normalized w (Shape.broadcastable_matrix_vector batch dim)
     pure (StaticTensor.assumeShape result)
 
 /-- Get trainable parameters -/
@@ -123,7 +107,7 @@ private def layerNormInternal {batch dim : Nat} {d : DType} {device : Backend.De
     : TensorM (Matrix batch dim d device) := do
   let meanRaw ← meanAxis x 1 true
   let mean : Matrix batch 1 d device := StaticTensor.assumeShape meanRaw
-  let diff ← subBroadcast x mean (bcastMatrixCol batch dim)
+  let diff ← subBroadcast x mean (Shape.broadcastable_matrix_col batch dim)
   let diff : Matrix batch dim d device := StaticTensor.assumeShape diff
   let diffSq ← mul diff diff
   let varianceRaw ← meanAxis diffSq 1 true
@@ -132,7 +116,7 @@ private def layerNormInternal {batch dim : Nat} {d : DType} {device : Backend.De
   let varEps ← addBroadcast variance epsT (Shape.broadcastable_refl [batch, 1])
   let invStdRaw ← rsqrt varEps
   let invStd : Matrix batch 1 d device := StaticTensor.assumeShape invStdRaw
-  let result ← mulBroadcast diff invStd (bcastMatrixCol batch dim)
+  let result ← mulBroadcast diff invStd (Shape.broadcastable_matrix_col batch dim)
   pure (StaticTensor.assumeShape result)
 
 /-- Forward pass for matrix input `[batch, dim]`. -/
@@ -143,15 +127,15 @@ def forward {batch : Nat} {device : Backend.DeviceType} (params : LayerNormParam
   match params.weight, params.bias with
   | none, none => pure normalized
   | some w, none =>
-    let result ← mulBroadcast normalized w (bcastMatrixVector batch dim)
+    let result ← mulBroadcast normalized w (Shape.broadcastable_matrix_vector batch dim)
     pure (StaticTensor.assumeShape result)
   | none, some b =>
-    let result ← addBroadcast normalized b (bcastMatrixVector batch dim)
+    let result ← addBroadcast normalized b (Shape.broadcastable_matrix_vector batch dim)
     pure (StaticTensor.assumeShape result)
   | some w, some b =>
-    let scaled ← mulBroadcast normalized w (bcastMatrixVector batch dim)
+    let scaled ← mulBroadcast normalized w (Shape.broadcastable_matrix_vector batch dim)
     let scaled : Matrix batch dim dt device := StaticTensor.assumeShape scaled
-    let result ← addBroadcast scaled b (bcastMatrixVector batch dim)
+    let result ← addBroadcast scaled b (Shape.broadcastable_matrix_vector batch dim)
     pure (StaticTensor.assumeShape result)
 
 /-- Get trainable parameters -/
@@ -218,7 +202,7 @@ def forward2d {batch channels height width : Nat} {device : Backend.DeviceType}
     let batchMeanRaw ← meanAxis m2 0 true
     let batchMean : StaticTensor [1, channels, 1, 1] dt device := StaticTensor.assumeShape batchMeanRaw
 
-    let diff ← subBroadcast x batchMean (bcastNCHWChannel batch channels height width)
+    let diff ← subBroadcast x batchMean (Shape.broadcastable_nchw_channel batch channels height width)
     let diff : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape diff
     let diffSq ← mul diff diff
     let v1Raw ← meanAxis diffSq 3 true
@@ -232,18 +216,18 @@ def forward2d {batch channels height width : Nat} {device : Backend.DeviceType}
     let varEps ← addBroadcast batchVar epsT (Shape.broadcastable_refl [1, channels, 1, 1])
     let varEps : StaticTensor [1, channels, 1, 1] dt device := StaticTensor.assumeShape varEps
     let invStd ← rsqrt varEps
-    let normalized ← mulBroadcast diff invStd (bcastNCHWChannel batch channels height width)
+    let normalized ← mulBroadcast diff invStd (Shape.broadcastable_nchw_channel batch channels height width)
     let normalized : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape normalized
 
     let weightB ← reshapeUnsafe params.weight [1, channels, 1, 1]
     let biasB ← reshapeUnsafe params.bias [1, channels, 1, 1]
-    let scaled ← mulBroadcast normalized weightB (bcastNCHWChannel batch channels height width)
+    let scaled ← mulBroadcast normalized weightB (Shape.broadcastable_nchw_channel batch channels height width)
     let scaled : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape scaled
-    let result ← addBroadcast scaled biasB (bcastNCHWChannel batch channels height width)
+    let result ← addBroadcast scaled biasB (Shape.broadcastable_nchw_channel batch channels height width)
     pure (StaticTensor.assumeShape result)
   else
     let meanB ← reshapeUnsafe params.runningMean [1, channels, 1, 1]
-    let diff ← subBroadcast x meanB (bcastNCHWChannel batch channels height width)
+    let diff ← subBroadcast x meanB (Shape.broadcastable_nchw_channel batch channels height width)
     let diff : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape diff
 
     let epsT ← Tensor.full (device := device) [1, channels, 1, 1] dt params.eps
@@ -251,14 +235,14 @@ def forward2d {batch channels height width : Nat} {device : Backend.DeviceType}
     let varEps ← addBroadcast varB epsT (Shape.broadcastable_refl [1, channels, 1, 1])
     let varEps : StaticTensor [1, channels, 1, 1] dt device := StaticTensor.assumeShape varEps
     let invStd ← rsqrt varEps
-    let normalized ← mulBroadcast diff invStd (bcastNCHWChannel batch channels height width)
+    let normalized ← mulBroadcast diff invStd (Shape.broadcastable_nchw_channel batch channels height width)
     let normalized : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape normalized
 
     let weightB ← reshapeUnsafe params.weight [1, channels, 1, 1]
     let biasB ← reshapeUnsafe params.bias [1, channels, 1, 1]
-    let scaled ← mulBroadcast normalized weightB (bcastNCHWChannel batch channels height width)
+    let scaled ← mulBroadcast normalized weightB (Shape.broadcastable_nchw_channel batch channels height width)
     let scaled : StaticTensor [batch, channels, height, width] dt device := StaticTensor.assumeShape scaled
-    let result ← addBroadcast scaled biasB (bcastNCHWChannel batch channels height width)
+    let result ← addBroadcast scaled biasB (Shape.broadcastable_nchw_channel batch channels height width)
     pure (StaticTensor.assumeShape result)
 
 /-- Forward pass for BatchNorm1d: input `[N, C]`. -/
@@ -269,7 +253,7 @@ def forward1d {batch channels : Nat} {device : Backend.DeviceType}
   if params.training then
     let batchMeanRaw ← meanAxis x 0 true
     let batchMean : StaticTensor [1, channels] dt device := StaticTensor.assumeShape batchMeanRaw
-    let diff ← subBroadcast x batchMean (bcastNCChannel batch channels)
+    let diff ← subBroadcast x batchMean (Shape.broadcastable_nc_channel batch channels)
     let diff : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape diff
     let diffSq ← mul diff diff
     let batchVarRaw ← meanAxis diffSq 0 true
@@ -279,18 +263,18 @@ def forward1d {batch channels : Nat} {device : Backend.DeviceType}
     let varEps ← addBroadcast batchVar epsT (Shape.broadcastable_refl [1, channels])
     let varEps : StaticTensor [1, channels] dt device := StaticTensor.assumeShape varEps
     let invStd ← rsqrt varEps
-    let normalized ← mulBroadcast diff invStd (bcastNCChannel batch channels)
+    let normalized ← mulBroadcast diff invStd (Shape.broadcastable_nc_channel batch channels)
     let normalized : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape normalized
 
     let weightB ← reshapeUnsafe params.weight [1, channels]
     let biasB ← reshapeUnsafe params.bias [1, channels]
-    let scaled ← mulBroadcast normalized weightB (bcastNCChannel batch channels)
+    let scaled ← mulBroadcast normalized weightB (Shape.broadcastable_nc_channel batch channels)
     let scaled : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape scaled
-    let result ← addBroadcast scaled biasB (bcastNCChannel batch channels)
+    let result ← addBroadcast scaled biasB (Shape.broadcastable_nc_channel batch channels)
     pure (StaticTensor.assumeShape result)
   else
     let meanB ← reshapeUnsafe params.runningMean [1, channels]
-    let diff ← subBroadcast x meanB (bcastNCChannel batch channels)
+    let diff ← subBroadcast x meanB (Shape.broadcastable_nc_channel batch channels)
     let diff : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape diff
 
     let epsT ← Tensor.full (device := device) [1, channels] dt params.eps
@@ -298,14 +282,14 @@ def forward1d {batch channels : Nat} {device : Backend.DeviceType}
     let varEps ← addBroadcast varB epsT (Shape.broadcastable_refl [1, channels])
     let varEps : StaticTensor [1, channels] dt device := StaticTensor.assumeShape varEps
     let invStd ← rsqrt varEps
-    let normalized ← mulBroadcast diff invStd (bcastNCChannel batch channels)
+    let normalized ← mulBroadcast diff invStd (Shape.broadcastable_nc_channel batch channels)
     let normalized : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape normalized
 
     let weightB ← reshapeUnsafe params.weight [1, channels]
     let biasB ← reshapeUnsafe params.bias [1, channels]
-    let scaled ← mulBroadcast normalized weightB (bcastNCChannel batch channels)
+    let scaled ← mulBroadcast normalized weightB (Shape.broadcastable_nc_channel batch channels)
     let scaled : StaticTensor [batch, channels] dt device := StaticTensor.assumeShape scaled
-    let result ← addBroadcast scaled biasB (bcastNCChannel batch channels)
+    let result ← addBroadcast scaled biasB (Shape.broadcastable_nc_channel batch channels)
     pure (StaticTensor.assumeShape result)
 
 /-- Set training mode -/

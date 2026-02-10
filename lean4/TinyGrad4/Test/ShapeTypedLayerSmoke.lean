@@ -39,7 +39,7 @@ private def testLayerNormDropoutStack : IO Unit := do
   let out := Id.run <| runTensorM do
     let x ← Tensor.ones [2, 4] .float32
     let bias ← Tensor.full [1, 4] .float32 3.0
-    let shifted ← addBroadcast x bias (by native_decide)
+    let shifted ← addBroadcast x bias (Shape.broadcastable_matrix_row 2 4)
     let ln ← layerNorm .CPU 4 .float32
     let normalized ← LayerNormParams.forward ln shifted
     let dp := dropout 0.25

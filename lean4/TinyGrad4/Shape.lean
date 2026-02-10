@@ -165,6 +165,31 @@ theorem broadcastOut_refl (s : Shape) : broadcastOut s s = s := by
 theorem broadcastable_out_refl (s : Shape) : broadcastable s (broadcastOut s s) = true := by
   simpa [broadcastOut_refl] using broadcastable_refl s
 
+/-- A matrix broadcasts with a row tensor across the batch axis. -/
+theorem broadcastable_matrix_row (batch dim : Nat) :
+    broadcastable [batch, dim] [1, dim] = true := by
+  simp [broadcastable, listAll]
+
+/-- A matrix broadcasts with a column tensor across the feature axis. -/
+theorem broadcastable_matrix_col (batch dim : Nat) :
+    broadcastable [batch, dim] [batch, 1] = true := by
+  simp [broadcastable, listAll]
+
+/-- A matrix broadcasts with a feature vector across the batch axis. -/
+theorem broadcastable_matrix_vector (batch dim : Nat) :
+    broadcastable [batch, dim] [dim] = true := by
+  simp [broadcastable, listAll]
+
+/-- NCHW tensors broadcast with channel-only tensors `[1, C, 1, 1]`. -/
+theorem broadcastable_nchw_channel (batch channels height width : Nat) :
+    broadcastable [batch, channels, height, width] [1, channels, 1, 1] = true := by
+  simp [broadcastable, listAll]
+
+/-- NC tensors broadcast with channel-only tensors `[1, C]`. -/
+theorem broadcastable_nc_channel (batch channels : Nat) :
+    broadcastable [batch, channels] [1, channels] = true := by
+  simp [broadcastable, listAll]
+
 /-- Check if concat is valid (same rank, same dims except axis). -/
 def concatValid (s1 s2 : Shape) (axis : Nat) : Bool :=
   s1.length == s2.length &&

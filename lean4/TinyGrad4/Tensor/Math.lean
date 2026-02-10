@@ -46,10 +46,6 @@ private theorem toUOpsShapeList {d : DType} {device : Backend.DeviceType} {shape
   | nil => simp [TensorList.toUOps]
   | cons t rest ih => simp [TensorList.toUOps, t.h_shape, ih]
 
-private theorem broadcastMatrixVector (batch dim : Nat) :
-    Shape.broadcastable [batch, dim] [dim] = true := by
-  simp [Shape.broadcastable, listAll]
-
 def add {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let hShape := shapeEq t1 t2
   let hType := dtypeEq t1 t2
@@ -1152,7 +1148,7 @@ def linearOpt {batch inDim outDim : Nat} {d : DType} {device : Backend.DeviceTyp
   match bias with
   | none => pure y
   | some b =>
-    let yb ← addBroadcast y b (broadcastMatrixVector batch outDim)
+    let yb ← addBroadcast y b (Shape.broadcastable_matrix_vector batch outDim)
     pure (build yb.uop (requiresGrad := yb.requiresGrad))
 
 /-- Fully-connected layer with bias: X @ W + b (broadcasted over batch). -/

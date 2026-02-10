@@ -61,8 +61,8 @@ def parameters {device : Backend.DeviceType} (params : LinearParams inFeatures o
 
 end LinearParams
 
-/-- Convenience: Create and apply linear layer in one step -/
-def linear' {batch inFeatures outFeatures : Nat} {dt : DType} {device : Backend.DeviceType}
+/-- Functional linear layer application (no parameter struct). -/
+def linearForward {batch inFeatures outFeatures : Nat} {dt : DType} {device : Backend.DeviceType}
     (x : Matrix batch inFeatures dt device)
     (weight : Matrix inFeatures outFeatures dt device)
     (bias : Option (Vector outFeatures dt device) := none)

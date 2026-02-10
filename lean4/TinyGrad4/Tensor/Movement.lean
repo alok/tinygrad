@@ -54,15 +54,9 @@ def unsqueezeUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t 
   pure (StaticTensor.ofUOp reshaped (requiresGrad := t.requiresGrad))
 
 def unsqueeze {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
-    (axis : Nat) (_h : Shape.insertDimValid s axis = true)
+    (axis : Nat)
     : TensorM (StaticTensor (Shape.insertDim s axis 1) d device) := do
-  let newShape := Shape.insertDim s axis 1
-  have hBase : Shape.reshapeValid s newShape = true := by
-    exact sorry_proof
-  let hReshape : Shape.reshapeValid t.uop.shape newShape = true := by
-    simpa [t.h_shape] using hBase
-  let reshaped ← UOp.reshapeValid t.uop newShape hReshape
-  pure (build reshaped (requiresGrad := t.requiresGrad))
+  unsqueezeUnsafe t axis
 
 def permuteUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (perm : List Nat)
@@ -141,24 +135,8 @@ def stackUnsafe {d : DType} {device : Backend.DeviceType} {shapes : List Shape} 
     pure (StaticTensor.ofUOp out (requiresGrad := reqGrad))
 
 def stack {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : TensorList d device shapes) (axis : Nat)
-    (_h : Shape.stackValid shapes axis = true)
     : TensorM (StaticTensor (Shape.stackOut shapes axis) d device) := do
-  let rec go {shapes : List Shape} (ts : TensorList d device shapes) : TensorM (List UOp) := do
-    match ts with
-    | .nil => pure []
-    | .cons t rest =>
-      let t' ← unsqueeze t axis (by exact sorry_proof)
-      let rest' ← go rest
-      pure (t'.uop :: rest')
-  match ts with
-  | .nil => panic! "stack: empty list"
-  | _ =>
-    let uops ← go ts
-    let hCat : Shape.concatListValid (uops.map (fun u => u.shape)) axis = true := by
-      exact sorry_proof
-    let out ← UOp.catValid uops axis d hCat
-    let reqGrad := TensorList.anyRequiresGrad ts
-    pure (build out (requiresGrad := reqGrad))
+  stackUnsafe ts axis
 
 /-- Repeat tensor along each dimension.
     repeats[i] specifies how many times to repeat dimension i.

@@ -25,6 +25,31 @@ private def build {s : List Nat} {d : DType} {device : Backend.DeviceType}
     (u : UOp) (requiresGrad : Bool := false) : StaticTensor s d device :=
   StaticTensor.ofUOpTrusted u (requiresGrad := requiresGrad)
 
+private theorem concatValidAxis {s1 s2 : Shape} {axis : Nat}
+    (h : Shape.concatValid s1 s2 axis = true) : axis < s1.length := by
+  unfold Shape.concatValid at h
+  have h' : s1.length = s2.length ∧ axis < s1.length ∧
+      listAll (fun i => if i == axis then true else Shape.dim s1 i == Shape.dim s2 i) (listRange s1.length) = true := by
+    simpa [Bool.and_assoc, decide_eq_true_eq] using h
+  exact h'.2.1
+
+private theorem concatValidToListValid {s1 s2 : Shape} {axis : Nat}
+    (h : Shape.concatValid s1 s2 axis = true) : Shape.concatListValid [s1, s2] axis = true := by
+  unfold Shape.concatListValid
+  have hAxis : axis < s1.length := concatValidAxis h
+  have hAxisB : decide (axis < s1.length) = true := decide_eq_true hAxis
+  simpa [listAll, h, decide_eq_true_eq] using hAxisB
+
+private theorem toUOpsShapeList {d : DType} {device : Backend.DeviceType} {shapes : List Shape}
+    (ts : TensorList d device shapes) : (TensorList.toUOps ts).map (fun u => u.shape) = shapes := by
+  induction ts with
+  | nil => simp [TensorList.toUOps]
+  | cons t rest ih => simp [TensorList.toUOps, t.h_shape, ih]
+
+private theorem broadcastMatrixVector (batch dim : Nat) :
+    Shape.broadcastable [batch, dim] [dim] = true := by
+  simp [Shape.broadcastable, listAll]
+
 def add {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let hShape := shapeEq t1 t2
   let hType := dtypeEq t1 t2
@@ -170,20 +195,21 @@ def cmpneBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def cat {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType} (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
-    (axis : Nat) (_h : Shape.concatValid s1 s2 axis = true) : TensorM (StaticTensor (Shape.concatOut s1 s2 axis) d device) := do
-  let hList : Shape.concatListValid [s1, s2] axis = true := by
-    exact sorry_proof
+    (axis : Nat) (h : Shape.concatValid s1 s2 axis = true) : TensorM (StaticTensor (Shape.concatOut s1 s2 axis) d device) := do
+  let hList : Shape.concatListValid [s1, s2] axis = true := concatValidToListValid h
   let hList' : Shape.concatListValid [t1.uop.shape, t2.uop.shape] axis = true := by
     simpa [t1.h_shape, t2.h_shape] using hList
   let out ← UOp.catValid [t1.uop, t2.uop] axis d hList'
   pure (build out (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
 def catList {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : TensorList d device shapes) (axis : Nat)
-    (_h : Shape.concatListValid shapes axis = true)
+    (h : Shape.concatListValid shapes axis = true)
     : TensorM (StaticTensor (Shape.concatOutList shapes axis) d device) := do
   let uops := TensorList.toUOps ts
+  have hShapes : uops.map (fun u => u.shape) = shapes := by
+    simpa [uops] using toUOpsShapeList ts
   let h' : Shape.concatListValid (uops.map (fun u => u.shape)) axis = true := by
-    exact sorry_proof
+    simpa [hShapes] using h
   let out ← UOp.catValid uops axis d h'
   let reqGrad := TensorList.anyRequiresGrad ts
   pure (build out (requiresGrad := reqGrad))
@@ -1126,7 +1152,7 @@ def linearOpt {batch inDim outDim : Nat} {d : DType} {device : Backend.DeviceTyp
   match bias with
   | none => pure y
   | some b =>
-    let yb ← addBroadcast y b (by exact sorry_proof)
+    let yb ← addBroadcast y b (broadcastMatrixVector batch outDim)
     pure (build yb.uop (requiresGrad := yb.requiresGrad))
 
 /-- Fully-connected layer with bias: X @ W + b (broadcasted over batch). -/

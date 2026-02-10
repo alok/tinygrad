@@ -53,7 +53,7 @@ private def buildLinear (batch inFeatures outFeatures : Nat)
   let x ← Tensor.full [batch, inFeatures] .float32 1.0
   let w ← Tensor.full [inFeatures, outFeatures] .float32 1.0
   let b ← Tensor.full [outFeatures] .float32 0.5
-  let y ← TinyGrad4.NN.linear' x w (some b)
+  let y ← TinyGrad4.NN.linearForward x w (some b)
   pure y
 
 /-- Smoke test: build a linear layer with shapes from TG4_TRITON_* and eval via IO path. -/

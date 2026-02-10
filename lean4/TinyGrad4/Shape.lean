@@ -124,9 +124,38 @@ private theorem listAllZipSelfTrue (s : Shape) :
   | nil => simp [listAll]
   | cons a as ih => simp [listAll, ih]
 
+private theorem broadcastPairSymm (a b : Nat) :
+    (a == b || a == 1 || b == 1) = (b == a || b == 1 || a == 1) := by
+  have hbeq : (a == b) = (b == a) := by
+    simpa using (Bool.beq_comm (a := a) (b := b))
+  calc
+    (a == b || a == 1 || b == 1)
+        = (b == a || a == 1 || b == 1) := by simp [hbeq]
+    _ = (b == a || b == 1 || a == 1) := by simp [Bool.or_left_comm, Bool.or_comm]
+
+private theorem listAllZipBroadcastSwap (xs ys : List Nat) :
+    listAll (fun x : Nat × Nat => x.fst == x.snd || x.fst == 1 || x.snd == 1) (List.zip xs ys) =
+    listAll (fun x : Nat × Nat => x.fst == x.snd || x.fst == 1 || x.snd == 1) (List.zip ys xs) := by
+  induction xs generalizing ys with
+  | nil =>
+    simp [listAll]
+  | cons x xs ih =>
+    cases ys with
+    | nil => simp [listAll]
+    | cons y ys =>
+      simp [listAll, broadcastPairSymm, ih]
+
 /-- A shape is always broadcastable with itself. -/
 theorem broadcastable_refl (s : Shape) : broadcastable s s = true := by
   simpa [broadcastable] using listAllZipSelfTrue s
+
+/-- Broadcasting compatibility is symmetric. -/
+theorem broadcastable_comm (s1 s2 : Shape) : broadcastable s1 s2 = broadcastable s2 s1 := by
+  unfold broadcastable
+  let n := max s1.length s2.length
+  let s1' := List.replicate (n - s1.length) 1 ++ s1
+  let s2' := List.replicate (n - s2.length) 1 ++ s2
+  simpa [n, s1', s2', Nat.max_comm] using listAllZipBroadcastSwap s1' s2'
 
 /-- Broadcasting a shape with itself keeps the same shape. -/
 theorem broadcastOut_refl (s : Shape) : broadcastOut s s = s := by

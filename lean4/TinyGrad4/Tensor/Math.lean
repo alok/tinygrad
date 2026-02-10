@@ -31,7 +31,7 @@ def add {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : Static
   let result ← UOp.binaryOpSame .ADD t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def addBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def addBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
@@ -47,7 +47,7 @@ def mul {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : Static
   let result ← UOp.binaryOpSame .MUL t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def mulBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def mulBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
@@ -63,7 +63,7 @@ def sub {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : Static
   let result ← UOp.binaryOpSame .SUB t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def subBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def subBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
@@ -79,7 +79,7 @@ def div {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : Static
   let result ← UOp.binaryOpSame .FDIV t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def divBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def divBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
@@ -95,7 +95,7 @@ def pow {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : Static
   let result ← UOp.binaryOpSame .POW t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def powBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def powBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) := do
@@ -111,7 +111,7 @@ def cmplt {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : Stat
   let result ← UOp.binaryOpSame .CMPLT t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def cmpltBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def cmpltBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
@@ -124,12 +124,14 @@ private def cmpltBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.
 def cmpgt {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : StaticTensor s d device) : TensorM (StaticTensor s .bool device) := do
   cmplt t2 t1
 
-private def cmpgtBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def cmpgtBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
-    (_h : Shape.broadcastable s1 s2 = true)
+    (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
+  let hSwap : Shape.broadcastable s2 s1 = true := by
+    simpa [Shape.broadcastable_comm s1 s2] using h
   let hShape : Shape.broadcastable t2.uop.shape t1.uop.shape = true := by
-    exact sorry_proof
+    simpa [t2.h_shape, t1.h_shape] using hSwap
   let hType : t2.uop.dtype = t1.uop.dtype := by
     simp [t2.h_dtype, t1.h_dtype]
   let result ← UOp.binaryOpBroadcastSame .CMPLT t2.uop t1.uop hShape hType
@@ -141,7 +143,7 @@ def cmpeq {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : Stat
   let result ← UOp.binaryOpSame .CMPEQ t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def cmpeqBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def cmpeqBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
@@ -157,7 +159,7 @@ def cmpne {s : List Nat} {d : DType} {device : Backend.DeviceType} (t1 t2 : Stat
   let result ← UOp.binaryOpSame .CMPNE t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def cmpneBroadcastCore {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
+def cmpneBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 d device) (t2 : StaticTensor s2 d device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
@@ -193,7 +195,7 @@ def bitand {s : List Nat} {device : Backend.DeviceType} (t1 t2 : StaticTensor s 
   let result ← UOp.binaryOpSame .AND t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def bitandBroadcastCore {s1 s2 : List Nat} {device : Backend.DeviceType}
+def bitandBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 .bool device) (t2 : StaticTensor s2 .bool device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
@@ -210,7 +212,7 @@ def bitor {s : List Nat} {device : Backend.DeviceType} (t1 t2 : StaticTensor s .
   let result ← UOp.binaryOpSame .OR t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def bitorBroadcastCore {s1 s2 : List Nat} {device : Backend.DeviceType}
+def bitorBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 .bool device) (t2 : StaticTensor s2 .bool device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
@@ -227,7 +229,7 @@ def bitxor {s : List Nat} {device : Backend.DeviceType} (t1 t2 : StaticTensor s 
   let result ← UOp.binaryOpSame .XOR t1.uop t2.uop hShape hType
   pure (build result (requiresGrad := t1.requiresGrad || t2.requiresGrad))
 
-private def bitxorBroadcastCore {s1 s2 : List Nat} {device : Backend.DeviceType}
+def bitxorBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
     (t1 : StaticTensor s1 .bool device) (t2 : StaticTensor s2 .bool device)
     (h : Shape.broadcastable s1 s2 = true)
     : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) := do
@@ -251,7 +253,7 @@ def to {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTenso
     : TensorM (StaticTensor s dtype device) :=
   cast t dtype
 
-private def selectBroadcastCore {s1 s2 s3 : List Nat} {d : DType} {device : Backend.DeviceType}
+def select {s1 s2 s3 : List Nat} {d : DType} {device : Backend.DeviceType}
     (cond : StaticTensor s1 .bool device) (x : StaticTensor s2 d device) (y : StaticTensor s3 d device)
     (hXY : Shape.broadcastable s2 s3 = true)
     (hCond : Shape.broadcastable s1 (Shape.broadcastOut s2 s3) = true)
@@ -262,98 +264,6 @@ private def selectBroadcastCore {s1 s2 s3 : List Nat} {d : DType} {device : Back
     simpa [cond.h_shape, x.h_shape, y.h_shape] using hCond
   let out ← UOp.whereBroadcast cond.uop x.uop y.uop hXY' hCond'
   pure (build out (requiresGrad := x.requiresGrad || y.requiresGrad))
-
-/-- Readable alias for broadcasted add. -/
-def addBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
-  addBroadcastCore x y h
-
-/-- Readable alias for broadcasted subtraction. -/
-def subBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
-  subBroadcastCore x y h
-
-/-- Readable alias for broadcasted multiplication. -/
-def mulBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
-  mulBroadcastCore x y h
-
-/-- Readable alias for broadcasted division. -/
-def divBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
-  divBroadcastCore x y h
-
-/-- Readable alias for broadcasted power. -/
-def powBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) d device) :=
-  powBroadcastCore x y h
-
-/-- Readable alias for broadcasted less-than comparison. -/
-def cmpltBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
-  cmpltBroadcastCore x y h
-
-/-- Readable alias for broadcasted greater-than comparison. -/
-def cmpgtBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
-  cmpgtBroadcastCore x y h
-
-/-- Readable alias for broadcasted equality comparison. -/
-def cmpeqBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
-  cmpeqBroadcastCore x y h
-
-/-- Readable alias for broadcasted inequality comparison. -/
-def cmpneBroadcast {s1 s2 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor s1 d device) (y : StaticTensor s2 d device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
-  cmpneBroadcastCore x y h
-
-/-- Readable alias for broadcasted boolean and. -/
-def bitandBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
-    (x : StaticTensor s1 .bool device) (y : StaticTensor s2 .bool device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
-  bitandBroadcastCore x y h
-
-/-- Readable alias for broadcasted boolean or. -/
-def bitorBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
-    (x : StaticTensor s1 .bool device) (y : StaticTensor s2 .bool device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
-  bitorBroadcastCore x y h
-
-/-- Readable alias for broadcasted boolean xor. -/
-def bitxorBroadcast {s1 s2 : List Nat} {device : Backend.DeviceType}
-    (x : StaticTensor s1 .bool device) (y : StaticTensor s2 .bool device)
-    (h : Shape.broadcastable s1 s2 = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 s2) .bool device) :=
-  bitxorBroadcastCore x y h
-
-/-- Readable alias for ternary select (`cond ? x : y`) with broadcasting. -/
-def select {s1 s2 s3 : List Nat} {d : DType} {device : Backend.DeviceType}
-    (cond : StaticTensor s1 .bool device) (x : StaticTensor s2 d device) (y : StaticTensor s3 d device)
-    (hXY : Shape.broadcastable s2 s3 = true)
-    (hCond : Shape.broadcastable s1 (Shape.broadcastOut s2 s3) = true)
-    : TensorM (StaticTensor (Shape.broadcastOut s1 (Shape.broadcastOut s2 s3)) d device) :=
-  selectBroadcastCore cond x y hXY hCond
 
 infixl:65 " +. " => addBroadcast
 infixl:65 " -. " => subBroadcast

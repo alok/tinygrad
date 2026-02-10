@@ -151,4 +151,4 @@ def train (numSteps : Nat) (lr : Float64 := 0.1) : IO Unit := do
 
 end TinyGrad4.Test.Training
 
-def main : IO Unit := TinyGrad4.Test.Training.train 100 0.5
+def trainingMain : IO Unit := TinyGrad4.Test.Training.train 100 0.5

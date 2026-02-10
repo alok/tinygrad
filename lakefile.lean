@@ -460,3 +460,7 @@ lean_exe cuda_minimal where
 lean_exe buffer_bench where
   root := `TinyGrad4Bench.BufferProtocolBench
   moreLinkArgs := metalLinkArgs
+
+lean_exe mac_e2e_train_smoke where
+  root := `TinyGrad4.Test.MacEndToEndTrainSmoke
+  moreLinkArgs := metalLinkArgs

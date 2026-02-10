@@ -1162,8 +1162,8 @@ private def argmaxF32 {batch n : Nat} {device : Backend.DeviceType} (t : StaticT
   let eqF ← cast eqT .float32
   let classesUop ← UOp.vconstF32 (classRangeF32 n)
   let classes : StaticTensor [n] .float32 device  := StaticTensor.ofUOp classesUop
-  let classes2 ← reshapeUnsafe classes [1, n]
-  let classesB ← expandUnsafe classes2 [batch, n]
+  let classes2 ← reshape classes [1, n] (by simp [Shape.reshapeValid, Shape.numel, listProd])
+  let classesB ← expand classes2 [batch, n] (by simp [Shape.expandValid, listAll])
   let prod ← mul eqF classesB
   let sumC ← sumAxis prod 1 false
   cast sumC .int32

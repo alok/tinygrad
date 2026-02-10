@@ -48,8 +48,7 @@ private def rmsNormInternal {batch dim : Nat} {d : DType} {device : Backend.Devi
     (x : Matrix batch dim d device) (eps : Float32)
     : TensorM (Matrix batch dim d device) := do
   let xSq ← mul x x
-  let meanSqRaw ← meanAxis xSq 1 true
-  let meanSq : Matrix batch 1 d device := StaticTensor.assumeShape meanSqRaw
+  let meanSq ← meanMatrixFeatures xSq
   let epsT ← Tensor.full (device := device) [batch, 1] d eps
   let meanEps ← add meanSq epsT
   let scaleRaw ← rsqrt meanEps
@@ -102,12 +101,10 @@ def create (device : Backend.DeviceType := .CPU) (dim : Nat) (dt : DType := .flo
 private def layerNormInternal {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
     (x : Matrix batch dim d device) (eps : Float32)
     : TensorM (Matrix batch dim d device) := do
-  let meanRaw ← meanAxis x 1 true
-  let mean : Matrix batch 1 d device := StaticTensor.assumeShape meanRaw
+  let mean ← meanMatrixFeatures x
   let diff ← subColumn x mean
   let diffSq ← mul diff diff
-  let varianceRaw ← meanAxis diffSq 1 true
-  let variance : Matrix batch 1 d device := StaticTensor.assumeShape varianceRaw
+  let variance ← meanMatrixFeatures diffSq
   let epsT ← Tensor.full (device := device) [batch, 1] d eps
   let varEps ← add variance epsT
   let invStdRaw ← rsqrt varEps
@@ -184,21 +181,15 @@ def forward2d {batch channels height width : Nat} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels, height, width] dt device)
     : TensorM (StaticTensor [batch, channels, height, width] dt device) := do
   if params.training then
-    let m1Raw ← meanAxis x 3 true
-    let m1 : StaticTensor [batch, channels, height, 1] dt device := StaticTensor.assumeShape m1Raw
-    let m2Raw ← meanAxis m1 2 true
-    let m2 : StaticTensor [batch, channels, 1, 1] dt device := StaticTensor.assumeShape m2Raw
-    let batchMeanRaw ← meanAxis m2 0 true
-    let batchMean : StaticTensor [1, channels, 1, 1] dt device := StaticTensor.assumeShape batchMeanRaw
+    let m1 ← meanNCHWWidth x
+    let m2 ← meanNCHWHeight m1
+    let batchMean ← meanNCHWBatch m2
 
     let diff ← subChannelNCHW x batchMean
     let diffSq ← mul diff diff
-    let v1Raw ← meanAxis diffSq 3 true
-    let v1 : StaticTensor [batch, channels, height, 1] dt device := StaticTensor.assumeShape v1Raw
-    let v2Raw ← meanAxis v1 2 true
-    let v2 : StaticTensor [batch, channels, 1, 1] dt device := StaticTensor.assumeShape v2Raw
-    let batchVarRaw ← meanAxis v2 0 true
-    let batchVar : StaticTensor [1, channels, 1, 1] dt device := StaticTensor.assumeShape batchVarRaw
+    let v1 ← meanNCHWWidth diffSq
+    let v2 ← meanNCHWHeight v1
+    let batchVar ← meanNCHWBatch v2
 
     let epsT ← Tensor.full (device := device) [1, channels, 1, 1] dt params.eps
     let varEps ← add batchVar epsT
@@ -230,12 +221,10 @@ def forward1d {batch channels : Nat} {device : Backend.DeviceType}
     (x : StaticTensor [batch, channels] dt device)
     : TensorM (StaticTensor [batch, channels] dt device) := do
   if params.training then
-    let batchMeanRaw ← meanAxis x 0 true
-    let batchMean : StaticTensor [1, channels] dt device := StaticTensor.assumeShape batchMeanRaw
+    let batchMean ← meanNCBatch x
     let diff ← subChannelNC x batchMean
     let diffSq ← mul diff diff
-    let batchVarRaw ← meanAxis diffSq 0 true
-    let batchVar : StaticTensor [1, channels] dt device := StaticTensor.assumeShape batchVarRaw
+    let batchVar ← meanNCBatch diffSq
 
     let epsT ← Tensor.full (device := device) [1, channels] dt params.eps
     let varEps ← add batchVar epsT

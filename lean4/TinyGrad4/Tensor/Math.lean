@@ -669,6 +669,40 @@ def meanAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Stati
   let result ← UOp.div sumT.uop nConst
   pure (StaticTensor.ofUOp result (requiresGrad := t.requiresGrad))
 
+/-- Mean over matrix feature axis: `[B, D] -> [B, 1]`. -/
+def meanMatrixFeatures {batch dim : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : Matrix batch dim d device) : TensorM (Matrix batch 1 d device) := do
+  let out ← meanAxis x 1 true
+  pure (StaticTensor.assumeShape out)
+
+/-- Mean over NCHW width axis: `[N, C, H, W] -> [N, C, H, 1]`. -/
+def meanNCHWWidth {batch channels height width : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, width] d device)
+    : TensorM (StaticTensor [batch, channels, height, 1] d device) := do
+  let out ← meanAxis x 3 true
+  pure (StaticTensor.assumeShape out)
+
+/-- Mean over NCHW height axis (for inputs shaped `[N, C, H, 1]`): `[N, C, H, 1] -> [N, C, 1, 1]`. -/
+def meanNCHWHeight {batch channels height : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, 1] d device)
+    : TensorM (StaticTensor [batch, channels, 1, 1] d device) := do
+  let out ← meanAxis x 2 true
+  pure (StaticTensor.assumeShape out)
+
+/-- Mean over NCHW batch axis (for inputs shaped `[N, C, 1, 1]`): `[N, C, 1, 1] -> [1, C, 1, 1]`. -/
+def meanNCHWBatch {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, 1, 1] d device)
+    : TensorM (StaticTensor [1, channels, 1, 1] d device) := do
+  let out ← meanAxis x 0 true
+  pure (StaticTensor.assumeShape out)
+
+/-- Mean over NC batch axis: `[N, C] -> [1, C]`. -/
+def meanNCBatch {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] d device)
+    : TensorM (StaticTensor [1, channels] d device) := do
+  let out ← meanAxis x 0 true
+  pure (StaticTensor.assumeShape out)
+
 /-- Variance along axis with keepdim -/
 def varAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d device) := do

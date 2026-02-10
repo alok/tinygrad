@@ -16,9 +16,6 @@ open TinyGrad4
 open Interpreter
 open StaticTensor
 
-private def broadcastProof {s1 s2 : List Nat} : Shape.broadcastable s1 s2 = true := by
-  exact sorry_proof
-
 private def concatProof {s1 s2 : List Nat} {axis : Nat} : Shape.concatValid s1 s2 axis = true := by
   exact sorry_proof
 
@@ -113,9 +110,9 @@ def testBoolOpsEval : IO Unit := do
   let (andT, orT, xorT) := runTensorM do
     let ones ← Tensor.full [3] .bool 1.0
     let zero ← Tensor.full [] .bool 0.0
-    let andT ← bitandBroadcast ones zero broadcastProof
-    let orT ← bitorBroadcast ones zero broadcastProof
-    let xorT ← bitxorBroadcast ones zero broadcastProof
+    let andT ← bitandBroadcast ones zero (by native_decide)
+    let orT ← bitorBroadcast ones zero (by native_decide)
+    let xorT ← bitxorBroadcast ones zero (by native_decide)
     pure (andT, orT, xorT)
   let andRaw := evalTensor andT
   let orRaw := evalTensor orT
@@ -196,7 +193,7 @@ def testWhereInt16 : IO Unit := do
     let cond ← cat c1 c0 0 concatProof
     let x ← Tensor.fullInt [2] .int16 5
     let y ← Tensor.fullInt [2] .int16 9
-    select cond x y broadcastProof broadcastProof
+    select cond x y (by native_decide) (by native_decide)
   let raw := evalTensor t
   assertDType raw.dtype .int16 "where int16 dtype"
   let expected ← expectI16Bytes [2] #[Int16.ofInt 5, Int16.ofInt 9] "where int16 data"

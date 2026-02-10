@@ -23,9 +23,6 @@ namespace TinyGrad4.NN
 open TinyGrad4
 open StaticTensor
 
-private def broadcastProof {s1 s2 : List Nat} : Shape.broadcastable s1 s2 = true := by
-  exact sorry_proof
-
 /-- Dropout parameters -/
 structure DropoutParams where
   /-- Dropout probability (fraction of elements to zero out) -/
@@ -71,12 +68,12 @@ def forward {s : List Nat} {d : DType} {device : Backend.DeviceType}
 
   -- mask = (rand > p), i.e., keep element if rand > p
   -- This drops ~p fraction of elements
-  let mask ← cmpgtBroadcast randT pT broadcastProof
+  let mask ← cmpgtBroadcast randT pT (Shape.broadcastable_refl s)
 
   -- Convert bool mask to float: where(mask, 1.0, 0.0)
   let one ← Tensor.full (device := device) s d 1.0
   let zero ← Tensor.full (device := device) s d 0.0
-  let maskF ← select mask one zero broadcastProof broadcastProof
+  let maskF ← select mask one zero (Shape.broadcastable_refl s) (Shape.broadcastable_refl (Shape.broadcastOut s s))
   let maskF : StaticTensor s d device := StaticTensor.assumeShape maskF
 
   -- Scale factor: 1 / (1 - p) to maintain expected values

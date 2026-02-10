@@ -112,6 +112,30 @@ def broadcastOut (s1 s2 : Shape) : Shape :=
   let s2' := List.replicate (len - s2.length) 1 ++ s2
   (s1'.zip s2').map fun (d1, d2) => max d1 d2
 
+private theorem mapZipMaxSelf (s : Shape) :
+    (List.zip s s).map (fun x => max x.fst x.snd) = s := by
+  induction s with
+  | nil => simp
+  | cons a as ih => simp [ih]
+
+private theorem listAllZipSelfTrue (s : Shape) :
+    listAll (fun x : Nat × Nat => x.fst == x.snd || x.fst == 1 || x.snd == 1) (List.zip s s) = true := by
+  induction s with
+  | nil => simp [listAll]
+  | cons a as ih => simp [listAll, ih]
+
+/-- A shape is always broadcastable with itself. -/
+theorem broadcastable_refl (s : Shape) : broadcastable s s = true := by
+  simpa [broadcastable] using listAllZipSelfTrue s
+
+/-- Broadcasting a shape with itself keeps the same shape. -/
+theorem broadcastOut_refl (s : Shape) : broadcastOut s s = s := by
+  simpa [broadcastOut] using mapZipMaxSelf s
+
+/-- A shape is broadcastable with `broadcastOut s s` (which is `s`). -/
+theorem broadcastable_out_refl (s : Shape) : broadcastable s (broadcastOut s s) = true := by
+  simpa [broadcastOut_refl] using broadcastable_refl s
+
 /-- Check if concat is valid (same rank, same dims except axis). -/
 def concatValid (s1 s2 : Shape) (axis : Nat) : Bool :=
   s1.length == s2.length &&

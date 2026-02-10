@@ -30,9 +30,6 @@ open TinyGrad4.Interpreter
 open TinyGrad4.StaticTensor
 open TinyGrad4.NN
 
-private def broadcastProof {s1 s2 : List Nat} : Shape.broadcastable s1 s2 = true := by
-  exact sorry_proof
-
 private def assertShape (got expected : List Nat) (label : String) : IO Unit := do
   if got != expected then
     throw (IO.userError s!"{label}: shape mismatch got={got}, expected={expected}")
@@ -41,7 +38,7 @@ private def testLayerNormDropoutStack : IO Unit := do
   let out := Id.run <| runTensorM do
     let x ← Tensor.ones [2, 4] .float32
     let bias ← Tensor.full [1, 4] .float32 3.0
-    let shifted ← addBroadcast x bias broadcastProof
+    let shifted ← addBroadcast x bias (by native_decide)
     let ln ← layerNorm .CPU [4] .float32
     let normalized ← LayerNormParams.forward ln shifted
     let dp := dropout 0.25

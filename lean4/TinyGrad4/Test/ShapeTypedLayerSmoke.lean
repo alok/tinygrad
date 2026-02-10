@@ -39,7 +39,7 @@ private def testLayerNormDropoutStack : IO Unit := do
     let x ← Tensor.ones [2, 4] .float32
     let bias ← Tensor.full [1, 4] .float32 3.0
     let shifted ← addBroadcast x bias (by native_decide)
-    let ln ← layerNorm .CPU [4] .float32
+    let ln ← layerNorm .CPU 4 .float32
     let normalized ← LayerNormParams.forward ln shifted
     let dp := dropout 0.25
     DropoutParams.forward (DropoutParams.eval dp) normalized 7
@@ -52,7 +52,7 @@ private def testLayerNormDropoutStack : IO Unit := do
 private def testBatchNorm1dShape : IO Unit := do
   let out := Id.run <| runTensorM do
     let x ← Tensor.ones [3, 5] .float32
-    let bn ← batchNorm1d .CPU 5 .float32
+    let bn ← batchNorm1d 5 .float32
     BatchNormParams.forward1d bn x
 
   assertShape out.uop.shape [3, 5] "batchnorm1d"

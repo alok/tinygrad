@@ -1153,11 +1153,22 @@ def logsumexpAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : 
     reshape outKeepT (Shape.reduce s [axis] false) (by
       simpa [Shape.reshapeValid, Shape.numel] using Shape.reduce_single_numel_eq s axis)
 
+/-- Log-sum-exp along axis (numerically stable, statically checked axis). -/
+def logsumexpAxisF {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Fin s.length)
+    (keepdim : Bool := true)
+    : TensorM (StaticTensor (Shape.reduce s [axis.val] keepdim) d device) :=
+  logsumexpAxis t axis.val keepdim
+
 /-- Log-softmax along an axis (stable). -/
 def logSoftmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
   let logSum ← logsumexpAxis t axis true
   let result ← UOp.sub t.uop logSum.uop
   pure (StaticTensor.ofUOp result (requiresGrad := t.requiresGrad))
+
+/-- Log-softmax along an axis (stable, statically checked axis). -/
+def logSoftmaxAxisF {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Fin s.length)
+    : TensorM (StaticTensor s d device) :=
+  logSoftmaxAxis t axis.val
 
 /-- Softmax along an axis (stable). -/
 def softmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
@@ -1168,6 +1179,11 @@ def softmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : St
   let sumExp ← UOp.sum expShifted.uop [axis] true
   let out ← UOp.div expShifted.uop sumExp
   pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Softmax along an axis (stable, statically checked axis). -/
+def softmaxAxisF {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Fin s.length)
+    : TensorM (StaticTensor s d device) :=
+  softmaxAxis t axis.val
 
 /-- Softmax along last axis: exp(x - max(x)) / sum(exp(x - max(x))) -/
 def softmax {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do

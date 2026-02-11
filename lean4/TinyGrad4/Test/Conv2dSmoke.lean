@@ -109,7 +109,8 @@ def testAvgPool2dTensor : IO Unit := do
 def testConv2dParams : IO Unit := do
   -- Test Conv2dParams creation
   let params := runTensorM do
-    Conv2dParams.create 3 16 3 .float32 true 1 1 1 42
+    Conv2dParams.create (inChannels := 3) (outChannels := 16) (kernelSize := 3)
+      (dt := .float32) (useBias := true) (padding := 1) (stride := 1) (dilation := 1) (seed := 42)
   assertShape params.weight.uop.shape [16, 3, 3, 3] "conv2d weight shape"
   match params.bias with
   | some b => assertShape b.uop.shape [16] "conv2d bias shape"
@@ -117,7 +118,8 @@ def testConv2dParams : IO Unit := do
 
 def testConv2dParamsNoBias : IO Unit := do
   let params := runTensorM do
-    Conv2dParams.create 3 16 3 .float32 false 0 1 1 42
+    Conv2dParams.create (inChannels := 3) (outChannels := 16) (kernelSize := 3)
+      (dt := .float32) (useBias := false) (padding := 0) (stride := 1) (dilation := 1) (seed := 42)
   assertShape params.weight.uop.shape [16, 3, 3, 3] "conv2d weight shape (no bias)"
   match params.bias with
   | some _ => throw (IO.userError "conv2d bias should not exist")
@@ -140,7 +142,7 @@ def testMaxPool2dParamsDefaultStride : IO Unit := do
 
 def testUniformInit : IO Unit := do
   let t := runTensorM do
-    uniformInit [2, 3] .float32 (-1.0) 1.0 42
+    uniformInit (shape := [2, 3]) (dt := .float32) (low := -1.0) (high := 1.0) (seed := 42)
   assertShape t.uop.shape [2, 3] "uniformInit shape"
   assertDType t.uop.dtype .float32 "uniformInit dtype"
 

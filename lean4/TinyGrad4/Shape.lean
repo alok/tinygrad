@@ -331,6 +331,22 @@ def reduce (s : Shape) (axes : List Nat) (keepdim : Bool := true) : Shape :=
   else
     (listEnum s).filterMap fun (i, d) => if axes.contains i then none else some d
 
+private theorem listProd_mapMaskEqFilterMap (xs : List (Nat × Nat)) (axis : Nat) :
+    listProd (xs.map (fun x => if x.fst = axis then 1 else x.snd)) =
+    listProd (xs.filterMap (fun x => if x.fst = axis then none else some x.snd)) := by
+  induction xs with
+  | nil => simp [listProd]
+  | cons x xs ih =>
+    rcases x with ⟨i, d⟩
+    by_cases h : i = axis
+    · simp [h, listProd, ih]
+    · simp [h, listProd, ih]
+
+/-- Reducing one axis preserves element count when switching from keepdim=true to keepdim=false. -/
+theorem reduce_single_numel_eq (s : Shape) (axis : Nat) :
+    (reduce s [axis] true).numel = (reduce s [axis] false).numel := by
+  simp [reduce, numel, listProd_mapMaskEqFilterMap]
+
 /-- Matmul output shape for tensors with rank ≥ 2.
     Semantics follow tinygrad/PyTorch:
     (..., m, k) @ (..., k, n) -> (..., m, n) with broadcast on leading dims. -/

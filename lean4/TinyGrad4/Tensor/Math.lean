@@ -1150,7 +1150,8 @@ def logsumexpAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : 
     pure (StaticTensor.ofUOp outKeep (requiresGrad := t.requiresGrad))
   | false =>
     let outKeepT : StaticTensor (Shape.reduce s [axis] true) d device  := StaticTensor.ofUOp outKeep (requiresGrad := t.requiresGrad)
-    reshapeUnsafe outKeepT (Shape.reduce s [axis] false)
+    reshape outKeepT (Shape.reduce s [axis] false) (by
+      simpa [Shape.reshapeValid, Shape.numel] using Shape.reduce_single_numel_eq s axis)
 
 /-- Log-softmax along an axis (stable). -/
 def logSoftmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
@@ -1444,11 +1445,14 @@ def maxPool2d {batch cin h w : Nat} {d : DType} {device : Backend.DeviceType}
     (padding : Nat := 0)
     : TensorM (StaticTensor (Shape.pool2dShape [batch, cin, h, w] kernelSize padding stride) d device) := do
   -- Step 1: Pad if needed
-  let xPadded ← if padding > 0 then
-    let padded ← pad2d x padding padding
-    pure (StaticTensor.ofUOp padded.uop (requiresGrad := x.requiresGrad))
-  else
-    pure x
+  let xPadded : StaticTensor [batch, cin, h + padding + padding, w + padding + padding] d device ←
+    if hpad : padding > 0 then
+      pad2d x padding padding
+    else
+      have hzero : padding = 0 := Nat.eq_zero_of_not_pos hpad
+      have hx : StaticTensor [batch, cin, h + padding + padding, w + padding + padding] d device := by
+        simpa [hzero, Nat.add_assoc] using x
+      pure hx
 
   -- Step 2: Apply pool/im2col to get patches
   -- Result shape: [batch, cin, hOut, wOut, kH, kW]
@@ -1474,11 +1478,14 @@ def avgPool2d {batch cin h w : Nat} {d : DType} {device : Backend.DeviceType}
     (padding : Nat := 0)
     : TensorM (StaticTensor (Shape.pool2dShape [batch, cin, h, w] kernelSize padding stride) d device) := do
   -- Step 1: Pad if needed
-  let xPadded ← if padding > 0 then
-    let padded ← pad2d x padding padding
-    pure (StaticTensor.ofUOp padded.uop (requiresGrad := x.requiresGrad))
-  else
-    pure x
+  let xPadded : StaticTensor [batch, cin, h + padding + padding, w + padding + padding] d device ←
+    if hpad : padding > 0 then
+      pad2d x padding padding
+    else
+      have hzero : padding = 0 := Nat.eq_zero_of_not_pos hpad
+      have hx : StaticTensor [batch, cin, h + padding + padding, w + padding + padding] d device := by
+        simpa [hzero, Nat.add_assoc] using x
+      pure hx
 
   -- Step 2: Apply pool/im2col to get patches
   -- Result shape: [batch, cin, hOut, wOut, kH, kW]
@@ -1515,11 +1522,14 @@ def conv1d {batch cin cout w kW : Nat} {d : DType} {device : Backend.DeviceType}
   let wOut := Shape.convOutDim w padding dilation kW stride
 
   -- Step 1: Pad input if needed
-  let xPadded ← if padding > 0 then
-    let padded ← pad1d x padding
-    pure (StaticTensor.ofUOp padded.uop (requiresGrad := x.requiresGrad))
-  else
-    pure x
+  let xPadded : StaticTensor [batch, cin, w + padding + padding] d device ←
+    if hpad : padding > 0 then
+      pad1d x padding
+    else
+      have hzero : padding = 0 := Nat.eq_zero_of_not_pos hpad
+      have hx : StaticTensor [batch, cin, w + padding + padding] d device := by
+        simpa [hzero, Nat.add_assoc] using x
+      pure hx
 
   -- Step 2: Apply pool/im2col to get patches
   -- Input: [batch, cin, wPadded]
@@ -1530,7 +1540,15 @@ def conv1d {batch cin cout w kW : Nat} {d : DType} {device : Backend.DeviceType}
   -- [batch, cin, wOut, kW] -> [batch * wOut, cin * kW]
   let patchFlat := batch * wOut
   let kernelFlat := cin * kW
-  let patchesReshaped ← reshapeUnsafe patches [patchFlat, kernelFlat]
+  let patchesReshaped ← reshape patches [patchFlat, kernelFlat] (by
+    have hpad2 : padding + padding = padding * 2 := by
+      calc
+        padding + padding = 2 * padding := by simp [Nat.two_mul]
+        _ = padding * 2 := by simp [Nat.mul_comm]
+    have hwpad2 : w + padding + padding = w + padding * 2 := by
+      simpa [Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using congrArg (fun t => w + t) hpad2
+    simp [Shape.reshapeValid, Shape.numel, Shape.poolOut, Shape.convOutDim, listProd, listZipWith5,
+      patchFlat, kernelFlat, wOut, hwpad2, Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
 
   -- Step 4: Reshape weight
   -- [cout, cin, kW] -> [cout, cin * kW]
@@ -1589,11 +1607,14 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType} {device : Backend.Device
   let wOut := Shape.convOutDim w padding dilation kW stride
 
   -- Step 1: Pad input if needed
-  let xPadded ← if padding > 0 then
-    let padded ← pad2d x padding padding
-    pure (StaticTensor.ofUOp padded.uop (requiresGrad := x.requiresGrad))
-  else
-    pure x
+  let xPadded : StaticTensor [batch, cin, h + padding + padding, w + padding + padding] d device ←
+    if hpad : padding > 0 then
+      pad2d x padding padding
+    else
+      have hzero : padding = 0 := Nat.eq_zero_of_not_pos hpad
+      have hx : StaticTensor [batch, cin, h + padding + padding, w + padding + padding] d device := by
+        simpa [hzero, Nat.add_assoc] using x
+      pure hx
 
   -- Step 2: Apply pool/im2col to get patches
   -- Input to pool: [batch, cin, hPadded, wPadded]
@@ -1604,7 +1625,17 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType} {device : Backend.Device
   -- [batch, cin, hOut, wOut, kH, kW] -> [batch * hOut * wOut, cin * kH * kW]
   let patchFlat := batch * hOut * wOut
   let kernelFlat := cin * kH * kW
-  let patchesReshaped ← reshapeUnsafe patches [patchFlat, kernelFlat]
+  let patchesReshaped ← reshape patches [patchFlat, kernelFlat] (by
+    have hpad2 : padding + padding = padding * 2 := by
+      calc
+        padding + padding = 2 * padding := by simp [Nat.two_mul]
+        _ = padding * 2 := by simp [Nat.mul_comm]
+    have hhpad2 : h + padding + padding = h + padding * 2 := by
+      simpa [Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using congrArg (fun t => h + t) hpad2
+    have hwpad2 : w + padding + padding = w + padding * 2 := by
+      simpa [Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using congrArg (fun t => w + t) hpad2
+    simp [Shape.reshapeValid, Shape.numel, Shape.poolOut, Shape.convOutDim, listProd, listZipWith5,
+      patchFlat, kernelFlat, hOut, wOut, hhpad2, hwpad2, Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
 
   -- Step 4: Reshape weight
   -- [cout, cin, kH, kW] -> [cout, cin * kH * kW]
@@ -1668,11 +1699,14 @@ def depthwiseConv2d {batch cin h w kH kW : Nat} {d : DType} {device : Backend.De
   let kernelFlat := kH * kW
 
   -- Step 1: Pad if needed
-  let xPadded ← if padding > 0 then
-    let padded ← pad2d x padding padding
-    pure (StaticTensor.ofUOp padded.uop (requiresGrad := x.requiresGrad))
-  else
-    pure x
+  let xPadded : StaticTensor [batch, cin, h + padding + padding, w + padding + padding] d device ←
+    if hpad : padding > 0 then
+      pad2d x padding padding
+    else
+      have hzero : padding = 0 := Nat.eq_zero_of_not_pos hpad
+      have hx : StaticTensor [batch, cin, h + padding + padding, w + padding + padding] d device := by
+        simpa [hzero, Nat.add_assoc] using x
+      pure hx
 
   -- Step 2: Pool to get patches: [batch, cin, hOut, wOut, kH, kW]
   let patches ← pool xPadded [kH, kW] [stride, stride] [dilation, dilation]

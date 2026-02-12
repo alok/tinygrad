@@ -326,11 +326,21 @@ def reduce (x : UOp) (reduceOp : Ops) (axes : List Nat) (keepdim : Bool := true)
   let newShape := Shape.reduce x.shape axes keepdim
   mkUOp .REDUCE_AXIS x.dtype [x] (.reduceWithAxes reduceOp axes) newShape
 
+def reduceValid (x : UOp) (reduceOp : Ops) (axes : List Nat) (keepdim : Bool := true)
+    (_h : axes.all (fun ax => ax < x.shape.length) = true) : UOpM UOp := do
+  let newShape := Shape.reduce x.shape axes keepdim
+  mkUOp .REDUCE_AXIS x.dtype [x] (.reduceWithAxes reduceOp axes) newShape
+
 /-- Tensor contraction (matmul): (..., m, k) @ (..., k, n) -> (..., m, n). -/
 def contract2D (a b : UOp) : UOpM UOp := do
   let outShape ← match Shape.matmulShape a.shape b.shape with
     | some s => pure s
     | none => panic! s!"Invalid matmul shapes: {a.shape} @ {b.shape}"
+  let dtype := DType.promote a.dtype b.dtype
+  mkUOp .CONTRACT dtype [a, b] .empty outShape
+
+def contract2DValid (a b : UOp) (outShape : Shape)
+    (_h : Shape.matmulShape a.shape b.shape = some outShape) : UOpM UOp := do
   let dtype := DType.promote a.dtype b.dtype
   mkUOp .CONTRACT dtype [a, b] .empty outShape
 
@@ -376,6 +386,9 @@ def bitcast (x : UOp) (dtype : DType) : UOpM UOp := do
     panic! s!"bitcast: dtype size mismatch {repr x.dtype} -> {repr dtype}"
   mkUOp .BITCAST dtype [x] .empty x.shape
 
+def bitcastValid (x : UOp) (dtype : DType) (_h : x.dtype.itemsize = dtype.itemsize) : UOpM UOp := do
+  mkUOp .BITCAST dtype [x] .empty x.shape
+
 def cat (xs : List UOp) (axis : Nat) : UOpM UOp := do
   if xs.isEmpty then
     panic! "cat: empty list"
@@ -403,6 +416,15 @@ def where_ (cond x y : UOp) : UOpM UOp := do
 def whereBroadcast (cond x y : UOp)
     (_hXY : Shape.broadcastable x.shape y.shape = true)
     (_hCond : Shape.broadcastable cond.shape (Shape.broadcastOut x.shape y.shape) = true) : UOpM UOp := do
+  let shapeXY := Shape.broadcastOut x.shape y.shape
+  let shape := Shape.broadcastOut cond.shape shapeXY
+  mkUOp .WHERE x.dtype [cond, x, y] .empty shape
+
+def whereBroadcastSame (cond x y : UOp)
+    (_hCondType : cond.dtype = .bool)
+    (_hXY : Shape.broadcastable x.shape y.shape = true)
+    (_hCond : Shape.broadcastable cond.shape (Shape.broadcastOut x.shape y.shape) = true)
+    (_hType : x.dtype = y.dtype) : UOpM UOp := do
   let shapeXY := Shape.broadcastOut x.shape y.shape
   let shape := Shape.broadcastOut cond.shape shapeXY
   mkUOp .WHERE x.dtype [cond, x, y] .empty shape

@@ -1336,7 +1336,14 @@ def mseLoss {s : List Nat} {d : DType} {device : Backend.DeviceType}
 def matmul {m k n : Nat} {d : DType} {device : Backend.DeviceType}
     (a : Matrix m k d device) (b : Matrix k n d device)
     : TensorM (Matrix m n d device) := do
-  let outUop ← UOp.contract2D a.uop b.uop
+  let hMatmul0 : Shape.matmulShape [m, k] [k, n] = some [m, n] := by
+    have hk : listGetD [m, k] 1 0 = listGetD [k, n] 0 0 := by simp [listGetD]
+    have hm : listGetD [m, k] 0 0 = m := by simp [listGetD]
+    have hn : listGetD [k, n] 1 0 = n := by simp [listGetD]
+    simp [Shape.matmulShape, Shape.broadcast, Shape.broadcastable, listAll, hk, hm, hn]
+  let hMatmul : Shape.matmulShape a.uop.shape b.uop.shape = some [m, n] := by
+    simpa [a.h_shape, b.h_shape] using hMatmul0
+  let outUop ← UOp.contract2DValid a.uop b.uop [m, n] hMatmul
   pure (StaticTensor.ofUOp outUop (requiresGrad := a.requiresGrad || b.requiresGrad))
 
 /-- Fully-connected (linear) layer: X @ W -> [batch, out]. -/

@@ -267,8 +267,11 @@ def cast {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTen
   pure (build result (requiresGrad := t.requiresGrad))
 
 def bitcast {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (dtype : DType)
+    (hBits : d.itemsize = dtype.itemsize)
     : TensorM (StaticTensor s dtype device) := do
-  let result ← UOp.bitcast t.uop dtype
+  let hBits' : t.uop.dtype.itemsize = dtype.itemsize := by
+    simpa [t.h_dtype] using hBits
+  let result ← UOp.bitcastValid t.uop dtype hBits'
   pure (build result (requiresGrad := t.requiresGrad))
 
 def to {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (dtype : DType)

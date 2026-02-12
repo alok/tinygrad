@@ -1176,8 +1176,26 @@ def logsumexpAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : 
 /-- Log-sum-exp along axis (numerically stable, statically checked axis). -/
 def logsumexpAxisF {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Fin s.length)
     (keepdim : Bool := true)
-    : TensorM (StaticTensor (Shape.reduce s [axis.val] keepdim) d device) :=
-  logsumexpAxis t axis.val keepdim
+    : TensorM (StaticTensor (Shape.reduce s [axis.val] keepdim) d device) := do
+  let hAxes : [axis.val].all (fun ax => ax < t.uop.shape.length) = true := by
+    simpa [t.h_shape] using axis.isLt
+  let maxVal ← UOp.reduceValid t.uop .MAX [axis.val] true hAxes
+  let shifted ← UOp.sub t.uop maxVal
+  let shiftedT : StaticTensor s d device := StaticTensor.ofUOp shifted (requiresGrad := t.requiresGrad)
+  let expShifted ← exp shiftedT
+  let hAxesExp : [axis.val].all (fun ax => ax < expShifted.uop.shape.length) = true := by
+    simpa [expShifted.h_shape] using axis.isLt
+  let sumExp ← UOp.reduceValid expShifted.uop .ADD [axis.val] true hAxesExp
+  let sumExpT : StaticTensor (Shape.reduce s [axis.val] true) d device := StaticTensor.ofUOp sumExp (requiresGrad := t.requiresGrad)
+  let logSum ← log sumExpT
+  let outKeep ← UOp.add logSum.uop maxVal
+  match keepdim with
+  | true =>
+    pure (StaticTensor.ofUOp outKeep (requiresGrad := t.requiresGrad))
+  | false =>
+    let outKeepT : StaticTensor (Shape.reduce s [axis.val] true) d device := StaticTensor.ofUOp outKeep (requiresGrad := t.requiresGrad)
+    reshape outKeepT (Shape.reduce s [axis.val] false) (by
+      simpa [Shape.reshapeValid, Shape.numel] using Shape.reduce_single_numel_eq s axis.val)
 
 /-- Log-softmax along an axis (stable). -/
 def logSoftmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
@@ -1187,8 +1205,10 @@ def logSoftmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t :
 
 /-- Log-softmax along an axis (stable, statically checked axis). -/
 def logSoftmaxAxisF {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Fin s.length)
-    : TensorM (StaticTensor s d device) :=
-  logSoftmaxAxis t axis.val
+    : TensorM (StaticTensor s d device) := do
+  let logSum ← logsumexpAxisF t axis true
+  let result ← UOp.sub t.uop logSum.uop
+  pure (StaticTensor.ofUOp result (requiresGrad := t.requiresGrad))
 
 /-- Softmax along an axis (stable). -/
 def softmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
@@ -1202,8 +1222,18 @@ def softmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : St
 
 /-- Softmax along an axis (stable, statically checked axis). -/
 def softmaxAxisF {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Fin s.length)
-    : TensorM (StaticTensor s d device) :=
-  softmaxAxis t axis.val
+    : TensorM (StaticTensor s d device) := do
+  let hAxes : [axis.val].all (fun ax => ax < t.uop.shape.length) = true := by
+    simpa [t.h_shape] using axis.isLt
+  let maxVal ← UOp.reduceValid t.uop .MAX [axis.val] true hAxes
+  let shifted ← UOp.sub t.uop maxVal
+  let shiftedT : StaticTensor s d device := StaticTensor.ofUOp shifted (requiresGrad := t.requiresGrad)
+  let expShifted ← exp shiftedT
+  let hAxesExp : [axis.val].all (fun ax => ax < expShifted.uop.shape.length) = true := by
+    simpa [expShifted.h_shape] using axis.isLt
+  let sumExp ← UOp.reduceValid expShifted.uop .ADD [axis.val] true hAxesExp
+  let out ← UOp.div expShifted.uop sumExp
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
 
 /-- Softmax along last axis: exp(x - max(x)) / sum(exp(x - max(x))) -/
 def softmax {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
@@ -1215,8 +1245,8 @@ def logSoftmax {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Sta
 
 private def argmaxF32 {batch n : Nat} {device : Backend.DeviceType} (t : StaticTensor [batch, n] .float32 device)
     : TensorM (StaticTensor [batch] .int32 device) := do
-  let maxVal ← UOp.max_ t.uop [1] true
-  let eq ← UOp.cmpeq t.uop maxVal
+  let maxVal ← maxAxisF t ⟨1, by simp⟩ true
+  let eq ← UOp.cmpeq t.uop maxVal.uop
   let eqT : StaticTensor [batch, n] .bool device  := StaticTensor.ofUOp eq
   let eqF ← cast eqT .float32
   let classesUop ← UOp.vconstF32 (classRangeF32 n)
@@ -1224,7 +1254,7 @@ private def argmaxF32 {batch n : Nat} {device : Backend.DeviceType} (t : StaticT
   let classes2 ← reshape classes [1, n] (by simp [Shape.reshapeValid, Shape.numel, listProd])
   let classesB ← expand classes2 [batch, n] (by simp [Shape.expandValid, listAll])
   let prod ← mul eqF classesB
-  let sumC ← sumAxis prod 1 false
+  let sumC ← sumAxisF prod ⟨1, by simp⟩ false
   cast sumC .int32
 
 /-- Argmax along last axis - returns indices (non-differentiable). -/
@@ -1275,8 +1305,7 @@ def crossEntropyOneHot {batch numClasses : Nat} {d : DType} {device : Backend.De
     : TensorM (Scalar d device) := do
   let logProbs ← logSoftmax logits
   let prod ← mul logProbs targets
-  let axis := ([batch, numClasses] : List Nat).length - 1
-  let sumC ← sumAxis prod axis true
+  let sumC ← sumAxisF prod ⟨1, by simp⟩ true
   let negSum ← neg sumC
   mean negSum
 

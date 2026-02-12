@@ -26,6 +26,10 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | creation ops (`zeros`, `ones`) | `ops.creation.zeros_ones` | ported | Value-level parity. |
 | `arange` sequence | `ops.creation.arange` | ported | Basic sequence behavior parity. |
 | broadcast add semantics | `ops.broadcast.add` | ported | Representative broadcast execution check. |
+| reshape/flatten movement semantics | `ops.move.reshape_flatten_roundtrip` | ported | Round-trip value/shape parity for movement path. |
+| transpose/permute movement semantics | `ops.move.permute_transpose` | ported | Matrix transpose parity via both APIs. |
+| expand broadcast semantics | `ops.move.expand` | ported | Broadcasted repeat values from singleton dims. |
+| axis reduction semantics (`sum`/`max`) | `ops.reduce.axis_semantics` | ported | `keepdim=true/false` runtime behavior parity. |
 | broadcast laws | `ops.prop.broadcastable_comm`, `ops.prop.broadcast_out_refl` | ported | Property-style invariants for shape broadcasting. |
 
 ### `test/unit/test_indexing.py`

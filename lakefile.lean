@@ -15,11 +15,11 @@ package TinyGrad4 where
     ⟨`weak.linter.useRawBuffer, true⟩    -- Warn about FloatArray/FlatArray, use RawBuffer
   ]
 
-require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
-require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
+require batteries from git "https://github.com/leanprover-community/batteries" @ "78a9bfe6b811fece2e00bf2c92e30729eeb8dc4e"
+require Cli from git "https://github.com/leanprover/lean4-cli" @ "28e0856d4424863a85b18f38868c5420c55f9bae"
 require LeanBench from "../LeanBench"
-require plausible from git "https://github.com/leanprover-community/plausible" @ "main"
-require lspec from git "https://github.com/yatima-inc/LSpec" @ "main"
+require plausible from git "https://github.com/leanprover-community/plausible" @ "7311586e1a56af887b1081d05e80c11b6c41d212"
+require lspec from git "https://github.com/yatima-inc/LSpec" @ "8e6ddb17c2b7e2bbb63585aa4225c5b0701b8ad2"
 
 def cFlags : Array String :=
   if System.Platform.isWindows then

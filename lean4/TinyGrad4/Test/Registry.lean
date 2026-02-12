@@ -21,6 +21,9 @@ def allCases : List TestCase :=
 private def hasTag (tc : TestCase) (tag : String) : Bool :=
   tc.tags.contains tag
 
+private def tagsMatch (tags : List String) (tc : TestCase) : Bool :=
+  tags.any (hasTag tc)
+
 private def groupMatches (group? : Option String) (tc : TestCase) : Bool :=
   match group? with
   | none => true
@@ -32,10 +35,10 @@ private def filterMatches (filter? : Option String) (tc : TestCase) : Bool :=
   | some f => tc.name.contains f || tc.group.contains f
 
 
-def selectCases (cfg : RunConfig) (group? filter? : Option String) : List TestCase :=
+def selectCases (cfg : RunConfig) (group? filter? : Option String) (tags : List String) : List TestCase :=
   allCases.filter fun tc =>
     TestProfile.allows cfg.profile tc.minProfile &&
-    hasTag tc "cpu" &&
+    tagsMatch tags tc &&
     groupMatches group? tc &&
     filterMatches filter? tc
 

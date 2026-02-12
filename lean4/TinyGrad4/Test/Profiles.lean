@@ -28,6 +28,11 @@ def TestProfile.parse? (s : String) : Option TestProfile :=
   | "slow" => some .slow
   | _ => none
 
+def TestProfile.toArg : TestProfile → String
+  | .fast => "fast"
+  | .medium => "medium"
+  | .slow => "slow"
+
 def plausibleConfig (cfg : RunConfig) : Plausible.Configuration :=
   let base : Plausible.Configuration :=
     match cfg.profile with

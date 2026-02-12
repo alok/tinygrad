@@ -5,6 +5,8 @@ open Lake DSL System
 package TinyGrad4 where
   version := v!"0.1.0"
   srcDir := "lean4"
+  testDriver := "tg4_tests"
+  testDriverArgs := #["--profile", "fast"]
   -- Global linter options - these apply to all modules in the project
   -- DO NOT disable these without good reason - they catch common mistakes
   -- Use weak.* prefix since options are defined in the project itself
@@ -16,6 +18,8 @@ package TinyGrad4 where
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
 require Cli from git "https://github.com/leanprover/lean4-cli" @ "main"
 require LeanBench from "../LeanBench"
+require plausible from git "https://github.com/leanprover-community/plausible" @ "main"
+require lspec from git "https://github.com/yatima-inc/LSpec" @ "main"
 
 def cFlags : Array String :=
   if System.Platform.isWindows then
@@ -252,6 +256,10 @@ lean_exe tg4_leanbench where
 
 lean_exe benchmark where
   root := `TinyGrad4.Test.BenchmarkMain
+  moreLinkArgs := metalLinkArgs
+
+lean_exe tg4_tests where
+  root := `TinyGrad4.Test.DriverMain
   moreLinkArgs := metalLinkArgs
 
 lean_exe mathops_smoke where

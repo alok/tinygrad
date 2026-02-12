@@ -24,20 +24,20 @@ def batchedContractForward : IO Unit := do
     -- B broadcast: [2,3,4] @ [1,4,5] -> [2,3,5]
     let a1 ← Tensor.full [2, 3, 4] .float32 1.0
     let b1 ← Tensor.full [1, 4, 5] .float32 2.0
-    let out1 ← bmatmul a1 b1
-    let outArr1 := eval out1.uop env
+    let out1 ← bmatmul a1 b1 (by simp [Shape.broadcastable, listAll])
+    let outArr1 := (eval out1.uop env).decode.data
 
     -- A broadcast: [1,3,4] @ [2,4,5] -> [2,3,5]
     let a2 ← Tensor.full [1, 3, 4] .float32 1.0
     let b2 ← Tensor.full [2, 4, 5] .float32 2.0
-    let out2 ← bmatmul a2 b2
-    let outArr2 := eval out2.uop env
+    let out2 ← bmatmul a2 b2 (by simp [Shape.broadcastable, listAll])
+    let outArr2 := (eval out2.uop env).decode.data
 
     -- No broadcast: [2,3,4] @ [2,4,5] -> [2,3,5]
     let a3 ← Tensor.full [2, 3, 4] .float32 1.0
     let b3 ← Tensor.full [2, 4, 5] .float32 2.0
-    let out3 ← bmatmul a3 b3
-    let outArr3 := eval out3.uop env
+    let out3 ← bmatmul a3 b3 (by simp [Shape.broadcastable, listAll])
+    let outArr3 := (eval out3.uop env).decode.data
 
     let close8 := fun x => Float64.abs (x - 8.0) < 0.0001
     pure (outArr1.all close8 && outArr2.all close8 && outArr3.all close8)

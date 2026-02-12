@@ -1391,8 +1391,18 @@ def linearBias {batch inDim outDim : Nat} {d : DType} {device : Backend.DeviceTy
     [b1, m, k] @ [b2, k, n] -> [max b1 b2, m, n]. -/
 def bmatmul {b1 b2 m k n : Nat} {d : DType} {device : Backend.DeviceType}
     (a : BMatrix b1 m k d device) (b : BMatrix b2 k n d device)
+    (hBatch : Shape.broadcastable [b1] [b2] = true)
     : TensorM (BMatrix (Nat.max b1 b2) m n d device) := do
-  let outUop ← UOp.contract2D a.uop b.uop
+  let hMatmul0 : Shape.matmulShape [b1, m, k] [b2, k, n] = some [Nat.max b1 b2, m, n] := by
+    have hk : listGetD [b1, m, k] 2 0 = listGetD [b2, k, n] 1 0 := by simp [listGetD]
+    have hm : listGetD [b1, m, k] 1 0 = m := by simp [listGetD]
+    have hn : listGetD [b2, k, n] 2 0 = n := by simp [listGetD]
+    have hBroad : Shape.broadcast [b1] [b2] = some [Nat.max b1 b2] := by
+      simp [Shape.broadcast, hBatch]
+    simp [Shape.matmulShape, hk, hm, hn, hBroad]
+  let hMatmul : Shape.matmulShape a.uop.shape b.uop.shape = some [Nat.max b1 b2, m, n] := by
+    simpa [a.h_shape, b.h_shape] using hMatmul0
+  let outUop ← UOp.contract2DValid a.uop b.uop [Nat.max b1 b2, m, n] hMatmul
   pure (StaticTensor.ofUOp outUop (requiresGrad := a.requiresGrad || b.requiresGrad))
 
 -- ============================================================================

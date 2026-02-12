@@ -123,7 +123,7 @@ private def testBatchedMatmulBiasBroadcastB : IO Unit := do
       let x ← Tensor.buffer [b, t, d] .float32
       let w ← Tensor.buffer [1, d, n] .float32
       let bias ← Tensor.buffer [n] .float32
-      let y ← bmatmul x w
+      let y ← bmatmul x w (by simp [Shape.broadcastable, listAll])
       let out ← addBroadcast y bias (by simp [Shape.broadcastable, listAll])
       pure (x.uop.uid, w.uop.uid, bias.uop.uid, out.uop)
 

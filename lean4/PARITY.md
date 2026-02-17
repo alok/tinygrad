@@ -1,6 +1,6 @@
 # Lean ↔ Python Tensor Parity Checklist (Core)
 
-Updated: 2025-12-24
+Updated: 2026-02-17
 
 Scope: user-facing tensor math/shape ops in `tinygrad/tensor.py` vs `lean4/TinyGrad4/Tensor/*`.
 Not in scope: device/runtime backends, scheduling, JIT, IO helpers, visualization, web, or model code.
@@ -24,8 +24,8 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 
 ## Indexing & masking
 - [x] where (elementwise select)
-- [~] gather (only last-axis helper)
-- [~] scatter / scatter_reduce (only last-axis helper)
+- [x] gather (general axis + typed-axis helpers)
+- [x] scatter / scatter_reduce (general axis + typed-axis helpers)
 - [ ] masked_fill / masked_select
 - [ ] take / item
 - [ ] diag / diagonal / tril / triu
@@ -33,10 +33,10 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 ## Reductions
 - [~] max / min (full tensor only)
 - [ ] prod
-- [ ] std / var (full tensor)
+- [~] std / var (axis variants exist; full wrappers missing)
 - [ ] std_mean / var_mean
 - [ ] cumsum / cumprod / cummax
-- [ ] logsumexp (full, not only axis helper)
+- [~] logsumexp (axis helper exists; full wrapper missing)
 - [ ] logcumsumexp
 - [~] argmax (only [batch,n] helper)
 - [~] argmin (only [batch,n] helper)
@@ -74,11 +74,12 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 - [x] contiguous / contiguous_backward (ops implemented in Rules.lean)
 
 ## Known placeholders (Lean)
-- `gatherLastF32` is a specialized helper, not a general gather.
+- Full-tensor wrappers for `std`/`var`/`logsumexp` are not yet exposed.
+- Prefix reductions (`cumsum`/`cumprod`/`cummax`) are still missing.
 
 ## Suggested order (high impact → low)
-1) `cast` + `to`/`to_` + dtype utilities (unblocks many ops/tests).
-2) General `where` + `gather` + `scatter` (core indexing/parity).
-3) `arange`/`linspace`/`rand*` + `_like` constructors (core creation).
-4) Reductions: `max`/`min`/`prod` + `std`/`var` + `cumsum`/`cumprod`.
-5) Movement: `stack`/`split`/`chunk` + `pad_to` + `roll`.
+1) Creation + movement parity tranche: `eye`, `meshgrid`, `randperm`, `split`, `chunk`, `pad_to`, `roll`.
+2) Reductions tranche: `prod`, full `std`/`var`, `std_mean`/`var_mean`, `cumsum`/`cumprod`/`cummax`, full `logsumexp`/`logcumsumexp`.
+3) Indexing tranche: `masked_fill`, `masked_select`, `take`/`item`, and triangular/diagonal helpers.
+4) Cross-language fixtures: deterministic Python oracle outputs for high-risk tensor semantics.
+5) Keep proof debt non-increasing in touched modules (`sorry` count should not go up).

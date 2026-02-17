@@ -50,3 +50,6 @@ jobs:
 
       - name: Run Medium Profile
         run: lake test -- --profile medium
+
+      - name: Run Slow Profile
+        run: lake test -- --profile slow

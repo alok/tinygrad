@@ -94,48 +94,56 @@ def cases : List TestCase :=
       name := "ops.creation.zeros_ones"
       group := "ops"
       minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_zeros", "test/test_ops.py::test_ones"]
       suite := fun _ => ioTest "Tensor.zeros/Tensor.ones values" testZerosOnesCreation
     },
     {
       name := "ops.creation.arange"
       group := "ops"
       minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_arange"]
       suite := fun _ => ioTest "Tensor.arange sequence" testArangeValues
     },
     {
       name := "ops.broadcast.add"
       group := "ops"
       minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_broadcasted_add"]
       suite := fun _ => ioTest "addBroadcast computes expected matrix" testBroadcastAddValues
     },
     {
       name := "ops.move.reshape_flatten_roundtrip"
       group := "ops"
       minProfile := .fast
+      pythonRefs := ["test/test_tensor.py::test_reshape"]
       suite := fun _ => ioTest "reshapeUnsafe/flatten round-trip semantics" testReshapeFlattenRoundTrip
     },
     {
       name := "ops.move.permute_transpose"
       group := "ops"
       minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_where_permute"]
       suite := fun _ => ioTest "permuteUnsafe and transpose matrix semantics" testPermuteAndTransposeValues
     },
     {
       name := "ops.move.expand"
       group := "ops"
       minProfile := .fast
+      pythonRefs := ["test/test_tensor.py::test_expand"]
       suite := fun _ => ioTest "expandUnsafe broadcast semantics" testExpandBroadcastValues
     },
     {
       name := "ops.reduce.axis_semantics"
       group := "ops"
       minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_sum_collapse", "test/test_ops.py::test_max_dont_collapse"]
       suite := fun _ => ioTest "sumAxis/maxAxis keepdim semantics" testReduceAxisSemantics
     },
     {
       name := "ops.prop.broadcastable_comm"
       group := "ops"
       minProfile := .medium
+      pythonRefs := ["test/test_ops.py::test_broadcasted_add_2"]
       suite := fun cfg =>
         ioTest "Plausible: broadcastable symmetry" (testBroadcastableCommPlausible cfg)
     },
@@ -143,6 +151,7 @@ def cases : List TestCase :=
       name := "ops.prop.broadcast_out_refl"
       group := "ops"
       minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_broadcasted_add"]
       suite := fun cfg =>
         ioTest "Plausible: broadcastOut reflexivity" (testBroadcastOutReflPlausible cfg)
     }

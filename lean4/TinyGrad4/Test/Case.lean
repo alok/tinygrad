@@ -8,6 +8,7 @@ structure TestCase where
   group : String
   minProfile : TestProfile
   tags : List String := ["cpu"]
+  pythonRefs : List String := []
   suite : RunConfig → LSpec.TestSeq
 
 end TinyGrad4.Test

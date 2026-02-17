@@ -2,6 +2,13 @@
 
 This file tracks Python-to-Lean test migration progress for the Lake test driver (`lake test`).
 
+## Porting Rules
+
+- Prefer runtime semantic checks; do not port assertions that merely restate compile-time shape/dtype facts.
+- Every parity case must include `pythonRefs` metadata in Lean test registry entries.
+- Keep CPU parity tests in default profiles; device-specific tests remain explicitly tagged.
+- For numerics, compare with tolerances and deterministic seeds where randomness is involved.
+
 ## Status Legend
 
 - `ported`: implemented in Lean test driver suites
@@ -56,3 +63,11 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 - GPU/CUDA/Metal/TPU execution-path tests in `lake test` default profiles (CPU-only for Phase 1).
 - Heavy model/data tests (MNIST pipelines, large benchmarks).
 - Advanced indexing and bool-mask assignment parity not yet implemented in Lean runtime.
+
+## Mandatory Gates
+
+Every parity PR should pass all three driver profiles locally and in CI:
+
+- `lake test` (fast)
+- `lake test -- --profile medium`
+- `lake test -- --profile slow`

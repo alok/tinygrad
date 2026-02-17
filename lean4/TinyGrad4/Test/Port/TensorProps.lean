@@ -58,24 +58,31 @@ def cases : List TestCase :=
       name := "tensor.zerodim.initialization"
       group := "tensor"
       minProfile := .fast
+      pythonRefs := ["test/test_tensor.py::test_zerodim_initialization"]
       suite := fun _ => ioTest "Tensor scalar initialization" testZeroDimInitialization
     },
     {
       name := "tensor.like.zeros_ones"
       group := "tensor"
       minProfile := .fast
+      pythonRefs := [
+        "test/test_tensor.py::test_zeros_like_has_same_dtype_and_shape",
+        "test/test_tensor.py::test_ones_like_has_same_dtype_and_shape"
+      ]
       suite := fun _ => ioTest "zerosLike/onesLike preserve shape and values" testZerosLikeOnesLike
     },
     {
       name := "tensor.rand.seed_determinism"
       group := "tensor"
       minProfile := .fast
+      pythonRefs := ["test/test_tensor.py::test_random_fns_are_deterministic_with_seed"]
       suite := fun _ => ioTest "Tensor.rand deterministic by seed" testRandSeedDeterminism
     },
     {
       name := "tensor.prop.numel_triple"
       group := "tensor"
       minProfile := .medium
+      pythonRefs := ["test/test_tensor.py::test_numel"]
       suite := fun cfg =>
         ioTest "Plausible: numel triple product" (testNumelTriplePlausible cfg)
     },
@@ -83,6 +90,7 @@ def cases : List TestCase :=
       name := "tensor.prop.broadcastable_refl"
       group := "tensor"
       minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_broadcasted_add"]
       suite := fun cfg =>
         ioTest "Plausible: broadcastable reflexivity" (testBroadcastableReflPlausible cfg)
     }

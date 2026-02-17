@@ -131,6 +131,7 @@ private def caseToJson (tc : TestCase) : Lean.Json :=
     , ("group", Lean.Json.str tc.group)
     , ("min_profile", testProfileJson tc.minProfile)
     , ("tags", Lean.Json.arr <| (tc.tags.map Lean.Json.str).toArray)
+    , ("python_refs", Lean.Json.arr <| (tc.pythonRefs.map Lean.Json.str).toArray)
     ]
 
 private def selectionToJson (cfg : RunConfig) (opts : DriverOptions) (cases : List TestCase) : Lean.Json :=
@@ -159,6 +160,7 @@ private def runSelectedJson (cfg : RunConfig) (opts : DriverOptions) (cases : Li
       , ("group", Lean.Json.str tc.group)
       , ("min_profile", testProfileJson tc.minProfile)
       , ("tags", Lean.Json.arr <| (tc.tags.map Lean.Json.str).toArray)
+      , ("python_refs", Lean.Json.arr <| (tc.pythonRefs.map Lean.Json.str).toArray)
       , ("success", Lean.toJson success)
       , ("elapsed_ms", Lean.toJson elapsedMs)
       , ("output", Lean.Json.str output)

@@ -54,6 +54,7 @@ def toSuiteMap (cfg : RunConfig) (cases : List TestCase) : HashMap String (List 
 
 def renderCase (tc : TestCase) : String :=
   let tags := String.intercalate "," tc.tags
-  s!"{tc.name} (group={tc.group}, minProfile={repr tc.minProfile}, tags=[{tags}])"
+  let refs := if tc.pythonRefs.isEmpty then "-" else String.intercalate "," tc.pythonRefs
+  s!"{tc.name} (group={tc.group}, minProfile={repr tc.minProfile}, tags=[{tags}], pythonRefs=[{refs}])"
 
 end TinyGrad4.Test

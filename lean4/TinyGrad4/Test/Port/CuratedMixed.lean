@@ -65,18 +65,21 @@ def cases : List TestCase :=
       name := "curated.grad.square"
       group := "curated"
       minProfile := .medium
+      pythonRefs := ["test/test_tensor.py::test_backward_pass"]
       suite := fun _ => ioTest "autodiff: d/dx x^2 = 2x" testSquareGradient
     },
     {
       name := "curated.grad.where_routing"
       group := "curated"
       minProfile := .medium
+      pythonRefs := ["test/test_ops.py::test_where"]
       suite := fun _ => ioTest "autodiff: where routes gradients correctly" testWhereGradientRouting
     },
     {
       name := "curated.prop.matrix_vector_broadcast"
       group := "curated"
       minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_broadcasted_add_2"]
       suite := fun cfg =>
         ioTest "Plausible: matrix/vector broadcastability" (testMatrixVectorBroadcastPlausible cfg)
     }

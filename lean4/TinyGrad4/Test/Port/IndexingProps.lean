@@ -55,24 +55,28 @@ def cases : List TestCase :=
       name := "indexing.shape.ellipsis_slice"
       group := "indexing"
       minProfile := .fast
+      pythonRefs := ["test/unit/test_indexing.py::test_ellipsis_index"]
       suite := fun _ => ioTest "ellipsis + int + slice shape inference" testEllipsisAndSliceShape
     },
     {
       name := "indexing.shape.newaxis_int"
       group := "indexing"
       minProfile := .fast
+      pythonRefs := ["test/unit/test_indexing.py::test_none_index", "test/unit/test_indexing.py::test_single_int_index"]
       suite := fun _ => ioTest "newaxis + slice + int shape inference" testNewaxisAndIntShape
     },
     {
       name := "indexing.normalize.examples"
       group := "indexing"
       minProfile := .fast
+      pythonRefs := ["test/unit/test_indexing.py::test_out_of_bound_index"]
       suite := fun _ => ioTest "normalizeIndex representative examples" testNormalizeIndexExamples
     },
     {
       name := "indexing.prop.normalize_bounds"
       group := "indexing"
       minProfile := .medium
+      pythonRefs := ["test/unit/test_indexing.py::test_out_of_bound_index"]
       suite := fun cfg =>
         ioTest "Plausible: normalizeIndex bounds" (testNormalizeIndexBoundsPlausible cfg)
     },
@@ -80,6 +84,7 @@ def cases : List TestCase :=
       name := "indexing.prop.single_int_shape"
       group := "indexing"
       minProfile := .fast
+      pythonRefs := ["test/unit/test_indexing.py::test_single_int_index"]
       suite := fun cfg =>
         ioTest "Plausible: single-int indexing shape" (testSingleIntIndexShapePlausible cfg)
     }

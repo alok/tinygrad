@@ -24,6 +24,7 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | zerodim initialization | `tensor.zerodim.initialization` | ported | Runtime scalar shape/value behavior. |
 | zeros_like / ones_like behavior | `tensor.like.zeros_ones` | ported | Lean keeps shape/dtype at type level; runtime value checks retained. |
 | random seed determinism | `tensor.rand.seed_determinism` | ported | Tests same-seed equality and different-seed divergence. |
+| `randperm` semantics | `tensor.rand.randperm` | partial | Determinism + permutation invariants covered; exact RNG-sequence parity still pending. |
 | shape/numel invariants | `tensor.prop.numel_triple` | ported | Property-style check with Plausible. |
 
 ### `test/test_ops.py`
@@ -37,6 +38,10 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | transpose/permute movement semantics | `ops.move.permute_transpose` | ported | Matrix transpose parity via both APIs. |
 | expand broadcast semantics | `ops.move.expand` | ported | Broadcasted repeat values from singleton dims. |
 | axis reduction semantics (`sum`/`max`) | `ops.reduce.axis_semantics` | ported | `keepdim=true/false` runtime behavior parity. |
+| `eye` creation semantics | `ops.creation.eye` | ported | Matrix identity behavior for rectangular shape. |
+| `meshgrid` semantics (`ij`/`xy`) | `ops.creation.meshgrid_ij`, `ops.creation.meshgrid_xy` | ported | Both indexing modes covered (2-arg variant). |
+| split/chunk/roll/pad-to movement | `ops.move.split_chunk_roll_pad_to` | ported | Includes shape and representative value checks. |
+| reduction extensions (`prod/std/var/cum*`) | `ops.reduce.extended` | ported | Covers `prod`, `std`, `var`, `varMean/stdMean`, cumulative ops, and log-sum-exp variants. |
 | broadcast laws | `ops.prop.broadcastable_comm`, `ops.prop.broadcast_out_refl` | ported | Property-style invariants for shape broadcasting. |
 
 ### `test/unit/test_indexing.py`
@@ -57,12 +62,15 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | autodiff scalar gradient | `curated.grad.square` | ported | Mirrors key gradient sanity behavior. |
 | where gradient routing | `curated.grad.where_routing` | ported | Branch-specific gradient flow checks. |
 | matrix-vector broadcastability | `curated.prop.matrix_vector_broadcast` | ported | Property-style broadcast invariant. |
+| conv/pool deterministic smoke | `curated.nn.conv_pool_smoke` | ported | Basic conv/max-pool/avg-pool shape+value parity sanity lane. |
+| Python fixture oracle checks | `fixture.core_ops.python_oracle` | ported | Slow-profile deterministic fixtures generated from Python tinygrad. |
 
 ## Deferred Areas
 
 - GPU/CUDA/Metal/TPU execution-path tests in `lake test` default profiles (CPU-only for Phase 1).
 - Heavy model/data tests (MNIST pipelines, large benchmarks).
 - Advanced indexing and bool-mask assignment parity not yet implemented in Lean runtime.
+- Exact Python RNG sequence parity for `randperm` is not yet guaranteed (property parity is enforced).
 
 ## Mandatory Gates
 
@@ -71,3 +79,9 @@ Every parity PR should pass all three driver profiles locally and in CI:
 - `lake test` (fast)
 - `lake test -- --profile medium`
 - `lake test -- --profile slow`
+
+Current selection counts:
+
+- fast: 21
+- medium: 29
+- slow: 30

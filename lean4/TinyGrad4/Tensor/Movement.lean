@@ -5,9 +5,42 @@ namespace TinyGrad4
 
 namespace StaticTensor
 
+abbrev SomeTensor (d : DType) (device : Backend.DeviceType) := Sigma fun s => StaticTensor s d device
+
 private def build {s : List Nat} {d : DType} {device : Backend.DeviceType}
     (u : UOp) (requiresGrad : Bool := false) : StaticTensor s d device :=
   StaticTensor.ofUOp u (requiresGrad := requiresGrad)
+
+private def resolveAxis (rank axis : Nat) : Nat :=
+  if axis < rank then axis
+  else panic! s!"axis {axis} out of range for rank {rank}"
+
+private def replaceDim (shape : Shape) (axis newDim : Nat) : Shape :=
+  (listEnum shape).map fun p =>
+    if p.1 == axis then newDim else p.2
+
+private def sliceBounds (shape : Shape) (axis start stop : Nat) : List (Nat × Nat) :=
+  (listEnum shape).map fun p =>
+    if p.1 == axis then (start, stop) else (0, p.2)
+
+private def chunkSizesFromSplit (dim splitSize : Nat) : List Nat :=
+  Id.run do
+    let mut remaining := dim
+    let mut out : List Nat := []
+    while remaining > 0 do
+      let k := min splitSize remaining
+      out := out ++ [k]
+      remaining := remaining - k
+    pure out
+
+private def normalizeRollShift (n : Nat) (shift : Int) : Nat :=
+  if n == 0 then
+    0
+  else if shift >= 0 then
+    Int.toNat shift % n
+  else
+    let back := Int.toNat (-shift) % n
+    if back == 0 then 0 else n - back
 
 def reshapeUnsafe {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device)
     (newShape : List Nat)
@@ -137,6 +170,85 @@ def stackUnsafe {d : DType} {device : Backend.DeviceType} {shapes : List Shape} 
 def stack {d : DType} {device : Backend.DeviceType} {shapes : List Shape} (ts : TensorList d device shapes) (axis : Nat)
     : TensorM (StaticTensor (Shape.stackOut shapes axis) d device) := do
   stackUnsafe ts axis
+
+/-- Split by an explicit list of chunk sizes along one axis. -/
+def splitSizes {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (sizes : List Nat) (axis : Nat := 0)
+    : TensorM (List (SomeTensor d device)) := do
+  let axis' := resolveAxis s.length axis
+  let dim := listGetD s axis' 0
+  if listSum sizes != dim then
+    panic! s!"splitSizes: sizes sum {listSum sizes} must equal axis dim {dim}"
+  let mut out : List (SomeTensor d device) := []
+  let mut start := 0
+  for sz in sizes do
+    let stop := start + sz
+    let bounds := sliceBounds s axis' start stop
+    let chunkShape := replaceDim s axis' sz
+    let u ← UOp.shrink t.uop bounds
+    let chunk : StaticTensor chunkShape d device := StaticTensor.ofUOp u (requiresGrad := t.requiresGrad)
+    out := out ++ [⟨chunkShape, chunk⟩]
+    start := stop
+  pure out
+
+/-- Split into chunks of at most `splitSize` along one axis. -/
+def split {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (splitSize : Nat) (axis : Nat := 0)
+    : TensorM (List (SomeTensor d device)) := do
+  if splitSize == 0 then
+    panic! "split: splitSize must be > 0"
+  let axis' := resolveAxis s.length axis
+  let dim := listGetD s axis' 0
+  let sizes := chunkSizesFromSplit dim splitSize
+  splitSizes t sizes axis'
+
+/-- Split into `chunks` approximately equal pieces along one axis. -/
+def chunk {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (chunks : Nat) (axis : Nat := 0)
+    : TensorM (List (SomeTensor d device)) := do
+  if chunks == 0 then
+    panic! "chunk: chunks must be > 0"
+  let axis' := resolveAxis s.length axis
+  let dim := listGetD s axis' 0
+  if dim == 0 then
+    pure []
+  else
+    let splitSize := (dim + chunks - 1) / chunks
+    split t splitSize axis'
+
+/-- Roll elements along an axis. Positive shifts move values toward higher indices. -/
+def roll {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (shift : Int) (axis : Nat := 0)
+    : TensorM (StaticTensor s d device) := do
+  let axis' := resolveAxis s.length axis
+  let n := listGetD s axis' 0
+  if n == 0 then
+    pure t
+  else
+    let k := normalizeRollShift n shift
+    if k == 0 then
+      pure t
+    else
+      let leftBounds := sliceBounds s axis' (n - k) n
+      let rightBounds := sliceBounds s axis' 0 (n - k)
+      let left ← UOp.shrink t.uop leftBounds
+      let right ← UOp.shrink t.uop rightBounds
+      let out ← UOp.cat [left, right] axis'
+      pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Pad trailing elements of each axis up to `targetShape`. -/
+def padTo {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (targetShape : Shape)
+    : TensorM (StaticTensor targetShape d device) := do
+  if targetShape.length != s.length then
+    panic! s!"padTo: rank mismatch {s.length} vs {targetShape.length}"
+  let mut padding : List (Nat × Nat) := []
+  for (srcDim, dstDim) in s.zip targetShape do
+    if dstDim < srcDim then
+      panic! s!"padTo: target dim {dstDim} must be >= source dim {srcDim}"
+    padding := padding ++ [(0, dstDim - srcDim)]
+  let padded ← UOp.pad t.uop padding
+  pure (StaticTensor.ofUOp padded (requiresGrad := t.requiresGrad))
 
 /-- Repeat tensor along each dimension.
     repeats[i] specifies how many times to repeat dimension i.

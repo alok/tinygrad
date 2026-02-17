@@ -6,6 +6,8 @@ import TinyGrad4.Test.Port.TensorProps
 import TinyGrad4.Test.Port.OpsProps
 import TinyGrad4.Test.Port.IndexingProps
 import TinyGrad4.Test.Port.CuratedMixed
+import TinyGrad4.Test.Port.ExtendedParity
+import TinyGrad4.Test.Port.FixtureOracle
 
 namespace TinyGrad4.Test
 
@@ -16,7 +18,9 @@ def allCases : List TestCase :=
   Port.TensorProps.cases ++
   Port.OpsProps.cases ++
   Port.IndexingProps.cases ++
-  Port.CuratedMixed.cases
+  Port.CuratedMixed.cases ++
+  Port.ExtendedParity.cases ++
+  Port.FixtureOracle.cases
 
 private def hasTag (tc : TestCase) (tag : String) : Bool :=
   tc.tags.contains tag

@@ -166,6 +166,45 @@ private def randintArray (n : Nat) (seed : Nat) (low high : Int) : Array Float32
     out := out.push (intToFloat v).toFloat32
   return out
 
+private def swapAt (arr : Array Nat) (i j : Nat) : Array Nat :=
+  if i < arr.size && j < arr.size then
+    let vi := arr[i]!
+    let vj := arr[j]!
+    let arr := arr.set! i vj
+    arr.set! j vi
+  else
+    arr
+
+private def randpermArray (n : Nat) (seed : Nat) : Array Float32 := Id.run do
+  let mut arr : Array Nat := (List.range n).toArray
+  let mut s := UInt64.ofNat seed
+  if n == 0 then
+    return #[]
+  for i in [:n] do
+    let jBound := n - i
+    s := lcgStep s
+    let j := i + (s.toNat % jBound)
+    arr := swapAt arr i j
+  let mut out := Array.emptyWithCapacity n
+  for v in arr do
+    out := out.push (Float64.ofNat v).toFloat32
+  return out
+
+def eye (rows : Nat) (cols : Nat := rows) (dtype : DType := .float32) (device : Backend.DeviceType := .CPU)
+    : TensorM (StaticTensor [rows, cols] dtype device) := do
+  let vals : Array Float32 := Id.run do
+    let mut out := Array.emptyWithCapacity (rows * cols)
+    for i in [:rows] do
+      for j in [:cols] do
+        out := out.push (if i == j then 1.0 else 0.0)
+    return out
+  let base ← fromArrayF32 (device := device) [rows, cols] vals
+  if dtype == .float32 then
+    pure (StaticTensor.ofUOp base.uop)
+  else
+    let casted ← UOp.cast base.uop dtype
+    pure (StaticTensor.ofUOp casted)
+
 def arange (n : Nat) (dtype : DType := .float32) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor [n] dtype device) := do
   let vals : Array Float32 := Id.run do
@@ -235,6 +274,40 @@ def randint (shape : Shape) (low high : Int) (dtype : DType := .int32) (seed : N
   else
     let casted ← UOp.cast reshaped dtype
     pure (StaticTensor.ofUOp casted)
+
+def randperm (n : Nat) (dtype : DType := .int32) (seed : Nat := 0) (device : Backend.DeviceType := .CPU)
+    : TensorM (StaticTensor [n] dtype device) := do
+  let vals := randpermArray n seed
+  let base ← fromArrayF32 (device := device) [n] vals
+  if dtype == .float32 then
+    pure (StaticTensor.ofUOp base.uop)
+  else
+    let casted ← UOp.cast base.uop dtype
+    pure (StaticTensor.ofUOp casted)
+
+/-- 2-argument meshgrid with matrix indexing (`ij`): outputs have shape `[m, n]`. -/
+def meshgridIJ {m n : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [m] d device) (y : StaticTensor [n] d device)
+    : TensorM (StaticTensor [m, n] d device × StaticTensor [m, n] d device) := do
+  let xRow ← UOp.reshape x.uop [m, 1]
+  let yRow ← UOp.reshape y.uop [1, n]
+  let xGrid ← UOp.expand xRow [m, n]
+  let yGrid ← UOp.expand yRow [m, n]
+  let reqGrad := x.requiresGrad || y.requiresGrad
+  pure
+    (StaticTensor.ofUOp xGrid (requiresGrad := reqGrad), StaticTensor.ofUOp yGrid (requiresGrad := reqGrad))
+
+/-- 2-argument meshgrid with Cartesian indexing (`xy`): outputs have shape `[n, m]`. -/
+def meshgridXY {m n : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [m] d device) (y : StaticTensor [n] d device)
+    : TensorM (StaticTensor [n, m] d device × StaticTensor [n, m] d device) := do
+  let xRow ← UOp.reshape x.uop [1, m]
+  let yCol ← UOp.reshape y.uop [n, 1]
+  let xGrid ← UOp.expand xRow [n, m]
+  let yGrid ← UOp.expand yCol [n, m]
+  let reqGrad := x.requiresGrad || y.requiresGrad
+  pure
+    (StaticTensor.ofUOp xGrid (requiresGrad := reqGrad), StaticTensor.ofUOp yGrid (requiresGrad := reqGrad))
 
 def buffer (shape : List Nat) (dtype : DType := .float32) (device : Backend.DeviceType := .CPU)
     : TensorM (StaticTensor shape dtype device) := do

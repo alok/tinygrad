@@ -10,11 +10,11 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 ## Core creation & dtype
 - [x] arange
 - [x] linspace
-- [~] rand / randn / randint / randperm (no randperm yet)
+- [x] rand / randn / randint / randperm
 - [~] zeros_like / ones_like / full_like / empty / empty_like (no empty/empty_like yet)
 - [~] one_hot (Lean has `oneHotF32`, specialized)
-- [ ] eye
-- [ ] meshgrid
+- [x] eye
+- [x] meshgrid (2-argument `ij`/`xy` variants)
 
 ## Casting & dtype utils
 - [x] cast
@@ -32,20 +32,20 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 
 ## Reductions
 - [~] max / min (full tensor only)
-- [ ] prod
-- [~] std / var (axis variants exist; full wrappers missing)
-- [ ] std_mean / var_mean
-- [ ] cumsum / cumprod / cummax
-- [~] logsumexp (axis helper exists; full wrapper missing)
-- [ ] logcumsumexp
+- [x] prod
+- [x] std / var (full + axis wrappers)
+- [x] std_mean / var_mean (full tensor)
+- [x] cumsum / cumprod / cummax
+- [x] logsumexp (full + axis)
+- [x] logcumsumexp
 - [~] argmax (only [batch,n] helper)
 - [~] argmin (only [batch,n] helper)
 
 ## Movement & shape
 - [x] cat / stack (Lean has `cat`/`catList`/`stack`)
-- [~] stack / split / chunk (stack only)
-- [ ] pad_to
-- [ ] roll
+- [x] stack / split / chunk
+- [x] pad_to
+- [x] roll
 - [ ] unfold
 
 ## Elementwise math
@@ -74,12 +74,12 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 - [x] contiguous / contiguous_backward (ops implemented in Rules.lean)
 
 ## Known placeholders (Lean)
-- Full-tensor wrappers for `std`/`var`/`logsumexp` are not yet exposed.
-- Prefix reductions (`cumsum`/`cumprod`/`cummax`) are still missing.
+- Advanced indexing helpers (`masked_select`, generalized `take/item`, diag family) are still missing.
+- `randperm` exact-sequence parity with Python RNG internals is not guaranteed yet (property parity is covered).
 
 ## Suggested order (high impact → low)
-1) Creation + movement parity tranche: `eye`, `meshgrid`, `randperm`, `split`, `chunk`, `pad_to`, `roll`.
-2) Reductions tranche: `prod`, full `std`/`var`, `std_mean`/`var_mean`, `cumsum`/`cumprod`/`cummax`, full `logsumexp`/`logcumsumexp`.
-3) Indexing tranche: `masked_fill`, `masked_select`, `take`/`item`, and triangular/diagonal helpers.
-4) Cross-language fixtures: deterministic Python oracle outputs for high-risk tensor semantics.
+1) Indexing tranche: `masked_fill`, `masked_select`, generalized `take`/`item`, and triangular/diagonal helpers.
+2) RNG parity tranche: align Lean RNG with Python for exact `randperm` sequence parity (not just permutation invariants).
+3) Cross-language fixtures: broaden deterministic oracle corpus for indexing + error-path behavior.
+4) Expand NN parity smokes: batchnorm/dropout surface semantics under deterministic conditions.
 5) Keep proof debt non-increasing in touched modules (`sorry` count should not go up).

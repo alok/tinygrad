@@ -793,6 +793,17 @@ def meanNCBatch {batch channels : Nat} {d : DType} {device : Backend.DeviceType}
     simpa [Shape.reduce, listEnum, listRange] using out
   pure out'
 
+private def assertAxisInRange (axis rank : Nat) : Unit :=
+  if axis < rank then () else panic! s!"axis {axis} out of range for rank {rank}"
+
+private def replaceDimNow (shape : Shape) (axis newDim : Nat) : Shape :=
+  (listEnum shape).map fun p =>
+    if p.1 == axis then newDim else p.2
+
+private def axisSliceBoundsNow (shape : Shape) (axis start stop : Nat) : List (Nat × Nat) :=
+  (listEnum shape).map fun p =>
+    if p.1 == axis then (start, stop) else (0, p.2)
+
 /-- Variance along axis with keepdim -/
 def varAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) (keepdim : Bool := true)
     : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d device) := do
@@ -801,6 +812,147 @@ def varAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Static
   let centeredT : StaticTensor s d device  := StaticTensor.ofUOp centered (requiresGrad := t.requiresGrad)
   let sq ← mul centeredT centeredT
   meanAxis sq axis keepdim
+
+/-- Product along an axis with keepdim. -/
+def prodAxis {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (axis : Nat) (keepdim : Bool := true)
+    : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d device) := do
+  let _ := assertAxisInRange axis s.length
+  let dim := listGetD s axis 0
+  let keepShape := Shape.reduce s [axis] true
+  let mut acc : StaticTensor keepShape d device ← Tensor.ones (device := device) keepShape d
+  for i in [:dim] do
+    let bounds := axisSliceBoundsNow s axis i (i + 1)
+    let sliceU ← UOp.shrink t.uop bounds
+    let slice : StaticTensor keepShape d device := StaticTensor.ofUOp sliceU (requiresGrad := t.requiresGrad)
+    acc ← mul acc slice
+  match keepdim with
+  | true =>
+    pure (StaticTensor.ofUOp acc.uop (requiresGrad := t.requiresGrad))
+  | false =>
+    reshape acc (Shape.reduce s [axis] false) (by
+      simpa [Shape.reshapeValid, Shape.numel] using Shape.reduce_single_numel_eq s axis)
+
+/-- Product over all elements. -/
+def prod {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (Scalar d device) := do
+  let flat ← flatten t
+  let out ← prodAxis flat 0 false
+  pure out
+
+/-- Population variance over all elements. -/
+def var {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (Scalar d device) := do
+  let meanT ← mean t
+  let centered ← UOp.sub t.uop meanT.uop
+  let centeredT : StaticTensor s d device := StaticTensor.ofUOp centered (requiresGrad := t.requiresGrad)
+  let sq ← mul centeredT centeredT
+  mean sq
+
+/-- Standard deviation along an axis with keepdim. -/
+def stdAxis {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (axis : Nat) (keepdim : Bool := true)
+    : TensorM (StaticTensor (Shape.reduce s [axis] keepdim) d device) := do
+  let v ← varAxis t axis keepdim
+  sqrt v
+
+/-- Population standard deviation over all elements. -/
+def std {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (Scalar d device) := do
+  let v ← var t
+  sqrt v
+
+/-- Population variance and mean over all elements. -/
+def varMean {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (Scalar d device × Scalar d device) := do
+  let v ← var t
+  let m ← mean t
+  pure (v, m)
+
+/-- Population standard deviation and mean over all elements. -/
+def stdMean {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (Scalar d device × Scalar d device) := do
+  let sdev ← std t
+  let m ← mean t
+  pure (sdev, m)
+
+/-- Cumulative sum along an axis. -/
+def cumsumAxis {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
+  let _ := assertAxisInRange axis s.length
+  let dim := listGetD s axis 0
+  if dim == 0 then
+    pure t
+  else
+    let keepShape := Shape.reduce s [axis] true
+    let mut parts : List UOp := []
+    for i in [:dim] do
+      let prefBounds := axisSliceBoundsNow s axis 0 (i + 1)
+      let prefShape := replaceDimNow s axis (i + 1)
+      let prefU ← UOp.shrink t.uop prefBounds
+      let prefTensor : StaticTensor prefShape d device := StaticTensor.ofUOp prefU (requiresGrad := t.requiresGrad)
+      let partRed ← sumAxis prefTensor axis true
+      let part : StaticTensor keepShape d device := StaticTensor.ofUOp partRed.uop (requiresGrad := t.requiresGrad)
+      parts := parts ++ [part.uop]
+    let out ← UOp.cat parts axis
+    pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Cumulative product along an axis. -/
+def cumprodAxis {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
+  let _ := assertAxisInRange axis s.length
+  let dim := listGetD s axis 0
+  if dim == 0 then
+    pure t
+  else
+    let keepShape := Shape.reduce s [axis] true
+    let mut parts : List UOp := []
+    for i in [:dim] do
+      let prefBounds := axisSliceBoundsNow s axis 0 (i + 1)
+      let prefShape := replaceDimNow s axis (i + 1)
+      let prefU ← UOp.shrink t.uop prefBounds
+      let prefTensor : StaticTensor prefShape d device := StaticTensor.ofUOp prefU (requiresGrad := t.requiresGrad)
+      let partRed ← prodAxis prefTensor axis true
+      let part : StaticTensor keepShape d device := StaticTensor.ofUOp partRed.uop (requiresGrad := t.requiresGrad)
+      parts := parts ++ [part.uop]
+    let out ← UOp.cat parts axis
+    pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Cumulative max along an axis. -/
+def cummaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
+  let _ := assertAxisInRange axis s.length
+  let dim := listGetD s axis 0
+  if dim == 0 then
+    pure t
+  else
+    let keepShape := Shape.reduce s [axis] true
+    let mut parts : List UOp := []
+    for i in [:dim] do
+      let prefBounds := axisSliceBoundsNow s axis 0 (i + 1)
+      let prefShape := replaceDimNow s axis (i + 1)
+      let prefU ← UOp.shrink t.uop prefBounds
+      let prefTensor : StaticTensor prefShape d device := StaticTensor.ofUOp prefU (requiresGrad := t.requiresGrad)
+      let partRed ← maxAxis prefTensor axis true
+      let part : StaticTensor keepShape d device := StaticTensor.ofUOp partRed.uop (requiresGrad := t.requiresGrad)
+      parts := parts ++ [part.uop]
+    let out ← UOp.cat parts axis
+    pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Cumulative sum along the last axis. -/
+def cumsum {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) :=
+  cumsumAxis t (s.length - 1)
+
+/-- Cumulative product along the last axis. -/
+def cumprod {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) :=
+  cumprodAxis t (s.length - 1)
+
+/-- Cumulative max along the last axis. -/
+def cummax {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) :=
+  cummaxAxis t (s.length - 1)
 
 /-- Layer norm over an axis (last axis by default). -/
 def layerNorm {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat := s.length - 1)
@@ -838,6 +990,14 @@ private def classRangeF32 (n : Nat) : Array Float32 := Id.run do
 private def resolveDim (dim rank : Nat) : Nat :=
   if dim < rank then dim else
     panic! s!"dim {dim} out of range for rank {rank}"
+
+private def replaceDim (shape : Shape) (axis newDim : Nat) : Shape :=
+  (listEnum shape).map fun p =>
+    if p.1 == axis then newDim else p.2
+
+private def axisSliceBounds (shape : Shape) (axis start stop : Nat) : List (Nat × Nat) :=
+  (listEnum shape).map fun p =>
+    if p.1 == axis then (start, stop) else (0, p.2)
 
 private def swapLastPerm (rank dim : Nat) : List Nat :=
   let last := rank - 1
@@ -1196,6 +1356,39 @@ def logsumexpAxisF {s : List Nat} {d : DType} {device : Backend.DeviceType} (t :
     let outKeepT : StaticTensor (Shape.reduce s [axis.val] true) d device := StaticTensor.ofUOp outKeep (requiresGrad := t.requiresGrad)
     reshape outKeepT (Shape.reduce s [axis.val] false) (by
       simpa [Shape.reshapeValid, Shape.numel] using Shape.reduce_single_numel_eq s axis.val)
+
+/-- Cumulative log-sum-exp along an axis. -/
+def logcumsumexpAxis {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do
+  let _ := assertAxisInRange axis s.length
+  let dim := listGetD s axis 0
+  if dim == 0 then
+    pure t
+  else
+    let keepShape := Shape.reduce s [axis] true
+    let mut parts : List UOp := []
+    for i in [:dim] do
+      let prefBounds := axisSliceBoundsNow s axis 0 (i + 1)
+      let prefShape := replaceDimNow s axis (i + 1)
+      let prefU ← UOp.shrink t.uop prefBounds
+      let prefTensor : StaticTensor prefShape d device := StaticTensor.ofUOp prefU (requiresGrad := t.requiresGrad)
+      let partRed ← logsumexpAxis prefTensor axis true
+      let part : StaticTensor keepShape d device := StaticTensor.ofUOp partRed.uop (requiresGrad := t.requiresGrad)
+      parts := parts ++ [part.uop]
+    let out ← UOp.cat parts axis
+    pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Cumulative log-sum-exp along the last axis. -/
+def logcumsumexp {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) :=
+  logcumsumexpAxis t (s.length - 1)
+
+/-- Log-sum-exp over all elements. -/
+def logsumexp {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (Scalar d device) := do
+  let flat ← flatten t
+  let out ← logsumexpAxis flat 0 false
+  pure out
 
 /-- Log-softmax along an axis (stable). -/
 def logSoftmaxAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) : TensorM (StaticTensor s d device) := do

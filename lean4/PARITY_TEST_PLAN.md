@@ -33,15 +33,19 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 |---|---|---|---|
 | creation ops (`zeros`, `ones`) | `ops.creation.zeros_ones` | ported | Value-level parity. |
 | `arange` sequence | `ops.creation.arange` | ported | Basic sequence behavior parity. |
+| `linspace` edge-step semantics | `ops.creation.linspace` | ported | Covers `steps=3/1/0` and int-dtype casting behavior. |
 | broadcast add semantics | `ops.broadcast.add` | ported | Representative broadcast execution check. |
 | reshape/flatten movement semantics | `ops.move.reshape_flatten_roundtrip` | ported | Round-trip value/shape parity for movement path. |
 | transpose/permute movement semantics | `ops.move.permute_transpose` | ported | Matrix transpose parity via both APIs. |
+| cat/stack movement semantics | `ops.move.cat_stack` | ported | Validates value ordering across concat and stack axes. |
 | expand broadcast semantics | `ops.move.expand` | ported | Broadcasted repeat values from singleton dims. |
 | axis reduction semantics (`sum`/`max`) | `ops.reduce.axis_semantics` | ported | `keepdim=true/false` runtime behavior parity. |
+| full-tensor `min`/`max` reductions | `ops.reduce.min_max_full` | ported | Scalar reduction outputs with signed inputs. |
 | `eye` creation semantics | `ops.creation.eye` | ported | Matrix identity behavior for rectangular shape. |
 | `meshgrid` semantics (`ij`/`xy`) | `ops.creation.meshgrid_ij`, `ops.creation.meshgrid_xy` | ported | Both indexing modes covered (2-arg variant). |
 | split/chunk/roll/pad-to movement | `ops.move.split_chunk_roll_pad_to` | ported | Includes shape and representative value checks. |
-| reduction extensions (`prod/std/var/cum*`) | `ops.reduce.extended` | ported | Covers `prod`, `std`, `var`, `varMean/stdMean`, cumulative ops, and log-sum-exp variants. |
+| reduction extensions (`prod/std/var/cum*`) | `ops.reduce.extended` | ported | Core extension coverage (`prod/std/var/cum*/log-sum-exp`). |
+| softmax/log-softmax semantics | `ops.softmax.logsoftmax` | ported | Last-axis parity plus explicit axis-0 softmax check. |
 | broadcast laws | `ops.prop.broadcastable_comm`, `ops.prop.broadcast_out_refl` | ported | Property-style invariants for shape broadcasting. |
 
 ### `test/unit/test_indexing.py`
@@ -82,6 +86,6 @@ Every parity PR should pass all three driver profiles locally and in CI:
 
 Current selection counts:
 
-- fast: 21
-- medium: 29
-- slow: 30
+- fast: 25
+- medium: 33
+- slow: 34

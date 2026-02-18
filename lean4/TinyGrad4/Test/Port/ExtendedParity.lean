@@ -86,6 +86,43 @@ def testMeshgridXY : IO Unit := do
       5.0, 5.0, 5.0,
       6.0, 6.0, 6.0] 0.0001 "meshgridXY y-values"
 
+def testLinspaceParity : IO Unit := do
+  let (f3, f1, f0, i3CastBack) := runTensorM do
+    let f3 ← Tensor.linspace 5.0 10.0 3 .float32
+    let f1 ← Tensor.linspace 5.0 10.0 1 .float32
+    let f0 ← Tensor.linspace 5.0 10.0 0 .float32
+    let i3 ← Tensor.linspace 5.0 10.0 3 .int32
+    let i3CastBack ← StaticTensor.cast i3 .float32
+    pure (f3, f1, f0, i3CastBack)
+  assertShape f3.uop.shape [3] "linspace float32 shape (3 steps)"
+  assertShape f1.uop.shape [1] "linspace float32 shape (1 step)"
+  assertShape f0.uop.shape [0] "linspace float32 shape (0 steps)"
+  assertShape i3CastBack.uop.shape [3] "linspace int32 shape (3 steps)"
+  assertRawAllClose (evalTensor f3) #[5.0, 7.5, 10.0] 0.0001 "linspace float32 values (3 steps)"
+  assertRawAllClose (evalTensor f1) #[5.0] 0.0001 "linspace float32 values (1 step)"
+  assertRawAllClose (evalTensor f0) #[] 0.0001 "linspace float32 values (0 steps)"
+  assertRawAllClose (evalTensor i3CastBack) #[5.0, 7.0, 10.0] 0.0001 "linspace int32 cast values"
+
+def testCatStackParity : IO Unit := do
+  let (catOut, stack0, stack1) := runTensorM do
+    let leftBase ← Tensor.arange 4 .float32
+    let left ← reshapeUnsafe leftBase [2, 2]
+    let right ← Tensor.full [2, 2] .float32 9.0
+    let catOut ← StaticTensor.cat left right 1 (by native_decide)
+    let v0 ← Tensor.arange 2 .float32
+    let v1 ← Tensor.full [2] .float32 4.0
+    let v2 ← Tensor.full [2] .float32 (-1.0)
+    let ts : TensorList .float32 .CPU [[2], [2], [2]] := .cons v0 (.cons v1 (.cons v2 .nil))
+    let stack0 ← StaticTensor.stack ts 0
+    let stack1 ← StaticTensor.stack ts 1
+    pure (catOut, stack0, stack1)
+  assertShape catOut.uop.shape [2, 4] "cat output shape"
+  assertShape stack0.uop.shape [3, 2] "stack axis0 shape"
+  assertShape stack1.uop.shape [2, 3] "stack axis1 shape"
+  assertRawAllClose (evalTensor catOut) #[0.0, 1.0, 9.0, 9.0, 2.0, 3.0, 9.0, 9.0] 0.0001 "cat values"
+  assertRawAllClose (evalTensor stack0) #[0.0, 1.0, 4.0, 4.0, -1.0, -1.0] 0.0001 "stack axis0 values"
+  assertRawAllClose (evalTensor stack1) #[0.0, 4.0, -1.0, 1.0, 4.0, -1.0] 0.0001 "stack axis1 values"
+
 def testSplitChunkRollPadTo : IO Unit := do
   let (splits, chunks, rolledPos, rolledNeg, padded) := runTensorM do
     let base ← Tensor.arange 10 .float32
@@ -155,6 +192,39 @@ def testReductionParity : IO Unit := do
   assertRawAllClose (evalTensor lcse)
     #[1.0, 2.3132617, 3.407606, 4.44019, 5.4519143, 6.4561934] 0.001 "logcumsumexp values"
 
+def testMinMaxReductionParity : IO Unit := do
+  let (mx, mn) := runTensorM do
+    let base ← Tensor.arange 6 .float32
+    let shifted ← addScalar base (-2.5)
+    let mx ← StaticTensor.max shifted
+    let mn ← StaticTensor.min shifted
+    pure (mx, mn)
+  assertShape mx.uop.shape [] "max reduction scalar shape"
+  assertShape mn.uop.shape [] "min reduction scalar shape"
+  assertRawAllClose (evalTensor mx) #[2.5] 0.0001 "max reduction value"
+  assertRawAllClose (evalTensor mn) #[-2.5] 0.0001 "min reduction value"
+
+def testSoftmaxLogSoftmaxParity : IO Unit := do
+  let (softmaxLast, logSoftmaxLast, softmaxAxis0) := runTensorM do
+    let base ← Tensor.arange 6 .float32
+    let mat ← reshapeUnsafe base [2, 3]
+    let softmaxLast ← StaticTensor.softmax mat
+    let logSoftmaxLast ← StaticTensor.logSoftmax mat
+    let softmaxAxis0 ← StaticTensor.softmaxAxis mat 0
+    pure (softmaxLast, logSoftmaxLast, softmaxAxis0)
+  assertShape softmaxLast.uop.shape [2, 3] "softmax last-axis shape"
+  assertShape logSoftmaxLast.uop.shape [2, 3] "logSoftmax last-axis shape"
+  assertShape softmaxAxis0.uop.shape [2, 3] "softmax axis0 shape"
+  assertRawAllClose (evalTensor softmaxLast)
+    #[0.0900306, 0.2447285, 0.6652409,
+      0.0900306, 0.2447285, 0.6652409] 0.001 "softmax last-axis values"
+  assertRawAllClose (evalTensor logSoftmaxLast)
+    #[-2.407606, -1.407606, -0.407606,
+      -2.407606, -1.407606, -0.407606] 0.001 "logSoftmax last-axis values"
+  assertRawAllClose (evalTensor softmaxAxis0)
+    #[0.0474259, 0.0474259, 0.0474259,
+      0.9525741, 0.9525741, 0.9525741] 0.001 "softmax axis0 values"
+
 def testNNConvPoolSmoke : IO Unit := do
   let (convOut, maxOut, avgOut) := runTensorM do
     let x ← Tensor.ones [1, 1, 4, 4] .float32
@@ -201,6 +271,20 @@ def cases : List TestCase :=
       suite := fun _ => ioTest "meshgrid XY indexing parity" testMeshgridXY
     },
     {
+      name := "ops.creation.linspace"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_linspace"]
+      suite := fun _ => ioTest "linspace parity for edge step counts and dtype" testLinspaceParity
+    },
+    {
+      name := "ops.move.cat_stack"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_cat", "test/test_ops.py::test_stack", "test/test_tensor.py::test_cat"]
+      suite := fun _ => ioTest "cat/stack movement parity" testCatStackParity
+    },
+    {
       name := "ops.move.split_chunk_roll_pad_to"
       group := "ops"
       minProfile := .medium
@@ -222,6 +306,24 @@ def cases : List TestCase :=
         "test/test_ops.py::test_logcumsumexp"
       ]
       suite := fun _ => ioTest "extended reduction parity" testReductionParity
+    },
+    {
+      name := "ops.reduce.min_max_full"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_min", "test/test_ops.py::test_max"]
+      suite := fun _ => ioTest "full-tensor min/max reduction parity" testMinMaxReductionParity
+    },
+    {
+      name := "ops.softmax.logsoftmax"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := [
+        "test/test_ops.py::test_softmax",
+        "test/test_ops.py::test_log_softmax",
+        "test/test_ops.py::test_softmax_other_axis"
+      ]
+      suite := fun _ => ioTest "softmax/logSoftmax parity including axis=0" testSoftmaxLogSoftmaxParity
     },
     {
       name := "curated.nn.conv_pool_smoke"

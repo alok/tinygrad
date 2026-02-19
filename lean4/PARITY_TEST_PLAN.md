@@ -46,6 +46,7 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | split/chunk/roll/pad-to movement | `ops.move.split_chunk_roll_pad_to` | ported | Includes shape and representative value checks. |
 | reduction extensions (`prod/std/var/cum*`) | `ops.reduce.extended` | ported | Core extension coverage (`prod/std/var/cum*/log-sum-exp`). |
 | softmax/log-softmax semantics | `ops.softmax.logsoftmax` | ported | Last-axis parity plus explicit axis-0 softmax check. |
+| activation family semantics (`relu/tanh/silu/gelu`) | `ops.elemwise.activations` | ported | Deterministic value checks for core nonlinearities. |
 | broadcast laws | `ops.prop.broadcastable_comm`, `ops.prop.broadcast_out_refl` | ported | Property-style invariants for shape broadcasting. |
 
 ### `test/unit/test_indexing.py`
@@ -86,6 +87,6 @@ Every parity PR should pass all three driver profiles locally and in CI:
 
 Current selection counts:
 
-- fast: 25
-- medium: 33
-- slow: 34
+- fast: 26
+- medium: 34
+- slow: 35

@@ -225,6 +225,24 @@ def testSoftmaxLogSoftmaxParity : IO Unit := do
     #[0.0474259, 0.0474259, 0.0474259,
       0.9525741, 0.9525741, 0.9525741] 0.001 "softmax axis0 values"
 
+def testActivationParity : IO Unit := do
+  let (reluOut, tanhOut, siluOut, geluOut) := runTensorM do
+    let base ← Tensor.arange 6 .float32
+    let x ← addScalar base (-2.5)
+    let reluOut ← StaticTensor.relu x
+    let tanhOut ← StaticTensor.tanh x
+    let siluOut ← StaticTensor.silu x
+    let geluOut ← StaticTensor.gelu x
+    pure (reluOut, tanhOut, siluOut, geluOut)
+  let expectedRelu := #[0.0, 0.0, 0.0, 0.5, 1.5, 2.5]
+  let expectedTanh := #[-0.9866143, -0.9051483, -0.4621172, 0.4621172, 0.9051483, 0.9866143]
+  let expectedSilu := #[-0.1896454, -0.2736383, -0.1887703, 0.3112297, 1.2263616, 2.3103545]
+  let expectedGelu := #[-0.0150843, -0.1004284, -0.1542860, 0.3457140, 1.3995717, 2.4849157]
+  assertRawAllClose (evalTensor reluOut) expectedRelu 0.001 "relu values"
+  assertRawAllClose (evalTensor tanhOut) expectedTanh 0.001 "tanh values"
+  assertRawAllClose (evalTensor siluOut) expectedSilu 0.001 "silu values"
+  assertRawAllClose (evalTensor geluOut) expectedGelu 0.001 "gelu values"
+
 def testNNConvPoolSmoke : IO Unit := do
   let (convOut, maxOut, avgOut) := runTensorM do
     let x ← Tensor.ones [1, 1, 4, 4] .float32
@@ -324,6 +342,18 @@ def cases : List TestCase :=
         "test/test_ops.py::test_softmax_other_axis"
       ]
       suite := fun _ => ioTest "softmax/logSoftmax parity including axis=0" testSoftmaxLogSoftmaxParity
+    },
+    {
+      name := "ops.elemwise.activations"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := [
+        "test/test_ops.py::test_relu",
+        "test/test_ops.py::test_tanh",
+        "test/test_ops.py::test_silu",
+        "test/test_ops.py::test_gelu"
+      ]
+      suite := fun _ => ioTest "relu/tanh/silu/gelu parity" testActivationParity
     },
     {
       name := "curated.nn.conv_pool_smoke"

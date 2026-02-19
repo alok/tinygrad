@@ -68,7 +68,7 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | where gradient routing | `curated.grad.where_routing` | ported | Branch-specific gradient flow checks. |
 | matrix-vector broadcastability | `curated.prop.matrix_vector_broadcast` | ported | Property-style broadcast invariant. |
 | conv/pool deterministic smoke | `curated.nn.conv_pool_smoke` | ported | Basic conv/max-pool/avg-pool shape+value parity sanity lane. |
-| Python fixture oracle checks | `fixture.core_ops.python_oracle` | ported | Slow-profile deterministic fixtures generated from Python tinygrad. |
+| Python fixture oracle checks | `fixture.core_ops.python_oracle` | ported | Slow-profile deterministic fixtures for core ops + activations. |
 
 ## Deferred Areas
 

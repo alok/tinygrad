@@ -103,7 +103,7 @@ private def runCase (id : String) : IO (Shape × RawBuffer) := do
       let base ← Tensor.arange 6 .float32
       let ones6 ← Tensor.ones [6] .float32
       let shifted ← add base ones6
-      let mat ← reshapeUnsafe shifted [2, 3]
+      let mat ← reshape shifted [2, 3] (by native_decide)
       StaticTensor.cumsumAxis mat 1
     pure (t.uop.shape, evalTensor t)
   | "cumprod_axis1_2x3" =>
@@ -111,7 +111,7 @@ private def runCase (id : String) : IO (Shape × RawBuffer) := do
       let base ← Tensor.arange 6 .float32
       let ones6 ← Tensor.ones [6] .float32
       let shifted ← add base ones6
-      let mat ← reshapeUnsafe shifted [2, 3]
+      let mat ← reshape shifted [2, 3] (by native_decide)
       StaticTensor.cumprodAxis mat 1
     pure (t.uop.shape, evalTensor t)
   | "logsumexp_1d_6" =>
@@ -127,6 +127,64 @@ private def runCase (id : String) : IO (Shape × RawBuffer) := do
       let ones6 ← Tensor.ones [6] .float32
       let shifted ← add base ones6
       StaticTensor.logcumsumexp shifted
+    pure (t.uop.shape, evalTensor t)
+  | "linspace_5_10_3" =>
+    let t := runTensorM do
+      Tensor.linspace 5.0 10.0 3 .float32
+    pure (t.uop.shape, evalTensor t)
+  | "relu_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.relu shifted
+    pure (t.uop.shape, evalTensor t)
+  | "tanh_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.tanh shifted
+    pure (t.uop.shape, evalTensor t)
+  | "silu_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.silu shifted
+    pure (t.uop.shape, evalTensor t)
+  | "gelu_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.gelu shifted
+    pure (t.uop.shape, evalTensor t)
+  | "max_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.max shifted
+    pure (t.uop.shape, evalTensor t)
+  | "min_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.min shifted
+    pure (t.uop.shape, evalTensor t)
+  | "softmax_last_2x3" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let mat ← reshape base [2, 3] (by native_decide)
+      StaticTensor.softmax mat
+    pure (t.uop.shape, evalTensor t)
+  | "logsoftmax_last_2x3" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let mat ← reshape base [2, 3] (by native_decide)
+      StaticTensor.logSoftmax mat
+    pure (t.uop.shape, evalTensor t)
+  | "softmax_axis0_2x3" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let mat ← reshape base [2, 3] (by native_decide)
+      StaticTensor.softmaxAxisF mat ⟨0, by decide⟩
     pure (t.uop.shape, evalTensor t)
   | _ =>
     throw <| IO.userError s!"unknown fixture case id: {id}"

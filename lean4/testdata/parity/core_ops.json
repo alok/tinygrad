@@ -167,6 +167,142 @@
       "shape": [
         6
       ]
+    },
+    {
+      "expected": [
+        5.0,
+        7.5,
+        10.0
+      ],
+      "id": "linspace_5_10_3",
+      "python_ref": "test/test_ops.py::test_linspace",
+      "shape": [
+        3
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        0.0,
+        0.0,
+        0.5,
+        1.5,
+        2.5
+      ],
+      "id": "relu_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_relu",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -0.9866142868995667,
+        -0.9051482677459717,
+        -0.46211719512939453,
+        0.46211719512939453,
+        0.9051482677459717,
+        0.9866143465042114
+      ],
+      "id": "tanh_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_tanh",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -0.1896454393863678,
+        -0.2736383080482483,
+        -0.1887703388929367,
+        0.3112296760082245,
+        1.226361632347107,
+        2.310354471206665
+      ],
+      "id": "silu_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_silu",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -0.01508426759392023,
+        -0.10042841732501984,
+        -0.1542859822511673,
+        0.3457140028476715,
+        1.3995716571807861,
+        2.4849157333374023
+      ],
+      "id": "gelu_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_gelu",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        2.5
+      ],
+      "id": "max_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_max",
+      "shape": []
+    },
+    {
+      "expected": [
+        -2.5
+      ],
+      "id": "min_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_min",
+      "shape": []
+    },
+    {
+      "expected": [
+        0.09003058075904846,
+        0.2447284758090973,
+        0.6652409434318542,
+        0.09003058075904846,
+        0.2447284758090973,
+        0.6652409434318542
+      ],
+      "id": "softmax_last_2x3",
+      "python_ref": "test/test_ops.py::test_softmax",
+      "shape": [
+        2,
+        3
+      ]
+    },
+    {
+      "expected": [
+        -2.4076058864593506,
+        -1.4076060056686401,
+        -0.40760594606399536,
+        -2.4076058864593506,
+        -1.4076060056686401,
+        -0.40760594606399536
+      ],
+      "id": "logsoftmax_last_2x3",
+      "python_ref": "test/test_ops.py::test_log_softmax",
+      "shape": [
+        2,
+        3
+      ]
+    },
+    {
+      "expected": [
+        0.047425881028175354,
+        0.047425881028175354,
+        0.047425881028175354,
+        0.9525741338729858,
+        0.9525741338729858,
+        0.9525741338729858
+      ],
+      "id": "softmax_axis0_2x3",
+      "python_ref": "test/test_ops.py::test_softmax_other_axis",
+      "shape": [
+        2,
+        3
+      ]
     }
   ],
   "generator": "lean4/scripts/generate_parity_fixtures.py",

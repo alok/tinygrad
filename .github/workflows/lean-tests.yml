@@ -36,6 +36,11 @@ jobs:
           curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Show Lake Version
         run: lake --version
 
@@ -44,6 +49,19 @@ jobs:
 
       - name: Build Test Driver
         run: lake build tg4_tests
+
+      - name: Run Parity Scorecard Check
+        run: |
+          uv run python lean4/scripts/parity_scorecard.py \
+            --json-out lean4/testdata/parity/scorecard.latest.json \
+            --md-out lean4/testdata/parity/scorecard.latest.md \
+            --check
+
+      - name: Check Fixture Freshness
+        run: |
+          tmp_json="$(mktemp)"
+          uv run python lean4/scripts/generate_parity_fixtures.py --out "$tmp_json"
+          diff -u "$tmp_json" lean4/testdata/parity/core_ops.json
 
       - name: Run Fast Profile
         run: lake test

@@ -1,0 +1,19 @@
+{
+  "captured_at": "2026-02-20T01:35:00+00:00",
+  "metrics": {
+    "fixture_case_count": 19,
+    "legacy_marker_count": 8,
+    "parity_counts": {
+      "implemented": 28,
+      "missing": 15,
+      "partial": 7
+    },
+    "selection_counts": {
+      "fast": 26,
+      "medium": 34,
+      "slow": 35
+    },
+    "source_ref": "505b70a0506d72db10ada998280bf4ed10bbf5da"
+  },
+  "source_ref": "505b70a0506d72db10ada998280bf4ed10bbf5da"
+}

@@ -1,4 +1,5 @@
 import Float64
+import TinyGrad4
 import TinyGrad4.Spec
 import TinyGrad4.Test.Case
 import TinyGrad4.Test.Profiles
@@ -7,6 +8,8 @@ import TinyGrad4.Test.Assertions
 namespace TinyGrad4.Test.Port.IndexingProps
 
 open TinyGrad4
+open TinyGrad4.Interpreter
+open TinyGrad4.StaticTensor
 open TinyGrad4.Spec
 open TinyGrad4.Test
 open TinyGrad4.Test.Assertions
@@ -49,6 +52,35 @@ def testSingleIntIndexShapePlausible (cfg : RunConfig) : IO Unit :=
       let out := inferBasicIndexShape [dim] [.int idx]
       out = none ∨ out = some [])
 
+def testItemRuntimeError : IO Unit := do
+  let status := runTensorM do
+    let x ← Tensor.arange 3 .float32
+    StaticTensor.itemChecked x
+  match status with
+  | .ok _ => throw <| IO.userError "itemChecked should report an error on non-scalar tensors"
+  | .error _ => pure ()
+
+def testMaskedSelectPackedCountBounds : IO Unit := do
+  let (count0F, count1F, countMixF, packedMix) := runTensorM do
+    let x0 ← Tensor.arange 9 .float32
+    let x ← reshapeUnsafe x0 [3, 3]
+    let mask0 ← Tensor.fullBool [3, 3] false
+    let mask1 ← Tensor.fullBool [3, 3] true
+    let five ← Tensor.full [3, 3] .float32 5.0
+    let maskMix ← StaticTensor.cmplt x five
+    let (_, count0) ← StaticTensor.maskedSelectPacked x mask0
+    let (_, count1) ← StaticTensor.maskedSelectPacked x mask1
+    let (packedMix, countMix) ← StaticTensor.maskedSelectPacked x maskMix
+    let count0F ← StaticTensor.cast count0 .float32
+    let count1F ← StaticTensor.cast count1 .float32
+    let countMixF ← StaticTensor.cast countMix .float32
+    pure (count0F, count1F, countMixF, packedMix)
+  assertRawAllClose (evalTensor count0F) #[0.0] 0.001 "maskedSelectPacked all-false count"
+  assertRawAllClose (evalTensor count1F) #[9.0] 0.001 "maskedSelectPacked all-true count"
+  assertRawAllClose (evalTensor countMixF) #[5.0] 0.001 "maskedSelectPacked mixed count"
+  assertRawAllClose (evalTensor packedMix) #[0.0, 1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0] 0.001
+    "maskedSelectPacked mixed prefix payload"
+
 def cases : List TestCase :=
   [
     {
@@ -87,6 +119,22 @@ def cases : List TestCase :=
       pythonRefs := ["test/unit/test_indexing.py::test_single_int_index"]
       suite := fun cfg =>
         ioTest "Plausible: single-int indexing shape" (testSingleIntIndexShapePlausible cfg)
+    },
+    {
+      name := "indexing.runtime.item_non_scalar_error"
+      group := "indexing"
+      minProfile := .fast
+      pythonRefs := ["test/test_tensor.py::test_item"]
+      suite := fun _ =>
+        ioTest "item rejects non-scalar tensors" testItemRuntimeError
+    },
+    {
+      name := "indexing.runtime.masked_select_packed_counts"
+      group := "indexing"
+      minProfile := .medium
+      pythonRefs := ["test/test_ops.py::test_masked_select"]
+      suite := fun _ =>
+        ioTest "maskedSelectPacked count bounds and prefix payload" testMaskedSelectPackedCountBounds
     }
   ]
 

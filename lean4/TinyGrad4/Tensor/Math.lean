@@ -437,8 +437,8 @@ def neg {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTens
   pure (build result (requiresGrad := t.requiresGrad))
 
 def trunc {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
-  let result ← UOp.trunc t.uop
-  pure (build result (requiresGrad := t.requiresGrad))
+  let asI32 ← cast t .int32
+  cast asI32 d
 
 def floor {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let truncT ← trunc t
@@ -457,6 +457,104 @@ def ceil {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTen
   let isPosT : StaticTensor s .bool device := StaticTensor.ofUOp isPos
   let truncPlusOneT : StaticTensor s d device := StaticTensor.ofUOp truncPlusOne (requiresGrad := t.requiresGrad)
   whereSame isPosT truncPlusOneT truncT
+
+private def minBinaryUOp (x y : UOp) : TensorM UOp := do
+  let nx ← UOp.neg x
+  let ny ← UOp.neg y
+  let maxNeg ← UOp.maxBinary nx ny
+  UOp.neg maxNeg
+
+private def intToFloat32 (x : Int) : Float32 :=
+  if x >= 0 then
+    (Float64.ofNat x.toNat).toFloat32
+  else
+    (-Float64.ofNat (-x).toNat).toFloat32
+
+/-- Round with ties-to-even behavior, matching tinygrad Tensor.round semantics. -/
+def round {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let zero ← UOp.const d 0.0
+  let half ← UOp.const d 0.5
+  let two ← UOp.const d 2.0
+  let isPos ← UOp.cmplt zero t.uop
+  let truncT ← trunc t
+  let halfTruncU ← UOp.div truncT.uop two
+  let halfTruncT : StaticTensor s d device := StaticTensor.ofUOp halfTruncU (requiresGrad := t.requiresGrad)
+  let halfTruncFloor ← trunc halfTruncT
+  let isEvenHalf ← UOp.cmpeq halfTruncFloor.uop halfTruncU
+  let tieUpU ← UOp.cmpeq isPos isEvenHalf
+  let tieUp : StaticTensor s .bool device := StaticTensor.ofUOp tieUpU
+  let minusHalfU ← UOp.sub t.uop half
+  let plusHalfU ← UOp.add t.uop half
+  let minusHalfT : StaticTensor s d device := StaticTensor.ofUOp minusHalfU (requiresGrad := t.requiresGrad)
+  let plusHalfT : StaticTensor s d device := StaticTensor.ofUOp plusHalfU (requiresGrad := t.requiresGrad)
+  let ceilMinusHalf ← ceil minusHalfT
+  let floorPlusHalf ← floor plusHalfT
+  whereSame tieUp ceilMinusHalf floorPlusHalf
+
+/-- Sign function: -1 for negative, 0 for zero, +1 for positive. -/
+def sign {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let zero ← UOp.const d 0.0
+  let one ← UOp.const d 1.0
+  let negOne ← UOp.const d (-1.0)
+  let isZero ← UOp.cmpeq t.uop zero
+  let isNeg ← UOp.cmplt t.uop zero
+  let negOrPos ← UOp.where_ isNeg negOne one
+  let signBase ← UOp.where_ isZero zero negOrPos
+  let zeroMul ← UOp.mul t.uop zero
+  let out ← UOp.add signBase zeroMul
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Linear interpolation between `start` and `end` with tensor weight. -/
+def lerp {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (start : StaticTensor s d device) (end_ : StaticTensor s d device) (weight : StaticTensor s d device)
+    : TensorM (StaticTensor s d device) := do
+  let delta ← sub end_ start
+  let scaled ← mul delta weight
+  add start scaled
+
+/-- Linear interpolation between `start` and `end` with scalar weight. -/
+def lerpScalar {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (start : StaticTensor s d device) (end_ : StaticTensor s d device) (weight : Float32)
+    : TensorM (StaticTensor s d device) := do
+  let w ← Tensor.full (device := device) s d weight
+  lerp start end_ w
+
+/-- Copy sign from `signSource` onto the magnitude of `mag`. -/
+def copysign {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (mag signSource : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let zero ← UOp.const d 0.0
+  let magNegU ← UOp.neg mag.uop
+  let magIsNegU ← UOp.cmplt mag.uop zero
+  let absMagU ← UOp.where_ magIsNegU magNegU mag.uop
+  let recipSignU ← UOp.recip signSource.uop
+  let isNegU ← UOp.cmplt recipSignU zero
+  let isNeg : StaticTensor s .bool device := StaticTensor.ofUOp isNegU
+  let absMag : StaticTensor s d device := StaticTensor.ofUOp absMagU (requiresGrad := mag.requiresGrad)
+  let negAbs ← neg absMag
+  let signed ← whereSame isNeg negAbs absMag
+  let signedZero ← UOp.mul signSource.uop zero
+  let out ← UOp.add signed.uop signedZero
+  pure (StaticTensor.ofUOp out (requiresGrad := mag.requiresGrad || signSource.requiresGrad))
+
+/-- Numerically stable logaddexp: log(exp(x) + exp(y)). -/
+def logaddexp {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x y : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let ln2Const ← UOp.const d 0.6931471805599453
+  let log2eConst ← UOp.const d 1.4426950408889634
+  let maxXY ← UOp.maxBinary x.uop y.uop
+  let xShift ← UOp.sub x.uop maxXY
+  let yShift ← UOp.sub y.uop maxXY
+  let xShiftLog2 ← UOp.mul xShift log2eConst
+  let yShiftLog2 ← UOp.mul yShift log2eConst
+  let xExp := (← UOp.exp2 xShiftLog2)
+  let yExp := (← UOp.exp2 yShiftLog2)
+  let sumExp ← UOp.add xExp yExp
+  let log2Sum := (← UOp.log2 sumExp)
+  let logSum := (← UOp.mul log2Sum ln2Const)
+  let out ← UOp.add logSum maxXY
+  pure (StaticTensor.ofUOp out (requiresGrad := x.requiresGrad || y.requiresGrad))
 
 def sqrt {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.sqrt t.uop
@@ -489,6 +587,58 @@ def cos {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTens
 def tan {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let result ← UOp.tan t.uop
   pure (build result (requiresGrad := t.requiresGrad))
+
+/-- Polynomial evaluation with Horner's method. -/
+private def polyHorner {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor s d device) (coeffs : List Float32) : TensorM (StaticTensor s d device) := do
+  let mut acc : StaticTensor s d device ← Tensor.zeros (device := device) s d
+  for c in coeffs do
+    let cU ← UOp.const d c
+    let mulU ← UOp.mul acc.uop x.uop
+    let next ← UOp.add mulU cU
+    acc := StaticTensor.ofUOp next (requiresGrad := x.requiresGrad || acc.requiresGrad)
+  pure acc
+
+/-- Inverse sine (arcsine) polynomial approximation used in tinygrad. -/
+def asin {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let one ← UOp.const d 1.0
+  let zero ← UOp.const d 0.0
+  let halfPi ← UOp.const d 1.570796305
+  let negT ← UOp.neg t.uop
+  let isNeg ← UOp.cmplt t.uop zero
+  let absXU ← UOp.where_ isNeg negT t.uop
+  let absX : StaticTensor s d device := StaticTensor.ofUOp absXU (requiresGrad := t.requiresGrad)
+  let oneMinusAbs ← UOp.sub one absX.uop
+  let oneMinusAbsT : StaticTensor s d device := StaticTensor.ofUOp oneMinusAbs (requiresGrad := t.requiresGrad)
+  let sqrtTerm ← sqrt oneMinusAbsT
+  let poly ← polyHorner absX [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810,
+    -0.0501743046, 0.0889789874, -0.2145988016, 1.5707963050]
+  let corr ← UOp.mul sqrtTerm.uop poly.uop
+  let core ← UOp.sub halfPi corr
+  let coreT : StaticTensor s d device := StaticTensor.ofUOp core (requiresGrad := t.requiresGrad)
+  let sgn ← sign t
+  mul sgn coreT
+
+/-- Inverse cosine via acos(x) = pi/2 - asin(x). -/
+def acos {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let halfPi ← UOp.const d 1.570796305
+  let asn ← asin t
+  let out ← UOp.sub halfPi asn.uop
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Inverse tangent via atan(x) = asin(x / sqrt(1 + x^2)). -/
+def atan {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let one ← UOp.const d 1.0
+  let sq ← UOp.mul t.uop t.uop
+  let onePlusSq ← UOp.add one sq
+  let onePlusSqT : StaticTensor s d device := StaticTensor.ofUOp onePlusSq (requiresGrad := t.requiresGrad)
+  let denom ← sqrt onePlusSqT
+  let ratio ← UOp.div t.uop denom.uop
+  let ratioT : StaticTensor s d device := StaticTensor.ofUOp ratio (requiresGrad := t.requiresGrad)
+  asin ratioT
 
 /-- Reciprocal (1/x) -/
 def recip {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
@@ -592,6 +742,28 @@ def tanh {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTen
   let result ← UOp.div num denom
   pure (StaticTensor.ofUOp result (requiresGrad := t.requiresGrad))
 
+/-- Hyperbolic sine. -/
+def sinh {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let negT ← neg t
+  let expPos ← exp t
+  let expNeg ← exp negT
+  let num ← UOp.sub expPos.uop expNeg.uop
+  let two ← UOp.const d 2.0
+  let out ← UOp.div num two
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Hyperbolic cosine. -/
+def cosh {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let negT ← neg t
+  let expPos ← exp t
+  let expNeg ← exp negT
+  let num ← UOp.add expPos.uop expNeg.uop
+  let two ← UOp.const d 2.0
+  let out ← UOp.div num two
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
 /-- Softplus: log(1 + exp(x)) -/
 def softplus {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   let expT ← exp t
@@ -675,6 +847,72 @@ def elu {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTens
   let isNegT : StaticTensor s .bool device := StaticTensor.ofUOp isNeg
   let negOutT : StaticTensor s d device := StaticTensor.ofUOp negOut (requiresGrad := t.requiresGrad)
   whereSame isNegT negOutT t
+
+/-- CELU: max(0, x) + min(alpha * (exp(x/alpha) - 1), 0). -/
+def celu {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (alpha : Float32 := 1.0) : TensorM (StaticTensor s d device) := do
+  let zero ← UOp.const d 0.0
+  let alphaU ← UOp.const d alpha
+  let pos ← UOp.maxBinary t.uop zero
+  let xOverAlpha ← UOp.div t.uop alphaU
+  let xOverAlphaT : StaticTensor s d device := StaticTensor.ofUOp xOverAlpha (requiresGrad := t.requiresGrad)
+  let expTerm ← exp xOverAlphaT
+  let expMinusOne ← UOp.sub expTerm.uop (← UOp.const d 1.0)
+  let scaled ← UOp.mul alphaU expMinusOne
+  let negPart ← minBinaryUOp scaled zero
+  let out ← UOp.add pos negPart
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- SELU activation with tinygrad defaults. -/
+def selu {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (alpha : Float32 := 1.67326) (gamma : Float32 := 1.0507)
+    : TensorM (StaticTensor s d device) := do
+  let zero ← UOp.const d 0.0
+  let alphaU ← UOp.const d alpha
+  let gammaU ← UOp.const d gamma
+  let isNeg ← UOp.cmplt t.uop zero
+  let expT ← exp t
+  let expMinusOne ← UOp.sub expT.uop (← UOp.const d 1.0)
+  let negBranch ← UOp.mul alphaU expMinusOne
+  let branch ← UOp.where_ isNeg negBranch t.uop
+  let out ← UOp.mul gammaU branch
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Softsign: x / (1 + |x|). -/
+def softsign {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let one ← UOp.const d 1.0
+  let absT ← abs t
+  let denom ← UOp.add one absT.uop
+  let out ← UOp.div t.uop denom
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Error function approximation used by tinygrad (A&S 7.1.26). -/
+def erf {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let one ← UOp.const d 1.0
+  let c0 ← UOp.const d 0.3275911
+  let absT ← abs t
+  let denom ← UOp.add one (← UOp.mul c0 absT.uop)
+  let tVarU ← UOp.div one denom
+  let tVar : StaticTensor s d device := StaticTensor.ofUOp tVarU (requiresGrad := t.requiresGrad)
+  let poly ← polyHorner tVar [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]
+  let tPoly ← UOp.mul tVar.uop poly.uop
+  let sq ← square t
+  let negSq ← neg sq
+  let expNegSq ← exp negSq
+  let corr ← UOp.mul tPoly expNegSq.uop
+  let oneMinus ← UOp.sub one corr
+  let oneMinusT : StaticTensor s d device := StaticTensor.ofUOp oneMinus (requiresGrad := t.requiresGrad)
+  let sgn ← sign t
+  mul sgn oneMinusT
+
+/-- Mish: x * tanh(softplus(x)). -/
+def mish {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
+  let sp ← softplus t
+  let tanhSp ← tanh sp
+  mul t tanhSp
 
 /-- Log-sigmoid: log(sigmoid(x)) -/
 def logSigmoid {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
@@ -1073,6 +1311,158 @@ def gatherAxis {s idxShape : Shape} {device : Backend.DeviceType}
     (index : StaticTensor idxShape .int32 device)
     : TensorM (StaticTensor idxShape .float32 device) :=
   gather t dim.1 index
+
+/-- Shape-preserving masked fill with tensor values. -/
+def maskedFill {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (mask : StaticTensor s .bool device) (value : StaticTensor s d device)
+    : TensorM (StaticTensor s d device) :=
+  whereSame mask value t
+
+/-- Shape-preserving masked fill with a scalar value. -/
+def maskedFillScalar {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (mask : StaticTensor s .bool device) (value : Float32)
+    : TensorM (StaticTensor s d device) := do
+  let valueT ← Tensor.full (device := device) s d value
+  maskedFill t mask valueT
+
+/-- Scalar extraction check returning an explicit error message for non-scalar tensors. -/
+def itemChecked {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (Except String (Scalar d device)) := do
+  if t.uop.shape != [] then
+    pure (.error s!"item expects scalar shape [], got {t.uop.shape}")
+  else
+    pure (.ok (StaticTensor.ofUOp t.uop (requiresGrad := t.requiresGrad)))
+
+/-- Scalar extraction API. Panics when tensor is not scalar-shaped. -/
+def item {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) : TensorM (Scalar d device) := do
+  match (← itemChecked t) with
+  | .ok scalar => pure scalar
+  | .error msg => panic! msg
+
+/-- Flattened gather-style take using static index shape. -/
+def take {s idxShape : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (index : StaticTensor idxShape .int32 device)
+    : TensorM (StaticTensor idxShape d device) := do
+  let flat ← flatten t
+  let idxFlat ← flatten index
+  let n := listProd s
+  let m := listProd idxShape
+  if m == 0 then
+    let empty ← Tensor.zeros (device := device) [0] d
+    reshapeUnsafe empty idxShape
+  else
+    let positions ← Tensor.arange (device := device) n .float32
+    let zero ← UOp.const d 0.0
+    let mut gathered : List UOp := []
+    for j in [:m] do
+      let idxJU ← UOp.shrink idxFlat.uop [(j, j + 1)]
+      let idxJ : StaticTensor [1] .int32 device := StaticTensor.ofUOp idxJU
+      let idxJF ← cast idxJ .float32
+      let eq := (← UOp.cmpeq positions.uop idxJF.uop)
+      let masked ← UOp.where_ eq flat.uop zero
+      let picked ← UOp.sum masked [0] false
+      let picked1 ← UOp.reshape picked [1]
+      gathered := gathered ++ [picked1]
+    let outFlatU ← UOp.cat gathered 0
+    let outFlat : StaticTensor [m] d device := StaticTensor.ofUOp outFlatU (requiresGrad := t.requiresGrad)
+    reshapeUnsafe outFlat idxShape
+
+private def triMask2D {rows cols : Nat} {device : Backend.DeviceType}
+    (diagonal : Int) (upper : Bool) : TensorM (StaticTensor [rows, cols] .bool device) := do
+  let rowIdx ← Tensor.arange (device := device) rows .float32
+  let colIdx ← Tensor.arange (device := device) cols .float32
+  let rowM ← reshapeUnsafe rowIdx [rows, 1]
+  let colM ← reshapeUnsafe colIdx [1, cols]
+  let dConst ← UOp.const .float32 (intToFloat32 diagonal)
+  let rowShifted ← UOp.add rowM.uop dConst
+  let lt ←
+    if upper then
+      UOp.cmplt rowShifted colM.uop
+    else
+      UOp.cmplt colM.uop rowShifted
+  let eq ← UOp.cmpeq rowShifted colM.uop
+  let maskU ← UOp.bitor lt eq
+  pure (StaticTensor.ofUOp maskU)
+
+/-- Upper-triangular mask/select on the last two dimensions. -/
+def triu {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (diagonal : Int := 0)
+    : TensorM (StaticTensor s d device) := do
+  if s.length < 2 then
+    panic! s!"triu expects rank >= 2, got shape {s}"
+  let rows := listGetD s (s.length - 2) 0
+  let cols := listGetD s (s.length - 1) 0
+  let mask2D : StaticTensor [rows, cols] .bool device ← triMask2D (rows := rows) (cols := cols) (device := device) diagonal true
+  let maskBaseShape := List.replicate (s.length - 2) 1 ++ [rows, cols]
+  let maskBase : StaticTensor maskBaseShape .bool device ← reshapeUnsafe mask2D maskBaseShape
+  let mask : StaticTensor s .bool device ← expandUnsafe maskBase s
+  let zero ← UOp.const d 0.0
+  let out ← UOp.where_ mask.uop t.uop zero
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Lower-triangular mask/select on the last two dimensions. -/
+def tril {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (diagonal : Int := 0)
+    : TensorM (StaticTensor s d device) := do
+  if s.length < 2 then
+    panic! s!"tril expects rank >= 2, got shape {s}"
+  let rows := listGetD s (s.length - 2) 0
+  let cols := listGetD s (s.length - 1) 0
+  let mask2D : StaticTensor [rows, cols] .bool device ← triMask2D (rows := rows) (cols := cols) (device := device) diagonal false
+  let maskBaseShape := List.replicate (s.length - 2) 1 ++ [rows, cols]
+  let maskBase : StaticTensor maskBaseShape .bool device ← reshapeUnsafe mask2D maskBaseShape
+  let mask : StaticTensor s .bool device ← expandUnsafe maskBase s
+  let zero ← UOp.const d 0.0
+  let out ← UOp.where_ mask.uop t.uop zero
+  pure (StaticTensor.ofUOp out (requiresGrad := t.requiresGrad))
+
+/-- Vector-to-matrix diagonal constructor. -/
+def diag {n : Nat} {d : DType} {device : Backend.DeviceType}
+    (t : Vector n d device) : TensorM (Matrix n n d device) := do
+  let col ← reshapeUnsafe t [n, 1]
+  let padded ← padUnsafe col [(0, 0), (0, n)]
+  let flat ← reshapeUnsafe padded [n * (n + 1)]
+  let shrunk ← shrinkUnsafe flat [(0, n * n)]
+  reshapeUnsafe shrunk [n, n]
+
+/-- Main diagonal view for square matrices. -/
+def diagonal {n : Nat} {d : DType} {device : Backend.DeviceType}
+    (t : Matrix n n d device) : TensorM (Vector n d device) := do
+  let flat ← reshapeUnsafe t [n * n]
+  let padded ← padUnsafe flat [(0, n)]
+  let stepped ← reshapeUnsafe padded [n, n + 1]
+  let firstCol ← shrinkUnsafe stepped [(0, n), (0, 1)]
+  reshapeUnsafe firstCol [n]
+
+/-- Packed masked select bridge: returns front-packed values and valid count.
+    Shape-changing exact masked_select is deferred until dynamic shape support lands. -/
+def maskedSelectPacked {s : Shape} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (mask : StaticTensor s .bool device)
+    : TensorM (StaticTensor [listProd s] d device × Scalar .int32 device) := do
+  let n := listProd s
+  let flatVals ← flatten t
+  let flatMask ← flatten mask
+  let slotIds ← Tensor.arange (device := device) n .float32
+  let mut packed : StaticTensor [n] d device ← Tensor.zeros (device := device) [n] d
+  let mut countF : Scalar .float32 device ← Tensor.full (device := device) [] .float32 0.0
+  for i in [:n] do
+    let viU ← UOp.shrink flatVals.uop [(i, i + 1)]
+    let vi : StaticTensor [1] d device := StaticTensor.ofUOp viU (requiresGrad := t.requiresGrad)
+    let viB ← expandUnsafe vi [n]
+    let miU ← UOp.shrink flatMask.uop [(i, i + 1)]
+    let mi : StaticTensor [1] .bool device := StaticTensor.ofUOp miU
+    let miB ← expandUnsafe mi [n]
+    let countF1 ← reshapeUnsafe countF [1]
+    let eqSlotU ← UOp.cmpeq slotIds.uop countF1.uop
+    let eqSlot : StaticTensor [n] .bool device := StaticTensor.ofUOp eqSlotU
+    let writeMask ← bitand eqSlot miB
+    packed ← whereSame writeMask viB packed
+    let miF ← cast mi .float32
+    let miScalar ← reshapeUnsafe miF []
+    countF ← add countF miScalar
+  let countI ← cast countF .int32
+  pure (packed, countI)
 
 /-- Gather along the last axis using class indices (float32). -/
 private def gatherLastF32 {batch numClasses : Nat} {device : Backend.DeviceType}
@@ -1505,7 +1895,7 @@ def crossEntropyOneHot {batch numClasses : Nat} {d : DType} {device : Backend.De
 /-- Negative log likelihood loss (assumes log_softmax input)
     log_probs: [batch, numClasses], already log-softmax'd
     target_indices: [batch] containing class indices
-    For MVP: averages all log probs (placeholder until gather/index support) -/
+    Returns mean negative picked log-probabilities. -/
 def nllLoss {batch numClasses : Nat} {device : Backend.DeviceType}
     (logProbs : StaticTensor [batch, numClasses] .float32 device)
     (targets : StaticTensor [batch] .int32 device)
@@ -1650,43 +2040,6 @@ def uniformInit (device : Backend.DeviceType := .CPU) (shape : Shape) (dt : DTyp
 -- ============================================================================
 -- Convolution Operations (pool/im2col + matmul)
 -- ============================================================================
-
-/-- Placeholder conv2d - returns correctly shaped output tensor.
-    Full implementation requires UOp-level pool operation. -/
-def conv2dPlaceholder {batch cin cout h w kH kW hOut wOut : Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor [batch, cin, h, w] d device)
-    (weight : StaticTensor [cout, cin, kH, kW] d device)
-    (bias : Option (StaticTensor [cout] d device) := none)
-    (_padding : Nat := 0)
-    (_stride : Nat := 1)
-    (_dilation : Nat := 1)
-    : TensorM (StaticTensor [batch, cout, hOut, wOut] d device) := do
-  -- Create output buffer with correct shape
-  let outShape := [batch, cout, hOut, wOut]
-  let out ← UOp.buffer d outShape
-  let biasGrad := match bias with | none => false | some b => b.requiresGrad
-  let reqGrad := x.requiresGrad || weight.requiresGrad || biasGrad
-  pure (StaticTensor.ofUOp out (requiresGrad := reqGrad))
-
-/-- Placeholder maxPool2d - returns correctly shaped output tensor. -/
-def maxPool2dPlaceholder {batch cin h w hOut wOut : Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor [batch, cin, h, w] d device)
-    (_kernelSize : Nat)
-    (_stride : Nat := 0)
-    : TensorM (StaticTensor [batch, cin, hOut, wOut] d device) := do
-  let outShape := [batch, cin, hOut, wOut]
-  let out ← UOp.buffer d outShape
-  pure (StaticTensor.ofUOp out (requiresGrad := x.requiresGrad))
-
-/-- Placeholder avgPool2d - returns correctly shaped output tensor. -/
-def avgPool2dPlaceholder {batch cin h w hOut wOut : Nat} {d : DType} {device : Backend.DeviceType}
-    (x : StaticTensor [batch, cin, h, w] d device)
-    (_kernelSize : Nat)
-    (_stride : Nat := 0)
-    : TensorM (StaticTensor [batch, cin, hOut, wOut] d device) := do
-  let outShape := [batch, cin, hOut, wOut]
-  let out ← UOp.buffer d outShape
-  pure (StaticTensor.ofUOp out (requiresGrad := x.requiresGrad))
 
 /-- Pad 1D tensor with symmetric padding on W dimension.
     Input:  [batch, channels, width]

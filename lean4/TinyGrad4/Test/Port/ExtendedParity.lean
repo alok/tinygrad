@@ -258,6 +258,234 @@ def testNNConvPoolSmoke : IO Unit := do
   assertRawAllClose (evalTensor maxOut) #[1.0, 1.0, 1.0, 1.0] 0.001 "maxPool2d output values"
   assertRawAllClose (evalTensor avgOut) #[1.0, 1.0, 1.0, 1.0] 0.001 "avgPool2d output values"
 
+def testRoundSignLerpParity : IO Unit := do
+  let (rounded, signed, lerpS, lerpT) := runTensorM do
+    let base ← Tensor.arange 6 .float32
+    let shifted ← addScalar base (-2.5)
+    let rounded ← StaticTensor.round shifted
+    let signed ← StaticTensor.sign shifted
+    let start ← Tensor.linspace 1.0 3.0 3 .float32
+    let end_ ← Tensor.linspace 4.0 6.0 3 .float32
+    let lerpS ← StaticTensor.lerpScalar start end_ 0.5
+    let w ← Tensor.linspace 0.0 1.0 3 .float32
+    let lerpT ← StaticTensor.lerp start end_ w
+    pure (rounded, signed, lerpS, lerpT)
+  assertRawAllClose (evalTensor rounded) #[-2.0, -2.0, 0.0, 0.0, 2.0, 2.0] 0.001 "round ties-to-even parity"
+  assertRawAllClose (evalTensor signed) #[-1.0, -1.0, -1.0, 1.0, 1.0, 1.0] 0.001 "sign parity"
+  assertRawAllClose (evalTensor lerpS) #[2.5, 3.5, 4.5] 0.001 "lerp scalar parity"
+  assertRawAllClose (evalTensor lerpT) #[1.0, 3.5, 6.0] 0.001 "lerp tensor parity"
+
+def testArcTrigParity : IO Unit := do
+  let (asinOut, acosOut, atanOut) := runTensorM do
+    let base ← Tensor.arange 7 .float32
+    let scaled ← scale base 0.3
+    let x ← addScalar scaled (-0.9)
+    let asinOut ← StaticTensor.asin x
+    let acosOut ← StaticTensor.acos x
+    let base6 ← Tensor.arange 6 .float32
+    let shifted6 ← addScalar base6 (-2.5)
+    let atanOut ← StaticTensor.atan shifted6
+    pure (asinOut, acosOut, atanOut)
+  assertRawAllClose (evalTensor asinOut)
+    #[-1.1197694, -0.6435010, -0.3046926, 0.0, 0.3046927, 0.6435011, 1.1197694] 0.01 "asin parity"
+  assertRawAllClose (evalTensor acosOut)
+    #[2.6905658, 2.2142973, 1.8754889, 1.5707964, 1.2661036, 0.9272952, 0.4510269] 0.01 "acos parity"
+  assertRawAllClose (evalTensor atanOut)
+    #[-1.1902900, -0.9827937, -0.4636477, 0.4636477, 0.9827937, 1.1902900] 0.01 "atan parity"
+
+def testHyperbolicErfParity : IO Unit := do
+  let (sinhOut, coshOut, erfOut) := runTensorM do
+    let base ← Tensor.arange 7 .float32
+    let scaled ← scale base 0.5
+    let x ← addScalar scaled (-1.5)
+    let sinhOut ← StaticTensor.sinh x
+    let coshOut ← StaticTensor.cosh x
+    let erfOut ← StaticTensor.erf x
+    pure (sinhOut, coshOut, erfOut)
+  assertRawAllClose (evalTensor sinhOut)
+    #[-2.1292794, -1.1752013, -0.5210953, 0.0, 0.5210953, 1.1752013, 2.1292794] 0.01 "sinh parity"
+  assertRawAllClose (evalTensor coshOut)
+    #[2.3524096, 1.5430807, 1.1276259, 1.0, 1.1276259, 1.5430807, 2.3524096] 0.01 "cosh parity"
+  assertRawAllClose (evalTensor erfOut)
+    #[-0.9661053, -0.8427007, -0.5205001, 0.0, 0.5205001, 0.8427007, 0.9661053] 0.01 "erf parity"
+
+def testActivationExtensionsParity : IO Unit := do
+  let (softsignOut, mishOut, celuOut, seluOut) := runTensorM do
+    let base ← Tensor.arange 6 .float32
+    let x ← addScalar base (-2.5)
+    let softsignOut ← StaticTensor.softsign x
+    let mishOut ← StaticTensor.mish x
+    let celuOut ← StaticTensor.celu x
+    let seluOut ← StaticTensor.selu x
+    pure (softsignOut, mishOut, celuOut, seluOut)
+  assertRawAllClose (evalTensor softsignOut)
+    #[-0.7142857, -0.6000000, -0.3333333, 0.3333333, 0.6000000, 0.7142857] 0.01 "softsign parity"
+  assertRawAllClose (evalTensor mishOut)
+    #[-0.1968163, -0.2980998, -0.2207437, 0.3752452, 1.4033782, 2.4713922] 0.01 "mish parity"
+  assertRawAllClose (evalTensor celuOut)
+    #[-0.9179150, -0.7768698, -0.3934693, 0.5, 1.5, 2.5] 0.01 "celu parity"
+  assertRawAllClose (evalTensor seluOut)
+    #[-1.6137811, -1.3658104, -0.6917562, 0.5253500, 1.5760500, 2.6267500] 0.01 "selu parity"
+
+def testCopysignLogaddexpParity : IO Unit := do
+  let (copysignOut, recipSignMaskF, logaddexpOut) := runTensorM do
+    let m0 ← Tensor.full [1] .float32 1.0
+    let m1 ← Tensor.full [1] .float32 (-2.0)
+    let mz ← Tensor.zeros [1] .float32
+    let m01 ← StaticTensor.cat m0 m1 0 (by native_decide)
+    let m23 ← StaticTensor.cat mz mz 0 (by native_decide)
+    let mag ← StaticTensor.cat m01 m23 0 (by native_decide)
+
+    let s0 ← Tensor.full [1] .float32 (-1.0)
+    let s1 ← Tensor.full [1] .float32 1.0
+    let sz := mz
+    let sNegZero ← Tensor.full [1] .float32 (-0.0)
+    let s01 ← StaticTensor.cat s0 s1 0 (by native_decide)
+    let s23 ← StaticTensor.cat sNegZero sz 0 (by native_decide)
+    let signSrc ← StaticTensor.cat s01 s23 0 (by native_decide)
+
+    let copysignOut ← StaticTensor.copysign mag signSrc
+    let recipOut ← StaticTensor.recip copysignOut
+    let zero4 ← Tensor.zeros [4] .float32
+    let recipSignMask ← StaticTensor.cmplt recipOut zero4
+    let recipSignMaskF ← StaticTensor.cast recipSignMask .float32
+
+    let la0 ← Tensor.full [1] .float32 100.0
+    let la1 ← Tensor.full [1] .float32 (-100.0)
+    let la2 ← Tensor.full [1] .float32 1.0
+    let la01 ← StaticTensor.cat la0 la1 0 (by native_decide)
+    let la ← StaticTensor.cat la01 la2 0 (by native_decide)
+    let lb0 ← Tensor.full [1] .float32 99.0
+    let lb1 ← Tensor.full [1] .float32 100.0
+    let lb2 ← Tensor.full [1] .float32 (-2.0)
+    let lb01 ← StaticTensor.cat lb0 lb1 0 (by native_decide)
+    let lb ← StaticTensor.cat lb01 lb2 0 (by native_decide)
+    let logaddexpOut ← StaticTensor.logaddexp la lb
+    pure (copysignOut, recipSignMaskF, logaddexpOut)
+  assertRawAllClose (evalTensor copysignOut) #[-1.0, 2.0, 0.0, 0.0] 0.001 "copysign magnitude parity"
+  assertRawAllClose (evalTensor recipSignMaskF) #[1.0, 0.0, 0.0, 0.0] 0.001 "copysign signed-zero parity"
+  assertRawAllClose (evalTensor logaddexpOut) #[100.31326, 100.0, 1.0485873] 0.01 "logaddexp parity"
+
+def testDiagDiagonalParity : IO Unit := do
+  let (diagOut, diagonalOut) := runTensorM do
+    let v ← Tensor.linspace 1.0 3.0 3 .float32
+    let diagOut ← StaticTensor.diag v
+    let mBase ← Tensor.arange 9 .float32
+    let m ← reshapeUnsafe mBase [3, 3]
+    let diagonalOut ← StaticTensor.diagonal m
+    pure (diagOut, diagonalOut)
+  assertShape diagOut.uop.shape [3, 3] "diag shape"
+  assertShape diagonalOut.uop.shape [3] "diagonal shape"
+  assertRawAllClose (evalTensor diagOut) #[1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0] 0.001 "diag values"
+  assertRawAllClose (evalTensor diagonalOut) #[0.0, 4.0, 8.0] 0.001 "diagonal values"
+
+def testMaskedFillParity : IO Unit := do
+  let (filledScalar, filledTensor) := runTensorM do
+    let base0 ← Tensor.arange 6 .float32
+    let base ← addScalar base0 1.0
+    let one ← Tensor.full [6] .float32 1.0
+    let three ← Tensor.full [6] .float32 3.0
+    let six ← Tensor.full [6] .float32 6.0
+    let m1 ← StaticTensor.cmpeq base one
+    let m3 ← StaticTensor.cmpeq base three
+    let m6 ← StaticTensor.cmpeq base six
+    let m13 ← StaticTensor.bitor m1 m3
+    let mask ← StaticTensor.bitor m13 m6
+    let filledScalar ← StaticTensor.maskedFillScalar base mask (-12.0)
+    let negBase ← StaticTensor.neg base
+    let filledTensor ← StaticTensor.maskedFill base mask negBase
+    pure (filledScalar, filledTensor)
+  assertRawAllClose (evalTensor filledScalar) #[-12.0, 2.0, -12.0, 4.0, 5.0, -12.0] 0.001 "maskedFill scalar parity"
+  assertRawAllClose (evalTensor filledTensor) #[-1.0, 2.0, -3.0, 4.0, 5.0, -6.0] 0.001 "maskedFill tensor parity"
+
+def testItemParity : IO Unit := do
+  let scalarOut := runTensorM do
+    let x ← Tensor.full [] .float32 42.0
+    StaticTensor.item x
+  assertRawAllClose (evalTensor scalarOut) #[42.0] 0.001 "item scalar value"
+
+  let nonScalarStatus := runTensorM do
+    let x ← Tensor.arange 3 .float32
+    StaticTensor.itemChecked x
+  match nonScalarStatus with
+  | .ok _ => throw <| IO.userError "itemChecked should report an error on non-scalar input"
+  | .error _ => pure ()
+
+def testTakeUnfoldParity : IO Unit := do
+  let (taken, unfold2, unfold3) := runTensorM do
+    let base0 ← Tensor.arange 6 .float32
+    let base ← reshapeUnsafe base0 [2, 3]
+    let idxA ← Tensor.arange 3 .int32
+    let idxB ← Tensor.arange 2 .int32
+    let idx ← StaticTensor.cat idxA idxB 0 (by native_decide)
+    let taken ← StaticTensor.take base idx
+    let v8 ← Tensor.arange 8 .float32
+    let unfold2 ← StaticTensor.unfold v8 0 2 2
+    let unfold3 ← StaticTensor.unfold v8 0 3 2
+    pure (taken, unfold2, unfold3)
+  assertShape taken.uop.shape [5] "take output shape"
+  assertRawAllClose (evalTensor taken) #[0.0, 1.0, 2.0, 0.0, 1.0] 0.001 "take flattened gather parity"
+  assertShape unfold2.uop.shape [4, 2] "unfold size=2 step=2 shape"
+  assertRawAllClose (evalTensor unfold2) #[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0] 0.001 "unfold size=2 step=2 values"
+  assertShape unfold3.uop.shape [3, 3] "unfold size=3 step=2 shape"
+  assertRawAllClose (evalTensor unfold3) #[0.0, 1.0, 2.0, 2.0, 3.0, 4.0, 4.0, 5.0, 6.0] 0.001 "unfold size=3 step=2 values"
+
+def testTriangularParity : IO Unit := do
+  let (triu1, triuNeg1, tril1, trilNeg1) := runTensorM do
+    let base0 ← Tensor.arange 12 .float32
+    let base1 ← addScalar base0 1.0
+    let mat ← reshapeUnsafe base1 [3, 4]
+    let triu1 ← StaticTensor.triu mat 1
+    let triuNeg1 ← StaticTensor.triu mat (-1)
+    let tril1 ← StaticTensor.tril mat 1
+    let trilNeg1 ← StaticTensor.tril mat (-1)
+    pure (triu1, triuNeg1, tril1, trilNeg1)
+  assertRawAllClose (evalTensor triu1)
+    #[0.0, 2.0, 3.0, 4.0, 0.0, 0.0, 7.0, 8.0, 0.0, 0.0, 0.0, 12.0] 0.001 "triu diagonal=1 values"
+  assertRawAllClose (evalTensor triuNeg1)
+    #[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 0.0, 10.0, 11.0, 12.0] 0.001 "triu diagonal=-1 values"
+  assertRawAllClose (evalTensor tril1)
+    #[1.0, 2.0, 0.0, 0.0, 5.0, 6.0, 7.0, 0.0, 9.0, 10.0, 11.0, 12.0] 0.001 "tril diagonal=1 values"
+  assertRawAllClose (evalTensor trilNeg1)
+    #[0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 9.0, 10.0, 0.0, 0.0] 0.001 "tril diagonal=-1 values"
+
+def testMaskedSelectPackedBoundary : IO Unit := do
+  let (packed0, count0F, packed1, count1F) := runTensorM do
+    let x0 ← Tensor.arange 9 .float32
+    let x ← reshapeUnsafe x0 [3, 3]
+    let mask0 ← Tensor.fullBool [3, 3] false
+    let mask1 ← Tensor.fullBool [3, 3] true
+    let (packed0, count0) ← StaticTensor.maskedSelectPacked x mask0
+    let (packed1, count1) ← StaticTensor.maskedSelectPacked x mask1
+    let count0F ← StaticTensor.cast count0 .float32
+    let count1F ← StaticTensor.cast count1 .float32
+    pure (packed0, count0F, packed1, count1F)
+  assertRawAllClose (evalTensor packed0) #[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001 "maskedSelectPacked all-false payload"
+  assertRawAllClose (evalTensor count0F) #[0.0] 0.001 "maskedSelectPacked all-false count"
+  assertRawAllClose (evalTensor packed1) #[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0] 0.001 "maskedSelectPacked all-true payload"
+  assertRawAllClose (evalTensor count1F) #[9.0] 0.001 "maskedSelectPacked all-true count"
+
+def testMaskedSelectPackedPrefix : IO Unit := do
+  let (packed, countF) := runTensorM do
+    let x0 ← Tensor.arange 9 .float32
+    let x ← reshapeUnsafe x0 [3, 3]
+    let z0 ← Tensor.full [3, 3] .float32 0.0
+    let z2 ← Tensor.full [3, 3] .float32 2.0
+    let z4 ← Tensor.full [3, 3] .float32 4.0
+    let z8 ← Tensor.full [3, 3] .float32 8.0
+    let m0 ← StaticTensor.cmpeq x z0
+    let m2 ← StaticTensor.cmpeq x z2
+    let m4 ← StaticTensor.cmpeq x z4
+    let m8 ← StaticTensor.cmpeq x z8
+    let m02 ← StaticTensor.bitor m0 m2
+    let m48 ← StaticTensor.bitor m4 m8
+    let mask ← StaticTensor.bitor m02 m48
+    let (packed, count) ← StaticTensor.maskedSelectPacked x mask
+    let countF ← StaticTensor.cast count .float32
+    pure (packed, countF)
+  assertRawAllClose (evalTensor countF) #[4.0] 0.001 "maskedSelectPacked mixed count"
+  assertRawAllClose (evalTensor packed) #[0.0, 2.0, 4.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001 "maskedSelectPacked mixed prefix"
+
 def cases : List TestCase :=
   [
     {
@@ -354,6 +582,90 @@ def cases : List TestCase :=
         "test/test_ops.py::test_gelu"
       ]
       suite := fun _ => ioTest "relu/tanh/silu/gelu parity" testActivationParity
+    },
+    {
+      name := "ops.elemwise.round_sign_lerp"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_round", "test/test_ops.py::test_sign", "test/test_ops.py::test_lerp"]
+      suite := fun _ => ioTest "round/sign/lerp parity" testRoundSignLerpParity
+    },
+    {
+      name := "ops.elemwise.arc_trig"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_asin", "test/test_ops.py::test_acos", "test/test_ops.py::test_atan"]
+      suite := fun _ => ioTest "asin/acos/atan parity" testArcTrigParity
+    },
+    {
+      name := "ops.elemwise.hyperbolic_erf"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_sinh", "test/test_ops.py::test_cosh", "test/test_ops.py::test_erf"]
+      suite := fun _ => ioTest "sinh/cosh/erf parity" testHyperbolicErfParity
+    },
+    {
+      name := "ops.elemwise.activation_extensions"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_softsign", "test/test_ops.py::test_mish", "test/test_ops.py::test_celu", "test/test_ops.py::test_selu"]
+      suite := fun _ => ioTest "softsign/mish/celu/selu parity" testActivationExtensionsParity
+    },
+    {
+      name := "ops.elemwise.copysign_logaddexp"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_copysign", "test/test_ops.py::test_logaddexp"]
+      suite := fun _ => ioTest "copysign/logaddexp parity" testCopysignLogaddexpParity
+    },
+    {
+      name := "ops.indexing.diag_diagonal"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_diag", "test/test_ops.py::test_diagonal"]
+      suite := fun _ => ioTest "diag/diagonal parity" testDiagDiagonalParity
+    },
+    {
+      name := "ops.indexing.masked_fill"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_ops.py::test_masked_fill"]
+      suite := fun _ => ioTest "masked_fill parity" testMaskedFillParity
+    },
+    {
+      name := "ops.indexing.item"
+      group := "ops"
+      minProfile := .fast
+      pythonRefs := ["test/test_tensor.py::test_item"]
+      suite := fun _ => ioTest "item scalar/failure parity" testItemParity
+    },
+    {
+      name := "ops.indexing.take_unfold"
+      group := "ops"
+      minProfile := .medium
+      pythonRefs := ["test/test_ops.py::test_take", "test/test_ops.py::test_unfold"]
+      suite := fun _ => ioTest "take/unfold parity" testTakeUnfoldParity
+    },
+    {
+      name := "ops.indexing.triangular"
+      group := "ops"
+      minProfile := .medium
+      pythonRefs := ["test/test_ops.py::test_triu", "test/test_ops.py::test_tril"]
+      suite := fun _ => ioTest "triu/tril parity with offsets" testTriangularParity
+    },
+    {
+      name := "ops.indexing.masked_select_packed_boundaries"
+      group := "ops"
+      minProfile := .slow
+      pythonRefs := ["test/test_ops.py::test_masked_select"]
+      suite := fun _ => ioTest "maskedSelectPacked all-false/all-true boundaries" testMaskedSelectPackedBoundary
+    },
+    {
+      name := "ops.indexing.masked_select_packed_prefix"
+      group := "ops"
+      minProfile := .slow
+      pythonRefs := ["test/test_ops.py::test_masked_select"]
+      suite := fun _ => ioTest "maskedSelectPacked prefix-order parity" testMaskedSelectPackedPrefix
     },
     {
       name := "curated.nn.conv_pool_smoke"

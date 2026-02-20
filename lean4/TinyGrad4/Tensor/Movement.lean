@@ -381,6 +381,23 @@ def pool {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTen
   let result ← permuteUnsafe x perm
   pure (StaticTensor.ofUOp result.uop (requiresGrad := t.requiresGrad))
 
+/-- Unfold along one dimension using pool/im2col primitives.
+    Static lane currently supports unfolding the last axis. -/
+def unfold {s : List Nat} {d : DType} {device : Backend.DeviceType}
+    (t : StaticTensor s d device) (dim : Nat) (size : Nat) (step : Nat)
+    : TensorM (StaticTensor (Shape.poolOut s [size] [step] [1]) d device) := do
+  if size == 0 then
+    panic! "unfold: size must be > 0"
+  if step == 0 then
+    panic! "unfold: step must be > 0"
+  let dim' := resolveAxis s.length dim
+  if dim' != s.length - 1 then
+    panic! s!"unfold: static lane supports only last-axis unfolding (got dim={dim'})"
+  let dimSize := listGetD s dim' 0
+  if size > dimSize then
+    panic! s!"unfold: size {size} exceeds axis dim {dimSize}"
+  pool t [size] [step] [1]
+
 end StaticTensor
 
 end TinyGrad4

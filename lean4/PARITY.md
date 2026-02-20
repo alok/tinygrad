@@ -1,11 +1,11 @@
 # Lean ↔ Python Tensor Parity Checklist (Core)
 
-Updated: 2026-02-17
+Updated: 2026-02-20
 
 Scope: user-facing tensor math/shape ops in `tinygrad/tensor.py` vs `lean4/TinyGrad4/Tensor/*`.
 Not in scope: device/runtime backends, scheduling, JIT, IO helpers, visualization, web, or model code.
 
-Legend: [x] implemented, [~] partial/placeholder, [ ] missing
+Legend: [x] implemented, [~] partial/bridge, [ ] missing
 
 ## Core creation & dtype
 - [x] arange
@@ -26,9 +26,9 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 - [x] where (elementwise select)
 - [x] gather (general axis + typed-axis helpers)
 - [x] scatter / scatter_reduce (general axis + typed-axis helpers)
-- [ ] masked_fill / masked_select
-- [ ] take / item
-- [ ] diag / diagonal / tril / triu
+- [~] masked_fill / masked_select (`maskedFill` exact shape-preserving, `maskedSelectPacked` front-packed bridge + count)
+- [x] take / item (`take` static index-shape lane, `item` scalar-only with runtime error for non-scalar)
+- [~] diag / diagonal / tril / triu (`tril`/`triu` include diagonal offsets; `diag`/`diagonal` core vector<->matrix forms without offset)
 
 ## Reductions
 - [~] max / min (full tensor only)
@@ -46,18 +46,18 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 - [x] stack / split / chunk
 - [x] pad_to
 - [x] roll
-- [ ] unfold
+- [~] unfold (static last-axis lane backed by existing `pool` path)
 
 ## Elementwise math
 - [x] sin / cos / tan
-- [ ] asin / acos / atan
-- [ ] sinh / cosh / tanh (tanh exists, others missing)
-- [ ] erf
-- [ ] round / sign
+- [x] asin / acos / atan
+- [x] sinh / cosh / tanh
+- [x] erf
+- [x] round / sign
 - [x] reciprocal (recip)
-- [ ] logaddexp
-- [ ] copysign / lerp / softsign
-- [ ] mish / celu / selu
+- [x] logaddexp
+- [x] copysign / lerp / softsign
+- [x] mish / celu / selu
 - [x] relu / gelu / silu / softplus / hardtanh / hardsigmoid / hardswish
 
 ## NN ops (core)
@@ -73,13 +73,15 @@ Legend: [x] implemented, [~] partial/placeholder, [ ] missing
 - [~] detach / requires_grad_ (DETACH op exists, tracking TBD)
 - [x] contiguous / contiguous_backward (ops implemented in Rules.lean)
 
-## Known placeholders (Lean)
-- Advanced indexing helpers (`masked_select`, generalized `take/item`, diag family) are still missing.
+## Known bridges/deferred items (Lean)
+- `masked_select` exact dynamic-length output is intentionally deferred while `UOp` tensor shapes stay static (`List Nat`); use `maskedSelectPacked` bridge.
+- `diag`/`diagonal` currently ship core vector<->matrix forms (offset variants deferred in this cycle).
+- `unfold` currently targets static last-axis lane.
 - `randperm` exact-sequence parity with Python RNG internals is not guaranteed yet (property parity is covered).
 
 ## Suggested order (high impact → low)
-1) Indexing tranche: `masked_fill`, `masked_select`, generalized `take`/`item`, and triangular/diagonal helpers.
-2) RNG parity tranche: align Lean RNG with Python for exact `randperm` sequence parity (not just permutation invariants).
-3) Cross-language fixtures: broaden deterministic oracle corpus for indexing + error-path behavior.
-4) Expand NN parity smokes: batchnorm/dropout surface semantics under deterministic conditions.
-5) Keep proof debt non-increasing in touched modules (`sorry` count should not go up).
+1) Dynamic-shape tranche: graduate `maskedSelectPacked` to exact `masked_select` when symbolic/runtime shape cardinality lands.
+2) Offset tranche: extend `diag`/`diagonal` with offsets if shape proof burden remains tractable.
+3) RNG parity tranche: align Lean RNG with Python for exact `randperm` sequence parity (not just permutation invariants).
+4) Cross-language fixtures: keep deterministic oracle corpus in lockstep with new parity APIs.
+5) Expand NN parity smokes: batchnorm/dropout surface semantics under deterministic conditions.

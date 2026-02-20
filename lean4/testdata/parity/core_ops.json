@@ -303,6 +303,384 @@
         2,
         3
       ]
+    },
+    {
+      "expected": [
+        -2.0,
+        -2.0,
+        0.0,
+        0.0,
+        2.0,
+        2.0
+      ],
+      "id": "round_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_round",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -1.0,
+        -1.0,
+        -1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "id": "sign_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_sign",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        2.5,
+        3.5,
+        4.5
+      ],
+      "id": "lerp_scalar_1d_3",
+      "python_ref": "test/test_ops.py::test_lerp",
+      "shape": [
+        3
+      ]
+    },
+    {
+      "expected": [
+        -1.1197694540023804,
+        -0.6435010433197021,
+        -0.3046925961971283,
+        -7.549790126404332e-08,
+        0.30469271540641785,
+        0.6435011029243469,
+        1.1197694540023804
+      ],
+      "id": "asin_vals7",
+      "python_ref": "test/test_ops.py::test_asin",
+      "shape": [
+        7
+      ]
+    },
+    {
+      "expected": [
+        2.690565824508667,
+        2.214297294616699,
+        1.8754888772964478,
+        1.5707963705062866,
+        1.2661036252975464,
+        0.9272952079772949,
+        0.45102688670158386
+      ],
+      "id": "acos_vals7",
+      "python_ref": "test/test_ops.py::test_acos",
+      "shape": [
+        7
+      ]
+    },
+    {
+      "expected": [
+        -1.1902899742126465,
+        -0.9827937483787537,
+        -0.4636476933956146,
+        0.4636476933956146,
+        0.9827937483787537,
+        1.1902899742126465
+      ],
+      "id": "atan_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_atan",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -2.129279375076294,
+        -1.1752012968063354,
+        -0.5210952758789062,
+        0.0,
+        0.5210952758789062,
+        1.1752012968063354,
+        2.129279375076294
+      ],
+      "id": "sinh_vals7",
+      "python_ref": "test/test_ops.py::test_sinh",
+      "shape": [
+        7
+      ]
+    },
+    {
+      "expected": [
+        2.352409601211548,
+        1.5430806875228882,
+        1.1276259422302246,
+        1.0,
+        1.1276259422302246,
+        1.5430806875228882,
+        2.352409601211548
+      ],
+      "id": "cosh_vals7",
+      "python_ref": "test/test_ops.py::test_cosh",
+      "shape": [
+        7
+      ]
+    },
+    {
+      "expected": [
+        -0.9661052823066711,
+        -0.8427006602287292,
+        -0.5205000638961792,
+        0.0,
+        0.5205000638961792,
+        0.8427006602287292,
+        0.9661052823066711
+      ],
+      "id": "erf_vals7",
+      "python_ref": "test/test_ops.py::test_erf",
+      "shape": [
+        7
+      ]
+    },
+    {
+      "expected": [
+        -0.7142857313156128,
+        -0.6000000238418579,
+        -0.3333333432674408,
+        0.3333333432674408,
+        0.6000000238418579,
+        0.7142857313156128
+      ],
+      "id": "softsign_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_softsign",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -0.1968163251876831,
+        -0.2980998158454895,
+        -0.22074371576309204,
+        0.3752451539039612,
+        1.4033782482147217,
+        2.4713921546936035
+      ],
+      "id": "mish_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_mish",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -0.9179149866104126,
+        -0.7768698334693909,
+        -0.39346933364868164,
+        0.5,
+        1.5,
+        2.5
+      ],
+      "id": "celu_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_celu",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -1.6137810945510864,
+        -1.3658103942871094,
+        -0.6917561888694763,
+        0.5253499746322632,
+        1.576050043106079,
+        2.6267499923706055
+      ],
+      "id": "selu_1d_6_shift25",
+      "python_ref": "test/test_ops.py::test_selu",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        -1.0,
+        2.0,
+        0.0,
+        -0.0
+      ],
+      "id": "copysign_1d_4",
+      "python_ref": "test/test_ops.py::test_copysign",
+      "shape": [
+        4
+      ]
+    },
+    {
+      "expected": [
+        100.31326293945312,
+        100.0,
+        1.0485873222351074
+      ],
+      "id": "logaddexp_1d_3",
+      "python_ref": "test/test_ops.py::test_logaddexp",
+      "shape": [
+        3
+      ]
+    },
+    {
+      "expected": [
+        -12.0,
+        2.0,
+        -12.0,
+        4.0,
+        5.0,
+        -12.0
+      ],
+      "id": "masked_fill_scalar_1d_6",
+      "python_ref": "test/test_ops.py::test_masked_fill",
+      "shape": [
+        6
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        1.0,
+        2.0,
+        0.0,
+        1.0
+      ],
+      "id": "take_flat_2x3_idx5",
+      "python_ref": "test/test_ops.py::test_take",
+      "shape": [
+        5
+      ]
+    },
+    {
+      "expected": [
+        42.0
+      ],
+      "id": "item_scalar_42",
+      "python_ref": "test/test_tensor.py::test_item",
+      "shape": []
+    },
+    {
+      "expected": [
+        0.0,
+        2.0,
+        3.0,
+        4.0,
+        0.0,
+        0.0,
+        7.0,
+        8.0,
+        0.0,
+        0.0,
+        0.0,
+        12.0
+      ],
+      "id": "triu_diag1_3x4",
+      "python_ref": "test/test_ops.py::test_triu",
+      "shape": [
+        3,
+        4
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        5.0,
+        0.0,
+        0.0,
+        0.0,
+        9.0,
+        10.0,
+        0.0,
+        0.0
+      ],
+      "id": "tril_diag_neg1_3x4",
+      "python_ref": "test/test_ops.py::test_tril",
+      "shape": [
+        3,
+        4
+      ]
+    },
+    {
+      "expected": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        2.0,
+        0.0,
+        0.0,
+        0.0,
+        3.0
+      ],
+      "id": "diag_vec3",
+      "python_ref": "test/test_ops.py::test_diag",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        4.0,
+        8.0
+      ],
+      "id": "diagonal_mat3",
+      "python_ref": "test/test_ops.py::test_diagonal",
+      "shape": [
+        3
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+        6.0,
+        7.0
+      ],
+      "id": "unfold_8_2_2",
+      "python_ref": "test/test_ops.py::test_unfold",
+      "shape": [
+        4,
+        2
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        2.0,
+        4.0,
+        8.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "id": "masked_select_packed_payload_3x3",
+      "python_ref": "test/test_ops.py::test_masked_select",
+      "shape": [
+        9
+      ]
+    },
+    {
+      "expected": [
+        4.0
+      ],
+      "id": "masked_select_packed_count_3x3",
+      "python_ref": "test/test_ops.py::test_masked_select",
+      "shape": []
     }
   ],
   "generator": "lean4/scripts/generate_parity_fixtures.py",

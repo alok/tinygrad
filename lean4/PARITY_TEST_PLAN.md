@@ -47,6 +47,18 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | reduction extensions (`prod/std/var/cum*`) | `ops.reduce.extended` | ported | Core extension coverage (`prod/std/var/cum*/log-sum-exp`). |
 | softmax/log-softmax semantics | `ops.softmax.logsoftmax` | ported | Last-axis parity plus explicit axis-0 softmax check. |
 | activation family semantics (`relu/tanh/silu/gelu`) | `ops.elemwise.activations` | ported | Deterministic value checks for core nonlinearities. |
+| round/sign/lerp semantics | `ops.elemwise.round_sign_lerp` | ported | Includes tie-to-even rounding and scalar/tensor lerp lanes. |
+| arc-trig semantics | `ops.elemwise.arc_trig` | ported | `asin`/`acos` domain checks plus `atan` vectors. |
+| hyperbolic + erf semantics | `ops.elemwise.hyperbolic_erf` | ported | `sinh`/`cosh`/`erf` deterministic parity vectors. |
+| activation extension semantics | `ops.elemwise.activation_extensions` | ported | `softsign`/`mish`/`celu`/`selu` parity lane. |
+| `copysign` + `logaddexp` numerics | `ops.elemwise.copysign_logaddexp` | ported | Includes signed-zero behavior and mixed-magnitude stability vectors. |
+| indexing core (`diag`/`diagonal`) | `ops.indexing.diag_diagonal` | ported | Vector<->matrix core forms. |
+| masked fill semantics | `ops.indexing.masked_fill` | ported | Shape-preserving lane with bool masks. |
+| scalar extraction semantics | `ops.indexing.item` | ported | Scalar success path in parity suite. |
+| flattened take + unfold lane | `ops.indexing.take_unfold` | ported | Static index-shape gather and static unfold parity. |
+| triangular indexing semantics | `ops.indexing.triangular` | ported | `triu`/`tril` with positive/negative diagonal checks. |
+| packed masked-select boundaries | `ops.indexing.masked_select_packed_boundaries` | ported | Validates `count=0` and `count=numel` contracts. |
+| packed masked-select prefix | `ops.indexing.masked_select_packed_prefix` | ported | Validates prefix-order payload contract under sparse mask. |
 | broadcast laws | `ops.prop.broadcastable_comm`, `ops.prop.broadcast_out_refl` | ported | Property-style invariants for shape broadcasting. |
 
 ### `test/unit/test_indexing.py`
@@ -58,6 +70,8 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | index normalization examples | `indexing.normalize.examples` | ported | Includes negative and out-of-range cases. |
 | normalize bounds invariant | `indexing.prop.normalize_bounds` | ported | Property-style safety invariant. |
 | single-int indexing shape | `indexing.prop.single_int_shape` | ported | Property for rank-1 scalar indexing behavior. |
+| runtime `item` error path | `indexing.runtime.item_non_scalar_error` | ported | Explicit runtime rejection for non-scalar `item`. |
+| packed masked-select count bounds | `indexing.runtime.masked_select_packed_counts` | ported | Runtime count bounds + prefix payload behavior checks. |
 | bool indexing parity | — | deferred | Feature still unsupported in Lean runtime path. |
 
 ## Curated Mixed Set
@@ -69,6 +83,7 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | matrix-vector broadcastability | `curated.prop.matrix_vector_broadcast` | ported | Property-style broadcast invariant. |
 | conv/pool deterministic smoke | `curated.nn.conv_pool_smoke` | ported | Basic conv/max-pool/avg-pool shape+value parity sanity lane. |
 | Python fixture oracle checks | `fixture.core_ops.python_oracle` | ported | Slow-profile deterministic fixtures for core ops + activations. |
+| expanded fixture oracle checks | `fixture.core_ops.python_oracle` | ported | Adds deterministic fixtures for new math/indexing + packed select bridge ids. |
 
 ## Deferred Areas
 
@@ -87,6 +102,6 @@ Every parity PR should pass all three driver profiles locally and in CI:
 
 Current selection counts:
 
-- fast: 26
-- medium: 34
-- slow: 35
+- fast: 35
+- medium: 46
+- slow: 49

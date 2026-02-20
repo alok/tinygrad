@@ -186,6 +186,214 @@ private def runCase (id : String) : IO (Shape × RawBuffer) := do
       let mat ← reshape base [2, 3] (by native_decide)
       StaticTensor.softmaxAxisF mat ⟨0, by decide⟩
     pure (t.uop.shape, evalTensor t)
+  | "round_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.round shifted
+    pure (t.uop.shape, evalTensor t)
+  | "sign_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.sign shifted
+    pure (t.uop.shape, evalTensor t)
+  | "lerp_scalar_1d_3" =>
+    let t := runTensorM do
+      let start ← Tensor.linspace 1.0 3.0 3 .float32
+      let stop ← Tensor.linspace 4.0 6.0 3 .float32
+      StaticTensor.lerpScalar start stop 0.5
+    pure (t.uop.shape, evalTensor t)
+  | "asin_vals7" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 7 .float32
+      let scaled ← scale base 0.3
+      let x ← addScalar scaled (-0.9)
+      StaticTensor.asin x
+    pure (t.uop.shape, evalTensor t)
+  | "acos_vals7" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 7 .float32
+      let scaled ← scale base 0.3
+      let x ← addScalar scaled (-0.9)
+      StaticTensor.acos x
+    pure (t.uop.shape, evalTensor t)
+  | "atan_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.atan shifted
+    pure (t.uop.shape, evalTensor t)
+  | "sinh_vals7" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 7 .float32
+      let scaled ← scale base 0.5
+      let x ← addScalar scaled (-1.5)
+      StaticTensor.sinh x
+    pure (t.uop.shape, evalTensor t)
+  | "cosh_vals7" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 7 .float32
+      let scaled ← scale base 0.5
+      let x ← addScalar scaled (-1.5)
+      StaticTensor.cosh x
+    pure (t.uop.shape, evalTensor t)
+  | "erf_vals7" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 7 .float32
+      let scaled ← scale base 0.5
+      let x ← addScalar scaled (-1.5)
+      StaticTensor.erf x
+    pure (t.uop.shape, evalTensor t)
+  | "softsign_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.softsign shifted
+    pure (t.uop.shape, evalTensor t)
+  | "mish_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.mish shifted
+    pure (t.uop.shape, evalTensor t)
+  | "celu_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.celu shifted
+    pure (t.uop.shape, evalTensor t)
+  | "selu_1d_6_shift25" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 6 .float32
+      let shifted ← addScalar base (-2.5)
+      StaticTensor.selu shifted
+    pure (t.uop.shape, evalTensor t)
+  | "copysign_1d_4" =>
+    let t := runTensorM do
+      let m0 ← Tensor.full [1] .float32 1.0
+      let m1 ← Tensor.full [1] .float32 (-2.0)
+      let mz ← Tensor.zeros [1] .float32
+      let m01 ← StaticTensor.cat m0 m1 0 (by native_decide)
+      let m23 ← StaticTensor.cat mz mz 0 (by native_decide)
+      let mag ← StaticTensor.cat m01 m23 0 (by native_decide)
+      let s0 ← Tensor.full [1] .float32 (-1.0)
+      let s1 ← Tensor.full [1] .float32 1.0
+      let sz := mz
+      let sNegZero ← Tensor.full [1] .float32 (-0.0)
+      let s01 ← StaticTensor.cat s0 s1 0 (by native_decide)
+      let s23 ← StaticTensor.cat sNegZero sz 0 (by native_decide)
+      let signSrc ← StaticTensor.cat s01 s23 0 (by native_decide)
+      StaticTensor.copysign mag signSrc
+    pure (t.uop.shape, evalTensor t)
+  | "logaddexp_1d_3" =>
+    let t := runTensorM do
+      let la0 ← Tensor.full [1] .float32 100.0
+      let la1 ← Tensor.full [1] .float32 (-100.0)
+      let la2 ← Tensor.full [1] .float32 1.0
+      let la01 ← StaticTensor.cat la0 la1 0 (by native_decide)
+      let la ← StaticTensor.cat la01 la2 0 (by native_decide)
+      let lb0 ← Tensor.full [1] .float32 99.0
+      let lb1 ← Tensor.full [1] .float32 100.0
+      let lb2 ← Tensor.full [1] .float32 (-2.0)
+      let lb01 ← StaticTensor.cat lb0 lb1 0 (by native_decide)
+      let lb ← StaticTensor.cat lb01 lb2 0 (by native_decide)
+      StaticTensor.logaddexp la lb
+    pure (t.uop.shape, evalTensor t)
+  | "masked_fill_scalar_1d_6" =>
+    let t := runTensorM do
+      let base0 ← Tensor.arange 6 .float32
+      let base ← addScalar base0 1.0
+      let one ← Tensor.full [6] .float32 1.0
+      let three ← Tensor.full [6] .float32 3.0
+      let six ← Tensor.full [6] .float32 6.0
+      let m1 ← StaticTensor.cmpeq base one
+      let m3 ← StaticTensor.cmpeq base three
+      let m6 ← StaticTensor.cmpeq base six
+      let m13 ← StaticTensor.bitor m1 m3
+      let mask ← StaticTensor.bitor m13 m6
+      StaticTensor.maskedFillScalar base mask (-12.0)
+    pure (t.uop.shape, evalTensor t)
+  | "take_flat_2x3_idx5" =>
+    let t := runTensorM do
+      let base0 ← Tensor.arange 6 .float32
+      let base ← reshapeUnsafe base0 [2, 3]
+      let idxA ← Tensor.arange 3 .int32
+      let idxB ← Tensor.arange 2 .int32
+      let idx ← StaticTensor.cat idxA idxB 0 (by native_decide)
+      StaticTensor.take base idx
+    pure (t.uop.shape, evalTensor t)
+  | "item_scalar_42" =>
+    let t := runTensorM do
+      let x ← Tensor.full [] .float32 42.0
+      StaticTensor.item x
+    pure (t.uop.shape, evalTensor t)
+  | "triu_diag1_3x4" =>
+    let t := runTensorM do
+      let base0 ← Tensor.arange 12 .float32
+      let base1 ← addScalar base0 1.0
+      let mat ← reshapeUnsafe base1 [3, 4]
+      StaticTensor.triu mat 1
+    pure (t.uop.shape, evalTensor t)
+  | "tril_diag_neg1_3x4" =>
+    let t := runTensorM do
+      let base0 ← Tensor.arange 12 .float32
+      let base1 ← addScalar base0 1.0
+      let mat ← reshapeUnsafe base1 [3, 4]
+      StaticTensor.tril mat (-1)
+    pure (t.uop.shape, evalTensor t)
+  | "diag_vec3" =>
+    let t := runTensorM do
+      let v ← Tensor.linspace 1.0 3.0 3 .float32
+      StaticTensor.diag v
+    pure (t.uop.shape, evalTensor t)
+  | "diagonal_mat3" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 9 .float32
+      let mat ← reshapeUnsafe base [3, 3]
+      StaticTensor.diagonal mat
+    pure (t.uop.shape, evalTensor t)
+  | "unfold_8_2_2" =>
+    let t := runTensorM do
+      let v ← Tensor.arange 8 .float32
+      StaticTensor.unfold v 0 2 2
+    pure (t.uop.shape, evalTensor t)
+  | "masked_select_packed_payload_3x3" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 9 .float32
+      let x ← reshapeUnsafe base [3, 3]
+      let z0 ← Tensor.full [3, 3] .float32 0.0
+      let z2 ← Tensor.full [3, 3] .float32 2.0
+      let z4 ← Tensor.full [3, 3] .float32 4.0
+      let z8 ← Tensor.full [3, 3] .float32 8.0
+      let m0 ← StaticTensor.cmpeq x z0
+      let m2 ← StaticTensor.cmpeq x z2
+      let m4 ← StaticTensor.cmpeq x z4
+      let m8 ← StaticTensor.cmpeq x z8
+      let m02 ← StaticTensor.bitor m0 m2
+      let m48 ← StaticTensor.bitor m4 m8
+      let mask ← StaticTensor.bitor m02 m48
+      let (packed, _) ← StaticTensor.maskedSelectPacked x mask
+      pure packed
+    pure (t.uop.shape, evalTensor t)
+  | "masked_select_packed_count_3x3" =>
+    let t := runTensorM do
+      let base ← Tensor.arange 9 .float32
+      let x ← reshapeUnsafe base [3, 3]
+      let z0 ← Tensor.full [3, 3] .float32 0.0
+      let z2 ← Tensor.full [3, 3] .float32 2.0
+      let z4 ← Tensor.full [3, 3] .float32 4.0
+      let z8 ← Tensor.full [3, 3] .float32 8.0
+      let m0 ← StaticTensor.cmpeq x z0
+      let m2 ← StaticTensor.cmpeq x z2
+      let m4 ← StaticTensor.cmpeq x z4
+      let m8 ← StaticTensor.cmpeq x z8
+      let m02 ← StaticTensor.bitor m0 m2
+      let m48 ← StaticTensor.bitor m4 m8
+      let mask ← StaticTensor.bitor m02 m48
+      let (_, count) ← StaticTensor.maskedSelectPacked x mask
+      StaticTensor.cast count .float32
+    pure (t.uop.shape, evalTensor t)
   | _ =>
     throw <| IO.userError s!"unknown fixture case id: {id}"
 

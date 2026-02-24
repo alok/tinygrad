@@ -1,6 +1,6 @@
 # Lean ↔ Python Tensor Parity Checklist (Core)
 
-Updated: 2026-02-20
+Updated: 2026-02-24
 
 Scope: user-facing tensor math/shape ops in `tinygrad/tensor.py` vs `lean4/TinyGrad4/Tensor/*`.
 Not in scope: device/runtime backends, scheduling, JIT, IO helpers, visualization, web, or model code.
@@ -61,10 +61,12 @@ Legend: [x] implemented, [~] partial/bridge, [ ] missing
 - [x] relu / gelu / silu / softplus / hardtanh / hardsigmoid / hardswish
 
 ## NN ops (core)
-- [ ] conv2d / conv_transpose2d
-- [ ] avg_pool2d / max_pool2d / max_unpool2d
-- [ ] batchnorm
-- [ ] dropout
+- [x] conv2d
+- [ ] conv_transpose2d
+- [x] avg_pool2d / max_pool2d
+- [ ] max_unpool2d
+- [~] batchnorm (`batchnorm` NC + `batchnormNCHW` channel-axis lanes; general axis tuples deferred)
+- [~] dropout (functional API with explicit `training` and `seed`; no global `Tensor.training` state bridge)
 - [~] cross_entropy (Lean has `crossEntropyLoss` and `crossEntropyOneHot` variants)
 - [x] softmax / log_softmax / layernorm / rmsnorm
 
@@ -77,6 +79,8 @@ Legend: [x] implemented, [~] partial/bridge, [ ] missing
 - `masked_select` exact dynamic-length output is intentionally deferred while `UOp` tensor shapes stay static (`List Nat`); use `maskedSelectPacked` bridge.
 - `diag`/`diagonal` currently ship core vector<->matrix forms (offset variants deferred in this cycle).
 - `unfold` currently targets static last-axis lane.
+- `batchnorm` currently ships channel-axis static lanes (`NC`, `NCHW`) but not full arbitrary-axis tuple semantics.
+- `dropout` currently uses explicit `training` + `seed` arguments instead of global training-mode state.
 - `randperm` exact-sequence parity with Python RNG internals is not guaranteed yet (property parity is covered).
 
 ## Suggested order (high impact → low)

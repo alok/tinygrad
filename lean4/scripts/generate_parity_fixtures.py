@@ -44,6 +44,17 @@ def build_fixtures() -> dict:
   ms_sel = ms_src.masked_select(ms_mask)
   ms_packed = np.zeros(ms_src.numel(), dtype=np.float32)
   ms_packed[:ms_sel.numel()] = ms_sel.numpy().reshape(-1)
+  bn_nc_x = Tensor.arange(6).float().reshape(2, 3)
+  bn_nc_mean = Tensor.linspace(1.5, 3.5, 3).float()
+  bn_nc_invstd = Tensor.full((3,), 2.0 / 3.0).float()
+  bn_nchw_x = Tensor.arange(8).float().reshape(1, 2, 2, 2)
+  bn_nchw_mean = Tensor([1.5, 5.5]).float()
+  bn_nchw_invstd = Tensor([1.0, 0.5]).float()
+  bn_nchw_weight = Tensor([2.0, -1.0]).float()
+  bn_nchw_bias = Tensor([0.5, 1.0]).float()
+  drop_src = Tensor.ones(8).float()
+  with Tensor.train():
+    drop_p1 = drop_src.dropout(1.0)
 
   cases = [
     {
@@ -309,6 +320,24 @@ def build_fixtures() -> dict:
       "python_ref": "test/test_ops.py::test_masked_select",
       "shape": [],
       "expected": [float(ms_sel.numel())],
+    },
+    {
+      "id": "batchnorm_nc_2x3",
+      "python_ref": "test/test_nn.py::test_batchnorm_axis",
+      "shape": [2, 3],
+      "expected": _flatten(bn_nc_x.batchnorm(None, None, bn_nc_mean, bn_nc_invstd)),
+    },
+    {
+      "id": "batchnorm_nchw_1x2x2x2_affine",
+      "python_ref": "test/test_nn.py::test_batchnorm_axis",
+      "shape": [1, 2, 2, 2],
+      "expected": _flatten(bn_nchw_x.batchnorm(bn_nchw_weight, bn_nchw_bias, bn_nchw_mean, bn_nchw_invstd)),
+    },
+    {
+      "id": "dropout_p1_zero_1d8",
+      "python_ref": "test/test_edgecases.py::test_dropout_rate_one",
+      "shape": [8],
+      "expected": _flatten(drop_p1),
     },
   ]
 

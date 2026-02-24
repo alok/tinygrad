@@ -681,6 +681,59 @@
       "id": "masked_select_packed_count_3x3",
       "python_ref": "test/test_ops.py::test_masked_select",
       "shape": []
+    },
+    {
+      "expected": [
+        -1.0,
+        -1.0,
+        -1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "id": "batchnorm_nc_2x3",
+      "python_ref": "test/test_nn.py::test_batchnorm_axis",
+      "shape": [
+        2,
+        3
+      ]
+    },
+    {
+      "expected": [
+        -2.5,
+        -0.5,
+        1.5,
+        3.5,
+        1.75,
+        1.25,
+        0.75,
+        0.25
+      ],
+      "id": "batchnorm_nchw_1x2x2x2_affine",
+      "python_ref": "test/test_nn.py::test_batchnorm_axis",
+      "shape": [
+        1,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "id": "dropout_p1_zero_1d8",
+      "python_ref": "test/test_edgecases.py::test_dropout_rate_one",
+      "shape": [
+        8
+      ]
     }
   ],
   "generator": "lean4/scripts/generate_parity_fixtures.py",

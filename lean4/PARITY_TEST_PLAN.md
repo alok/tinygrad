@@ -82,8 +82,10 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | where gradient routing | `curated.grad.where_routing` | ported | Branch-specific gradient flow checks. |
 | matrix-vector broadcastability | `curated.prop.matrix_vector_broadcast` | ported | Property-style broadcast invariant. |
 | conv/pool deterministic smoke | `curated.nn.conv_pool_smoke` | ported | Basic conv/max-pool/avg-pool shape+value parity sanity lane. |
+| batchnorm channel-axis parity | `ops.nn.batchnorm_channel_axis` | ported | Covers `NC` and `NCHW` affine lanes against Tensor.batchnorm semantics. |
+| dropout seeded semantics | `ops.nn.dropout_seeded_semantics` | ported | Deterministic same-seed behavior + eval/p=0/p=1 contracts. |
 | Python fixture oracle checks | `fixture.core_ops.python_oracle` | ported | Slow-profile deterministic fixtures for core ops + activations. |
-| expanded fixture oracle checks | `fixture.core_ops.python_oracle` | ported | Adds deterministic fixtures for new math/indexing + packed select bridge ids. |
+| expanded fixture oracle checks | `fixture.core_ops.python_oracle` | ported | Adds deterministic fixtures for math/indexing plus batchnorm/dropout boundary lanes. |
 
 ## Deferred Areas
 
@@ -103,5 +105,5 @@ Every parity PR should pass all three driver profiles locally and in CI:
 Current selection counts:
 
 - fast: 35
-- medium: 46
-- slow: 49
+- medium: 47
+- slow: 51

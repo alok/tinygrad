@@ -1826,6 +1826,76 @@ def softmax {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : Static
 def logSoftmax {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
   logSoftmaxAxis t (s.length - 1)
 
+/-- Batch normalization for `NC` inputs (`[N, C]`) using channel-axis stats (`axis=1` lane). -/
+def batchnormNC {batch channels : Nat} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] .float32 device)
+    (weight : Option (Vector channels .float32 device))
+    (bias : Option (Vector channels .float32 device))
+    (mean : Vector channels .float32 device)
+    (invstd : Vector channels .float32 device)
+    : TensorM (StaticTensor [batch, channels] .float32 device) := do
+  let centered ← subChannelVectorNC x mean
+  let weighted ← match weight with
+    | none => pure centered
+    | some w => mulChannelVectorNC centered w
+  let normalized ← mulChannelVectorNC weighted invstd
+  match bias with
+  | none => pure normalized
+  | some b => addChannelVectorNC normalized b
+
+/-- Batch normalization for `NCHW` inputs (`[N, C, H, W]`) using channel-axis stats (`axis=1` lane). -/
+def batchnormNCHW {batch channels height width : Nat} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels, height, width] .float32 device)
+    (weight : Option (Vector channels .float32 device))
+    (bias : Option (Vector channels .float32 device))
+    (mean : Vector channels .float32 device)
+    (invstd : Vector channels .float32 device)
+    : TensorM (StaticTensor [batch, channels, height, width] .float32 device) := do
+  let centered ← subChannelVectorNCHW x mean
+  let weighted ← match weight with
+    | none => pure centered
+    | some w => mulChannelVectorNCHW centered w
+  let normalized ← mulChannelVectorNCHW weighted invstd
+  match bias with
+  | none => pure normalized
+  | some b => addChannelVectorNCHW normalized b
+
+/-- Alias matching tinygrad's `Tensor.batchnorm` surface for `NC` tensors. -/
+def batchnorm {batch channels : Nat} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, channels] .float32 device)
+    (weight : Option (Vector channels .float32 device))
+    (bias : Option (Vector channels .float32 device))
+    (mean : Vector channels .float32 device)
+    (invstd : Vector channels .float32 device)
+    : TensorM (StaticTensor [batch, channels] .float32 device) :=
+  batchnormNC x weight bias mean invstd
+
+/-- Dropout with explicit training flag and deterministic seed.
+    Uses keep mask `rand >= p` and scales by `1/(1-p)` in training mode. -/
+def dropout {s : List Nat} {device : Backend.DeviceType}
+    (x : StaticTensor s .float32 device)
+    (p : Float32 := 0.5) (training : Bool := true) (seed : Nat := 0)
+    : TensorM (StaticTensor s .float32 device) := do
+  if p < 0.0 || p > 1.0 then
+    panic! s!"dropout probability {p} out of range [0, 1]"
+  if !training || p == 0.0 then
+    pure x
+  else if p == 1.0 then
+    Tensor.zerosLike x
+  else
+    let randT ← Tensor.rand (device := device) s .float32 seed
+    let pT ← Tensor.full (device := device) s .float32 p
+    let keepGt ← cmpgt randT pT
+    let keepEq ← cmpeq randT pT
+    let keepMask ← bitor keepGt keepEq
+    let one ← Tensor.full (device := device) s .float32 1.0
+    let zero ← Tensor.full (device := device) s .float32 0.0
+    let keepF ← whereSame keepMask one zero
+    let kept ← mul x keepF
+    let scale := 1.0 / (1.0 - p)
+    let scaleT ← Tensor.full (device := device) s .float32 scale
+    mul kept scaleT
+
 private def argmaxF32 {batch n : Nat} {device : Backend.DeviceType} (t : StaticTensor [batch, n] .float32 device)
     : TensorM (StaticTensor [batch] .int32 device) := do
   let maxVal ← maxAxisF t ⟨1, by simp⟩ true

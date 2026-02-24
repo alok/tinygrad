@@ -28,6 +28,27 @@ private def assertPermutationRange (raw : RawBuffer) (n : Nat) (label : String) 
       if Float64.abs (raw.getF32 i - raw.getF32 j) < 0.1 then
         throw <| IO.userError s!"{label}: duplicate values at {i} and {j}"
 
+private def assertRawAllConst (raw : RawBuffer) (v tol : Float64) (label : String) : IO Unit := do
+  for i in [:raw.numF32] do
+    if Float64.abs (raw.getF32 i - v) > tol then
+      throw <| IO.userError s!"{label}: index {i} expected {v}, got {raw.getF32 i}"
+
+private def assertDropoutScaledBinary (raw : RawBuffer) (scale tol : Float64) (label : String) : IO Unit := do
+  let mut sawZero := false
+  let mut sawScaled := false
+  for i in [:raw.numF32] do
+    let x := raw.getF32 i
+    if Float64.abs x <= tol then
+      sawZero := true
+    else if Float64.abs (x - scale) <= tol then
+      sawScaled := true
+    else
+      throw <| IO.userError s!"{label}: index {i} expected 0 or {scale}, got {x}"
+  if !sawZero then
+    throw <| IO.userError s!"{label}: expected at least one dropped element"
+  if !sawScaled then
+    throw <| IO.userError s!"{label}: expected at least one kept element"
+
 def testEyeValues : IO Unit := do
   let eye := runTensorM do
     Tensor.eye 3 5 .float32
@@ -257,6 +278,56 @@ def testNNConvPoolSmoke : IO Unit := do
   assertRawAllClose (evalTensor convOut) #[9.0, 9.0, 9.0, 9.0] 0.001 "conv2d output values"
   assertRawAllClose (evalTensor maxOut) #[1.0, 1.0, 1.0, 1.0] 0.001 "maxPool2d output values"
   assertRawAllClose (evalTensor avgOut) #[1.0, 1.0, 1.0, 1.0] 0.001 "avgPool2d output values"
+
+def testBatchnormParity : IO Unit := do
+  let (bnNc, bnNchw) := runTensorM do
+    let x0 ← Tensor.arange 6 .float32
+    let xNc ← reshapeUnsafe x0 [2, 3]
+    let meanNc ← Tensor.linspace 1.5 3.5 3 .float32
+    let invstdNc ← Tensor.full [3] .float32 0.6666667
+    let bnNc ← StaticTensor.batchnorm xNc none none meanNc invstdNc
+
+    let x4Base ← Tensor.arange 8 .float32
+    let x4 ← reshapeUnsafe x4Base [1, 2, 2, 2]
+    let m0 ← Tensor.full [1] .float32 1.5
+    let m1 ← Tensor.full [1] .float32 5.5
+    let meanNchw ← StaticTensor.cat m0 m1 0 (by native_decide)
+    let i0 ← Tensor.full [1] .float32 1.0
+    let i1 ← Tensor.full [1] .float32 0.5
+    let invstdNchw ← StaticTensor.cat i0 i1 0 (by native_decide)
+    let w0 ← Tensor.full [1] .float32 2.0
+    let w1 ← Tensor.full [1] .float32 (-1.0)
+    let weightNchw ← StaticTensor.cat w0 w1 0 (by native_decide)
+    let b0 ← Tensor.full [1] .float32 0.5
+    let b1 ← Tensor.full [1] .float32 1.0
+    let biasNchw ← StaticTensor.cat b0 b1 0 (by native_decide)
+    let bnNchw ← StaticTensor.batchnormNCHW x4 (some weightNchw) (some biasNchw) meanNchw invstdNchw
+    pure (bnNc, bnNchw)
+  assertRawAllClose (evalTensor bnNc) #[-1.0, -1.0, -1.0, 1.0, 1.0, 1.0] 0.001 "batchnorm NC parity"
+  assertRawAllClose (evalTensor bnNchw)
+    #[-2.5, -0.5, 1.5, 3.5, 1.75, 1.25, 0.75, 0.25] 0.001 "batchnorm NCHW affine parity"
+
+def testDropoutParity : IO Unit := do
+  let (trainA, trainB, trainC, evalOut, p0Out, p1Out) := runTensorM do
+    let x ← Tensor.ones [32] .float32
+    let trainA ← StaticTensor.dropout x 0.5 true 7
+    let trainB ← StaticTensor.dropout x 0.5 true 7
+    let trainC ← StaticTensor.dropout x 0.5 true 8
+    let evalOut ← StaticTensor.dropout x 0.5 false 7
+    let p0Out ← StaticTensor.dropout x 0.0 true 7
+    let p1Out ← StaticTensor.dropout x 1.0 true 7
+    pure (trainA, trainB, trainC, evalOut, p0Out, p1Out)
+  let rawA := evalTensor trainA
+  let rawB := evalTensor trainB
+  let rawC := evalTensor trainC
+  if rawA.data != rawB.data then
+    throw <| IO.userError "dropout should be deterministic for identical seeds"
+  if rawA.data == rawC.data then
+    throw <| IO.userError "dropout should differ for distinct seeds"
+  assertDropoutScaledBinary rawA 2.0 0.001 "dropout training mask+scale parity"
+  assertRawAllConst (evalTensor evalOut) 1.0 0.001 "dropout eval identity parity"
+  assertRawAllConst (evalTensor p0Out) 1.0 0.001 "dropout p=0 identity parity"
+  assertRawAllConst (evalTensor p1Out) 0.0 0.001 "dropout p=1 zero parity"
 
 def testRoundSignLerpParity : IO Unit := do
   let (rounded, signed, lerpS, lerpT) := runTensorM do
@@ -673,6 +744,20 @@ def cases : List TestCase :=
       minProfile := .medium
       pythonRefs := ["test/unit/test_conv.py::test_conv2d", "test/test_ops.py::test_sum_fake"]
       suite := fun _ => ioTest "nn conv/pool deterministic smoke" testNNConvPoolSmoke
+    },
+    {
+      name := "ops.nn.batchnorm_channel_axis"
+      group := "ops"
+      minProfile := .medium
+      pythonRefs := ["test/test_nn.py::test_batchnorm_axis"]
+      suite := fun _ => ioTest "batchnorm channel-axis parity (NC + NCHW affine)" testBatchnormParity
+    },
+    {
+      name := "ops.nn.dropout_seeded_semantics"
+      group := "ops"
+      minProfile := .slow
+      pythonRefs := ["test/test_tensor.py::test_dropout", "test/test_edgecases.py::test_dropout_rate_one"]
+      suite := fun _ => ioTest "dropout seeded semantics parity (train/eval/p0/p1)" testDropoutParity
     }
   ]
 

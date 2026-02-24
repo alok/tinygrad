@@ -394,6 +394,37 @@ private def runCase (id : String) : IO (Shape × RawBuffer) := do
       let (_, count) ← StaticTensor.maskedSelectPacked x mask
       StaticTensor.cast count .float32
     pure (t.uop.shape, evalTensor t)
+  | "batchnorm_nc_2x3" =>
+    let t := runTensorM do
+      let x0 ← Tensor.arange 6 .float32
+      let x ← reshapeUnsafe x0 [2, 3]
+      let mean ← Tensor.linspace 1.5 3.5 3 .float32
+      let invstd ← Tensor.full [3] .float32 0.6666667
+      StaticTensor.batchnorm x none none mean invstd
+    pure (t.uop.shape, evalTensor t)
+  | "batchnorm_nchw_1x2x2x2_affine" =>
+    let t := runTensorM do
+      let x0 ← Tensor.arange 8 .float32
+      let x ← reshapeUnsafe x0 [1, 2, 2, 2]
+      let m0 ← Tensor.full [1] .float32 1.5
+      let m1 ← Tensor.full [1] .float32 5.5
+      let mean ← StaticTensor.cat m0 m1 0 (by native_decide)
+      let i0 ← Tensor.full [1] .float32 1.0
+      let i1 ← Tensor.full [1] .float32 0.5
+      let invstd ← StaticTensor.cat i0 i1 0 (by native_decide)
+      let w0 ← Tensor.full [1] .float32 2.0
+      let w1 ← Tensor.full [1] .float32 (-1.0)
+      let weight ← StaticTensor.cat w0 w1 0 (by native_decide)
+      let b0 ← Tensor.full [1] .float32 0.5
+      let b1 ← Tensor.full [1] .float32 1.0
+      let bias ← StaticTensor.cat b0 b1 0 (by native_decide)
+      StaticTensor.batchnormNCHW x (some weight) (some bias) mean invstd
+    pure (t.uop.shape, evalTensor t)
+  | "dropout_p1_zero_1d8" =>
+    let t := runTensorM do
+      let x ← Tensor.ones [8] .float32
+      StaticTensor.dropout x 1.0 true 0
+    pure (t.uop.shape, evalTensor t)
   | _ =>
     throw <| IO.userError s!"unknown fixture case id: {id}"
 

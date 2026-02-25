@@ -62,9 +62,9 @@ Legend: [x] implemented, [~] partial/bridge, [ ] missing
 
 ## NN ops (core)
 - [x] conv2d
-- [ ] conv_transpose2d
+- [~] conv_transpose2d (core static lane: square kernels + scalar hyperparameters)
 - [x] avg_pool2d / max_pool2d
-- [ ] max_unpool2d
+- [~] max_unpool2d (core static lane: scalar kernel/stride/padding/dilation + explicit-output helper)
 - [~] batchnorm (`batchnorm` NC + `batchnormNCHW` channel-axis lanes; general axis tuples deferred)
 - [~] dropout (functional API with explicit `training` and `seed`; no global `Tensor.training` state bridge)
 - [~] cross_entropy (Lean has `crossEntropyLoss` and `crossEntropyOneHot` variants)
@@ -82,6 +82,8 @@ Legend: [x] implemented, [~] partial/bridge, [ ] missing
 - `batchnorm` currently ships channel-axis static lanes (`NC`, `NCHW`) but not full arbitrary-axis tuple semantics.
 - `dropout` currently uses explicit `training` + `seed` arguments instead of global training-mode state.
 - `randperm` exact-sequence parity with Python RNG internals is not guaranteed yet (property parity is covered).
+- `convTranspose2d` currently targets a core lane (square kernels + scalar `padding/stride/dilation/outputPadding`) and rejects unsupported negative effective-padding cases.
+- `maxUnpool2d` currently targets core scalar-parameter lanes via `maxUnpool2d` and `maxUnpool2dOut` on static shapes.
 
 ## Suggested order (high impact → low)
 1) Dynamic-shape tranche: graduate `maskedSelectPacked` to exact `masked_select` when symbolic/runtime shape cardinality lands.

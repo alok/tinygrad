@@ -1,0 +1,72 @@
+{
+  "baseline": {
+    "fixture_case_count": 19,
+    "legacy_marker_count": 8,
+    "parity_counts": {
+      "implemented": 28,
+      "missing": 15,
+      "partial": 7
+    },
+    "selection_counts": {
+      "fast": 26,
+      "medium": 34,
+      "slow": 35
+    },
+    "source_ref": "505b70a0506d72db10ada998280bf4ed10bbf5da"
+  },
+  "check_passed": true,
+  "current": {
+    "fixture_case_count": 50,
+    "legacy_hits": [],
+    "legacy_marker_count": 0,
+    "parity_counts": {
+      "implemented": 38,
+      "missing": 0,
+      "partial": 14
+    },
+    "selection_counts": {
+      "fast": 35,
+      "medium": 48,
+      "slow": 53
+    }
+  },
+  "deltas": {
+    "parity_missing_decrease": 15,
+    "selection_fast_delta": 9,
+    "selection_medium_delta": 14,
+    "selection_slow_delta": 18
+  },
+  "gates": [
+    {
+      "name": "parity_missing_decrease",
+      "passed": true,
+      "reason": "missing delta = 15 (baseline 15 -> current 0, requires >= 6)"
+    },
+    {
+      "name": "driver_selection_fast",
+      "passed": true,
+      "reason": "fast delta = 9 (baseline 26 -> current 35, requires >= 8)"
+    },
+    {
+      "name": "driver_selection_medium",
+      "passed": true,
+      "reason": "medium delta = 14 (baseline 34 -> current 48, requires >= 10)"
+    },
+    {
+      "name": "driver_selection_slow",
+      "passed": true,
+      "reason": "slow delta = 18 (baseline 35 -> current 53, requires >= 12)"
+    },
+    {
+      "name": "legacy_placeholder_markers_zero",
+      "passed": true,
+      "reason": "legacy marker count = 0 (requires 0)"
+    },
+    {
+      "name": "fixture_freshness",
+      "passed": true,
+      "reason": "fixture file matches generator output"
+    }
+  ],
+  "generated_at": "2026-02-25T10:24:14.056628+00:00"
+}

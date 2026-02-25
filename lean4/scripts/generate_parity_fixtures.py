@@ -44,6 +44,10 @@ def build_fixtures() -> dict:
   ms_sel = ms_src.masked_select(ms_mask)
   ms_packed = np.zeros(ms_src.numel(), dtype=np.float32)
   ms_packed[:ms_sel.numel()] = ms_sel.numpy().reshape(-1)
+  conv_t_x = (Tensor.arange(4).reshape(1, 1, 2, 2) + 1).float()
+  conv_t_w = Tensor.ones(1, 1, 2, 2).float()
+  pooled_2x2 = Tensor([6.0, 8.0, 14.0, 16.0]).reshape(1, 1, 2, 2).float()
+  unpool_idx_2x2 = Tensor([5, 7, 13, 15], dtype="int").reshape(1, 1, 2, 2)
   bn_nc_x = Tensor.arange(6).float().reshape(2, 3)
   bn_nc_mean = Tensor.linspace(1.5, 3.5, 3).float()
   bn_nc_invstd = Tensor.full((3,), 2.0 / 3.0).float()
@@ -320,6 +324,24 @@ def build_fixtures() -> dict:
       "python_ref": "test/test_ops.py::test_masked_select",
       "shape": [],
       "expected": [float(ms_sel.numel())],
+    },
+    {
+      "id": "conv_transpose2d_core_1x1x2x2",
+      "python_ref": "test/test_ops.py::test_output_padded_conv_transpose2d",
+      "shape": [1, 1, 5, 5],
+      "expected": _flatten(conv_t_x.conv_transpose2d(conv_t_w, stride=2, output_padding=1)),
+    },
+    {
+      "id": "max_unpool2d_default_1x1x2x2",
+      "python_ref": "test/test_ops.py::test_max_unpool2d",
+      "shape": [1, 1, 4, 4],
+      "expected": _flatten(pooled_2x2.max_unpool2d(unpool_idx_2x2, kernel_size=(2, 2), stride=(2, 2))),
+    },
+    {
+      "id": "max_unpool2d_out_1x1x2x2",
+      "python_ref": "test/test_ops.py::test_max_unpool2d",
+      "shape": [1, 1, 4, 4],
+      "expected": _flatten(pooled_2x2.max_unpool2d(unpool_idx_2x2, kernel_size=(2, 2), stride=(2, 2), output_size=(4, 4))),
     },
     {
       "id": "batchnorm_nc_2x3",

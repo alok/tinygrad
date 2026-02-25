@@ -59,6 +59,8 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | triangular indexing semantics | `ops.indexing.triangular` | ported | `triu`/`tril` with positive/negative diagonal checks. |
 | packed masked-select boundaries | `ops.indexing.masked_select_packed_boundaries` | ported | Validates `count=0` and `count=numel` contracts. |
 | packed masked-select prefix | `ops.indexing.masked_select_packed_prefix` | ported | Validates prefix-order payload contract under sparse mask. |
+| conv-transpose core lane | `ops.nn.conv_transpose2d_core` | ported | Static square-kernel lane with scalar stride/output-padding parity. |
+| max-unpool core lanes | `ops.nn.max_unpool2d_core` | ported | Covers default output-size lane plus explicit-output helper lane. |
 | broadcast laws | `ops.prop.broadcastable_comm`, `ops.prop.broadcast_out_refl` | ported | Property-style invariants for shape broadcasting. |
 
 ### `test/unit/test_indexing.py`
@@ -105,5 +107,5 @@ Every parity PR should pass all three driver profiles locally and in CI:
 Current selection counts:
 
 - fast: 35
-- medium: 47
-- slow: 51
+- medium: 48
+- slow: 53

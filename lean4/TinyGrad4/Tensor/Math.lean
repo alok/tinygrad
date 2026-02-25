@@ -2135,6 +2135,29 @@ def pad2d {batch cin h w : Nat} {d : DType} {device : Backend.DeviceType}
     simpa [Shape.pad, listZipWith, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using result
   pure out
 
+private def strideExpandDim (dim stride : Nat) : Nat :=
+  dim * stride - (stride - 1)
+
+private def convTransposeOutDim (inputDim kernel stride padding dilation outputPadding : Nat) : Nat :=
+  (inputDim - 1) * stride - (padding + padding) + dilation * (kernel - 1) + outputPadding + 1
+
+private def convTranspose2dOutShape
+    (batch cin cout h w k stride padding dilation outputPadding : Nat) : Shape :=
+  Shape.conv2dOut
+    [batch, cin, strideExpandDim h stride + outputPadding, strideExpandDim w stride + outputPadding]
+    [cout, cin, k, k]
+    ((k - 1) * dilation - padding)
+    1
+    dilation
+
+private def upsampleZeros2d {batch cin h w : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, cin, h, w] d device) (stride : Nat)
+    : TensorM (StaticTensor [batch, cin, strideExpandDim h stride, strideExpandDim w stride] d device) := do
+  let x6 ← reshapeUnsafe x [batch, cin, h, 1, w, 1]
+  let xPadded ← padUnsafe x6 [(0, 0), (0, 0), (0, 0), (0, stride - 1), (0, 0), (0, stride - 1)]
+  let xGrid ← reshapeUnsafe xPadded [batch, cin, h * stride, w * stride]
+  shrinkUnsafe xGrid [(0, batch), (0, cin), (0, strideExpandDim h stride), (0, strideExpandDim w stride)]
+
 /-- Max pooling 2D operation using pool/im2col + reduce.
     Input:  [batch, channels, height, width]
     Output: [batch, channels, outHeight, outWidth] -/
@@ -2204,6 +2227,44 @@ def avgPool2d {batch cin h w : Nat} {d : DType} {device : Backend.DeviceType}
   let result ← UOp.div sum2 divisor
 
   pure (StaticTensor.ofUOp result (requiresGrad := x.requiresGrad))
+
+/-- Max-unpool with explicit output shape.
+    Scatters pooled values into flattened `outH*outW` slots using `indices`. -/
+def maxUnpool2dOut {batch cin h w outH outW : Nat} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, cin, h, w] .float32 device)
+    (indices : StaticTensor [batch, cin, h, w] .int32 device)
+    : TensorM (StaticTensor [batch, cin, outH, outW] .float32 device) := do
+  let n := h * w
+  let total := outH * outW
+  let xFlat ← reshapeUnsafe x [batch, cin, n]
+  let iFlat ← reshapeUnsafe indices [batch, cin, n]
+  let iFlatF ← cast iFlat .float32
+  let iUnsq ← unsqueezeUnsafe iFlatF 3
+  let oneHotMask ← oneHotLastF32 iUnsq total
+  let oneHot ← cast oneHotMask .float32
+  let xUnsq ← unsqueezeUnsafe xFlat 3
+  let xExpanded ← expandUnsafe xUnsq [batch, cin, n, total]
+  let weighted ← mul xExpanded oneHot
+  let scattered ← sumAxis weighted 2 false
+  reshapeUnsafe scattered [batch, cin, outH, outW]
+
+/-- Max-unpool 2D default output-size lane using scalar kernel/stride/dilation/padding.
+    Output shape follows tinygrad formula with `output_padding=0`. -/
+def maxUnpool2d {batch cin h w : Nat} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, cin, h, w] .float32 device)
+    (indices : StaticTensor [batch, cin, h, w] .int32 device)
+    (kernelSize : Nat)
+    (stride : Nat)
+    (padding : Nat := 0)
+    (dilation : Nat := 1)
+    : TensorM
+        (StaticTensor
+          [batch, cin, convTransposeOutDim h kernelSize stride padding dilation 0,
+            convTransposeOutDim w kernelSize stride padding dilation 0]
+          .float32 device) := do
+  let outH := convTransposeOutDim h kernelSize stride padding dilation 0
+  let outW := convTransposeOutDim w kernelSize stride padding dilation 0
+  maxUnpool2dOut (outH := outH) (outW := outW) x indices
 
 /-- Conv1d operation using pool/im2col + matmul.
     Input:  [batch, inChannels, width]
@@ -2366,6 +2427,47 @@ def conv2d {batch cin cout h w kH kW : Nat} {d : DType} {device : Backend.Device
   let biasGrad := match bias with | none => false | some b => b.requiresGrad
   let reqGrad := x.requiresGrad || weight.requiresGrad || biasGrad
   pure (StaticTensor.ofUOp finalUop (requiresGrad := reqGrad))
+
+/-- Core transposed convolution lane for square kernels and scalar hyperparameters.
+    Mirrors tinygrad's stride-expansion + flipped-weight conv2d reduction. -/
+def convTranspose2d {batch cin cout h w k : Nat} {d : DType} {device : Backend.DeviceType}
+    (x : StaticTensor [batch, cin, h, w] d device)
+    (weight : StaticTensor [cin, cout, k, k] d device)
+    (bias : Option (StaticTensor [cout] d device) := none)
+    (padding : Nat := 0)
+    (stride : Nat := 1)
+    (dilation : Nat := 1)
+    (outputPadding : Nat := 0)
+    : TensorM (StaticTensor (convTranspose2dOutShape batch cin cout h w k stride padding dilation outputPadding) d device) := do
+  if stride == 0 then
+    panic! "convTranspose2d: stride must be > 0"
+  if dilation == 0 then
+    panic! "convTranspose2d: dilation must be > 0"
+  let basePad := (k - 1) * dilation
+  if padding > basePad then
+    panic! s!"convTranspose2d: effective padding would be negative ({padding} > {basePad})"
+  if outputPadding >= stride then
+    panic! s!"convTranspose2d: outputPadding {outputPadding} must be < stride {stride}"
+
+  let xUp ← upsampleZeros2d x stride
+  let xConvIn : StaticTensor
+      [batch, cin, strideExpandDim h stride + outputPadding, strideExpandDim w stride + outputPadding] d device ←
+    if hop : outputPadding > 0 then
+      padUnsafe xUp [(0, 0), (0, 0), (0, outputPadding), (0, outputPadding)]
+    else
+      have hz : outputPadding = 0 := Nat.eq_zero_of_not_pos hop
+      have hx : StaticTensor
+          [batch, cin, strideExpandDim h stride + outputPadding, strideExpandDim w stride + outputPadding] d device := by
+        simpa [hz] using xUp
+      pure hx
+
+  let wPerm ← permute weight [1, 0, 2, 3] (by simp [Shape.permuteValid, listAll, listRange])
+  let wFlip ← flipUnsafe wPerm [2, 3]
+  let padEff := basePad - padding
+  let out ← conv2d xConvIn wFlip bias padEff 1 dilation
+  have out' : StaticTensor (convTranspose2dOutShape batch cin cout h w k stride padding dilation outputPadding) d device := by
+    simpa [convTranspose2dOutShape, padEff] using out
+  pure out'
 
 /-- Depthwise 2D convolution: each input channel is convolved with its own filter.
     This is a specialized case of grouped convolution where groups = cin = cout.

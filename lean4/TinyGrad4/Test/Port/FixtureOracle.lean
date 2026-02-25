@@ -394,6 +394,56 @@ private def runCase (id : String) : IO (Shape × RawBuffer) := do
       let (_, count) ← StaticTensor.maskedSelectPacked x mask
       StaticTensor.cast count .float32
     pure (t.uop.shape, evalTensor t)
+  | "conv_transpose2d_core_1x1x2x2" =>
+    let t := runTensorM do
+      let x0 ← Tensor.arange 4 .float32
+      let x1 ← addScalar x0 1.0
+      let x ← reshapeUnsafe x1 [1, 1, 2, 2]
+      let w ← Tensor.ones [1, 1, 2, 2] .float32
+      convTranspose2d x w none 0 2 1 1
+    pure (t.uop.shape, evalTensor t)
+  | "max_unpool2d_default_1x1x2x2" =>
+    let t := runTensorM do
+      let p0 ← Tensor.full [1] .float32 6.0
+      let p1 ← Tensor.full [1] .float32 8.0
+      let p2 ← Tensor.full [1] .float32 14.0
+      let p3 ← Tensor.full [1] .float32 16.0
+      let p01 ← StaticTensor.cat p0 p1 0 (by native_decide)
+      let p23 ← StaticTensor.cat p2 p3 0 (by native_decide)
+      let pFlat ← StaticTensor.cat p01 p23 0 (by native_decide)
+      let pooled ← reshapeUnsafe pFlat [1, 1, 2, 2]
+
+      let i0 ← Tensor.full [1] .int32 5.0
+      let i1 ← Tensor.full [1] .int32 7.0
+      let i2 ← Tensor.full [1] .int32 13.0
+      let i3 ← Tensor.full [1] .int32 15.0
+      let i01 ← StaticTensor.cat i0 i1 0 (by native_decide)
+      let i23 ← StaticTensor.cat i2 i3 0 (by native_decide)
+      let iFlat ← StaticTensor.cat i01 i23 0 (by native_decide)
+      let idx ← reshapeUnsafe iFlat [1, 1, 2, 2]
+      maxUnpool2d pooled idx 2 2
+    pure (t.uop.shape, evalTensor t)
+  | "max_unpool2d_out_1x1x2x2" =>
+    let t := runTensorM do
+      let p0 ← Tensor.full [1] .float32 6.0
+      let p1 ← Tensor.full [1] .float32 8.0
+      let p2 ← Tensor.full [1] .float32 14.0
+      let p3 ← Tensor.full [1] .float32 16.0
+      let p01 ← StaticTensor.cat p0 p1 0 (by native_decide)
+      let p23 ← StaticTensor.cat p2 p3 0 (by native_decide)
+      let pFlat ← StaticTensor.cat p01 p23 0 (by native_decide)
+      let pooled ← reshapeUnsafe pFlat [1, 1, 2, 2]
+
+      let i0 ← Tensor.full [1] .int32 5.0
+      let i1 ← Tensor.full [1] .int32 7.0
+      let i2 ← Tensor.full [1] .int32 13.0
+      let i3 ← Tensor.full [1] .int32 15.0
+      let i01 ← StaticTensor.cat i0 i1 0 (by native_decide)
+      let i23 ← StaticTensor.cat i2 i3 0 (by native_decide)
+      let iFlat ← StaticTensor.cat i01 i23 0 (by native_decide)
+      let idx ← reshapeUnsafe iFlat [1, 1, 2, 2]
+      maxUnpool2dOut (outH := 4) (outW := 4) pooled idx
+    pure (t.uop.shape, evalTensor t)
   | "batchnorm_nc_2x3" =>
     let t := runTensorM do
       let x0 ← Tensor.arange 6 .float32

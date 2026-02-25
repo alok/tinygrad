@@ -684,6 +684,99 @@
     },
     {
       "expected": [
+        1.0,
+        1.0,
+        2.0,
+        2.0,
+        0.0,
+        1.0,
+        1.0,
+        2.0,
+        2.0,
+        0.0,
+        3.0,
+        3.0,
+        4.0,
+        4.0,
+        0.0,
+        3.0,
+        3.0,
+        4.0,
+        4.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "id": "conv_transpose2d_core_1x1x2x2",
+      "python_ref": "test/test_ops.py::test_output_padded_conv_transpose2d",
+      "shape": [
+        1,
+        1,
+        5,
+        5
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        6.0,
+        0.0,
+        8.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        14.0,
+        0.0,
+        16.0
+      ],
+      "id": "max_unpool2d_default_1x1x2x2",
+      "python_ref": "test/test_ops.py::test_max_unpool2d",
+      "shape": [
+        1,
+        1,
+        4,
+        4
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        6.0,
+        0.0,
+        8.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        14.0,
+        0.0,
+        16.0
+      ],
+      "id": "max_unpool2d_out_1x1x2x2",
+      "python_ref": "test/test_ops.py::test_max_unpool2d",
+      "shape": [
+        1,
+        1,
+        4,
+        4
+      ]
+    },
+    {
+      "expected": [
         -1.0,
         -1.0,
         -1.0,

@@ -329,6 +329,57 @@ def testDropoutParity : IO Unit := do
   assertRawAllConst (evalTensor p0Out) 1.0 0.001 "dropout p=0 identity parity"
   assertRawAllConst (evalTensor p1Out) 0.0 0.001 "dropout p=1 zero parity"
 
+def testConvTransposeUnpoolParity : IO Unit := do
+  let (convT, unpoolDef, unpoolOut) := runTensorM do
+    let x0 ← Tensor.arange 4 .float32
+    let x1 ← addScalar x0 1.0
+    let x ← reshapeUnsafe x1 [1, 1, 2, 2]
+    let w ← Tensor.ones [1, 1, 2, 2] .float32
+    let convT ← convTranspose2d x w none 0 2 1 1
+
+    let p0 ← Tensor.full [1] .float32 6.0
+    let p1 ← Tensor.full [1] .float32 8.0
+    let p2 ← Tensor.full [1] .float32 14.0
+    let p3 ← Tensor.full [1] .float32 16.0
+    let p01 ← StaticTensor.cat p0 p1 0 (by native_decide)
+    let p23 ← StaticTensor.cat p2 p3 0 (by native_decide)
+    let pFlat ← StaticTensor.cat p01 p23 0 (by native_decide)
+    let pooled ← reshapeUnsafe pFlat [1, 1, 2, 2]
+
+    let i0 ← Tensor.full [1] .int32 5.0
+    let i1 ← Tensor.full [1] .int32 7.0
+    let i2 ← Tensor.full [1] .int32 13.0
+    let i3 ← Tensor.full [1] .int32 15.0
+    let i01 ← StaticTensor.cat i0 i1 0 (by native_decide)
+    let i23 ← StaticTensor.cat i2 i3 0 (by native_decide)
+    let iFlat ← StaticTensor.cat i01 i23 0 (by native_decide)
+    let idx ← reshapeUnsafe iFlat [1, 1, 2, 2]
+
+    let unpoolDef ← maxUnpool2d pooled idx 2 2
+    let unpoolOut ← maxUnpool2dOut (outH := 4) (outW := 4) pooled idx
+    pure (convT, unpoolDef, unpoolOut)
+
+  assertShape convT.uop.shape [1, 1, 5, 5] "convTranspose2d output shape"
+  assertRawAllClose (evalTensor convT)
+    #[1.0, 1.0, 2.0, 2.0, 0.0,
+      1.0, 1.0, 2.0, 2.0, 0.0,
+      3.0, 3.0, 4.0, 4.0, 0.0,
+      3.0, 3.0, 4.0, 4.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0] 0.001 "convTranspose2d stride/outputPadding parity"
+
+  assertShape unpoolDef.uop.shape [1, 1, 4, 4] "maxUnpool2d default output shape"
+  assertShape unpoolOut.uop.shape [1, 1, 4, 4] "maxUnpool2dOut explicit output shape"
+  assertRawAllClose (evalTensor unpoolDef)
+    #[0.0, 0.0, 0.0, 0.0,
+      0.0, 6.0, 0.0, 8.0,
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 14.0, 0.0, 16.0] 0.001 "maxUnpool2d default parity"
+  assertRawAllClose (evalTensor unpoolOut)
+    #[0.0, 0.0, 0.0, 0.0,
+      0.0, 6.0, 0.0, 8.0,
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 14.0, 0.0, 16.0] 0.001 "maxUnpool2dOut explicit parity"
+
 def testRoundSignLerpParity : IO Unit := do
   let (rounded, signed, lerpS, lerpT) := runTensorM do
     let base ← Tensor.arange 6 .float32
@@ -758,6 +809,20 @@ def cases : List TestCase :=
       minProfile := .slow
       pythonRefs := ["test/test_tensor.py::test_dropout", "test/test_edgecases.py::test_dropout_rate_one"]
       suite := fun _ => ioTest "dropout seeded semantics parity (train/eval/p0/p1)" testDropoutParity
+    },
+    {
+      name := "ops.nn.conv_transpose2d_core"
+      group := "ops"
+      minProfile := .medium
+      pythonRefs := ["test/test_ops.py::test_output_padded_conv_transpose2d", "test/test_nn.py::test_conv_transpose2d"]
+      suite := fun _ => ioTest "convTranspose2d core parity (stride/outputPadding lane)" testConvTransposeUnpoolParity
+    },
+    {
+      name := "ops.nn.max_unpool2d_core"
+      group := "ops"
+      minProfile := .slow
+      pythonRefs := ["test/test_ops.py::test_max_unpool2d"]
+      suite := fun _ => ioTest "maxUnpool2d core parity (default + explicit output lane)" testConvTransposeUnpoolParity
     }
   ]
 

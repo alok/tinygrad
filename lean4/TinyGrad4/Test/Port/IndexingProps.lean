@@ -82,7 +82,8 @@ def testMaskedSelectPackedCountBounds : IO Unit := do
     "maskedSelectPacked mixed prefix payload"
 
 def testScatterAxisDimMismatch : IO Unit := do
-  let (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut) := runTensorM do
+  let (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut,
+      scatterReduceSumIncludeSelfOut, scatterReduceProdIncludeSelfOut) := runTensorM do
     let base ← Tensor.zeros [1, 1, 16] .float32
     let i0 ← Tensor.full [1] .int32 5.0
     let i1 ← Tensor.full [1] .int32 7.0
@@ -133,7 +134,11 @@ def testScatterAxisDimMismatch : IO Unit := do
     let psrcFlat ← StaticTensor.cat psrc01 psrc23 0 (by native_decide)
     let psrc ← reshapeUnsafe psrcFlat [1, 1, 4]
     let scatterReduceProdOut ← scatterReduce base 2 ridx psrc .prod false
-    pure (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut)
+    let onesBase ← Tensor.ones [1, 1, 16] .float32
+    let scatterReduceSumIncludeSelfOut ← scatterReduce onesBase 2 ridx rsrc .sum true
+    let scatterReduceProdIncludeSelfOut ← scatterReduce onesBase 2 ridx psrc .prod true
+    pure (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut,
+      scatterReduceSumIncludeSelfOut, scatterReduceProdIncludeSelfOut)
 
   assertRawAllClose (evalTensor scatterOut)
     #[0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 14.0, 0.0, 16.0] 0.001
@@ -153,6 +158,12 @@ def testScatterAxisDimMismatch : IO Unit := do
   assertRawAllClose (evalTensor scatterReduceProdOut)
     #[0.0, 0.0, 5.0, 0.0, 0.0, 24.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
     "scatterReduce prod dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceSumIncludeSelfOut)
+    #[1.0, 1.0, 5.0, 1.0, 1.0, 7.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0] 0.001
+    "scatterReduce sum include_self dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceProdIncludeSelfOut)
+    #[1.0, 1.0, 5.0, 1.0, 1.0, 24.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0] 0.001
+    "scatterReduce prod include_self dim-mismatch lane"
 
 def cases : List TestCase :=
   [

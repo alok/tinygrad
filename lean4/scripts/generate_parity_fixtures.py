@@ -45,6 +45,7 @@ def build_fixtures() -> dict:
   ms_packed = np.zeros(ms_src.numel(), dtype=np.float32)
   ms_packed[:ms_sel.numel()] = ms_sel.numpy().reshape(-1)
   scatter_base = Tensor.zeros(1, 1, 16).float()
+  scatter_ones = Tensor.ones(1, 1, 16).float()
   scatter_idx = Tensor([5, 7, 13, 15], dtype="int").reshape(1, 1, 4)
   scatter_src = Tensor([6.0, 8.0, 14.0, 16.0]).float().reshape(1, 1, 4)
   scatter_ridx = Tensor([5, 5, 5, 2], dtype="int").reshape(1, 1, 4)
@@ -366,6 +367,18 @@ def build_fixtures() -> dict:
       "python_ref": "test/test_ops.py::test_scatter_reduce",
       "shape": [1, 1, 16],
       "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_psrc, reduce="prod", include_self=False)),
+    },
+    {
+      "id": "scatter_reduce_sum_include_self_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_ones.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="sum", include_self=True)),
+    },
+    {
+      "id": "scatter_reduce_prod_include_self_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_ones.scatter_reduce(2, scatter_ridx, scatter_psrc, reduce="prod", include_self=True)),
     },
     {
       "id": "conv_transpose2d_core_1x1x2x2",

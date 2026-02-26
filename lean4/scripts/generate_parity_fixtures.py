@@ -49,6 +49,7 @@ def build_fixtures() -> dict:
   scatter_src = Tensor([6.0, 8.0, 14.0, 16.0]).float().reshape(1, 1, 4)
   scatter_ridx = Tensor([5, 5, 5, 2], dtype="int").reshape(1, 1, 4)
   scatter_rsrc = Tensor([1.0, 2.0, 3.0, 4.0]).float().reshape(1, 1, 4)
+  scatter_psrc = Tensor([2.0, 3.0, 4.0, 5.0]).float().reshape(1, 1, 4)
   conv_t_x = (Tensor.arange(4).reshape(1, 1, 2, 2) + 1).float()
   conv_t_w = Tensor.ones(1, 1, 2, 2).float()
   pooled_2x2 = Tensor([6.0, 8.0, 14.0, 16.0]).reshape(1, 1, 2, 2).float()
@@ -359,6 +360,12 @@ def build_fixtures() -> dict:
       "python_ref": "test/test_ops.py::test_scatter_reduce",
       "shape": [1, 1, 16],
       "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="amin", include_self=False)),
+    },
+    {
+      "id": "scatter_reduce_prod_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_psrc, reduce="prod", include_self=False)),
     },
     {
       "id": "conv_transpose2d_core_1x1x2x2",

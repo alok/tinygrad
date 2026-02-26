@@ -82,7 +82,7 @@ def testMaskedSelectPackedCountBounds : IO Unit := do
     "maskedSelectPacked mixed prefix payload"
 
 def testScatterAxisDimMismatch : IO Unit := do
-  let (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut) := runTensorM do
+  let (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut) := runTensorM do
     let base ← Tensor.zeros [1, 1, 16] .float32
     let i0 ← Tensor.full [1] .int32 5.0
     let i1 ← Tensor.full [1] .int32 7.0
@@ -124,7 +124,16 @@ def testScatterAxisDimMismatch : IO Unit := do
     let scatterReduceMeanOut ← scatterReduce base 2 ridx rsrc .mean false
     let scatterReduceAmaxOut ← scatterReduce base 2 ridx rsrc .amax false
     let scatterReduceAminOut ← scatterReduce base 2 ridx rsrc .amin false
-    pure (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut)
+    let ps0 ← Tensor.full [1] .float32 2.0
+    let ps1 ← Tensor.full [1] .float32 3.0
+    let ps2 ← Tensor.full [1] .float32 4.0
+    let ps3 ← Tensor.full [1] .float32 5.0
+    let psrc01 ← StaticTensor.cat ps0 ps1 0 (by native_decide)
+    let psrc23 ← StaticTensor.cat ps2 ps3 0 (by native_decide)
+    let psrcFlat ← StaticTensor.cat psrc01 psrc23 0 (by native_decide)
+    let psrc ← reshapeUnsafe psrcFlat [1, 1, 4]
+    let scatterReduceProdOut ← scatterReduce base 2 ridx psrc .prod false
+    pure (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut)
 
   assertRawAllClose (evalTensor scatterOut)
     #[0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 14.0, 0.0, 16.0] 0.001
@@ -141,6 +150,9 @@ def testScatterAxisDimMismatch : IO Unit := do
   assertRawAllClose (evalTensor scatterReduceAminOut)
     #[0.0, 0.0, 4.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
     "scatterReduce amin dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceProdOut)
+    #[0.0, 0.0, 5.0, 0.0, 0.0, 24.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
+    "scatterReduce prod dim-mismatch lane"
 
 def cases : List TestCase :=
   [

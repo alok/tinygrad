@@ -819,6 +819,33 @@
     },
     {
       "expected": [
+        0.0,
+        0.0,
+        5.0,
+        0.0,
+        0.0,
+        24.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "id": "scatter_reduce_prod_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "expected": [
         1.0,
         1.0,
         2.0,

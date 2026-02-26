@@ -509,6 +509,29 @@ private def runCase (id : String) : IO (Shape × RawBuffer) := do
       let src ← reshapeUnsafe srcFlat [1, 1, 4]
       scatterReduce base 2 idx src .amin false
     pure (t.uop.shape, evalTensor t)
+  | "scatter_reduce_prod_dim_mismatch_1x1x16" =>
+    let t := runTensorM do
+      let base ← Tensor.zeros [1, 1, 16] .float32
+
+      let i0 ← Tensor.full [1] .int32 5.0
+      let i1 ← Tensor.full [1] .int32 5.0
+      let i2 ← Tensor.full [1] .int32 5.0
+      let i3 ← Tensor.full [1] .int32 2.0
+      let idx01 ← StaticTensor.cat i0 i1 0 (by native_decide)
+      let idx23 ← StaticTensor.cat i2 i3 0 (by native_decide)
+      let idxFlat ← StaticTensor.cat idx01 idx23 0 (by native_decide)
+      let idx ← reshapeUnsafe idxFlat [1, 1, 4]
+
+      let s0 ← Tensor.full [1] .float32 2.0
+      let s1 ← Tensor.full [1] .float32 3.0
+      let s2 ← Tensor.full [1] .float32 4.0
+      let s3 ← Tensor.full [1] .float32 5.0
+      let src01 ← StaticTensor.cat s0 s1 0 (by native_decide)
+      let src23 ← StaticTensor.cat s2 s3 0 (by native_decide)
+      let srcFlat ← StaticTensor.cat src01 src23 0 (by native_decide)
+      let src ← reshapeUnsafe srcFlat [1, 1, 4]
+      scatterReduce base 2 idx src .prod false
+    pure (t.uop.shape, evalTensor t)
   | "conv_transpose2d_core_1x1x2x2" =>
     let t := runTensorM do
       let x0 ← Tensor.arange 4 .float32

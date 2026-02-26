@@ -1502,6 +1502,7 @@ def scatterLast {batch numClasses : Nat} {device : Backend.DeviceType}
 
 inductive ScatterReduce where
   | sum
+  | prod
   | mean
   | amax
   | amin
@@ -1628,6 +1629,17 @@ private def scatterReduceF32 {s idxShape srcShape : Shape} {device : Backend.Dev
       let invU ← UOp.where_ noUpdate.uop self.uop zero
       let invT : StaticTensor s .float32 device  := StaticTensor.ofUOp invU
       add sumT invT
+  | .prod =>
+    let maskedProdU ← UOp.where_ maskP.uop srcP.uop one
+    let maskedProdT : StaticTensor (scatterPrepShape s idxShape dim) .float32 device := StaticTensor.ofUOp maskedProdU
+    let prodR ← prodAxis maskedProdT lastAxis false
+    let prodT : StaticTensor s .float32 device := StaticTensor.ofUOp prodR.uop
+    if includeSelf then
+      mul prodT self
+    else
+      let invU ← UOp.where_ noUpdate.uop self.uop one
+      let invT : StaticTensor s .float32 device := StaticTensor.ofUOp invU
+      mul prodT invT
   | .mean =>
     let baseNum ←
       if includeSelf then

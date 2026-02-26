@@ -57,6 +57,7 @@ This file tracks Python-to-Lean test migration progress for the Lake test driver
 | scalar extraction semantics | `ops.indexing.item` | ported | Scalar success path in parity suite. |
 | flattened take + unfold lane | `ops.indexing.take_unfold` | ported | Static index-shape gather and static unfold parity. |
 | triangular indexing semantics | `ops.indexing.triangular` | ported | `triu`/`tril` with positive/negative diagonal checks. |
+| scatter dim-mismatch semantics | `indexing.runtime.scatter_dim_mismatch` | ported | Verifies `index.shape[dim] < self.shape[dim]` lane for scatter/scatter_reduce parity. |
 | packed masked-select boundaries | `ops.indexing.masked_select_packed_boundaries` | ported | Validates `count=0` and `count=numel` contracts. |
 | packed masked-select prefix | `ops.indexing.masked_select_packed_prefix` | ported | Validates prefix-order payload contract under sparse mask. |
 | conv-transpose core lane | `ops.nn.conv_transpose2d_core` | ported | Static square-kernel lane with scalar stride/output-padding parity. |
@@ -107,5 +108,5 @@ Every parity PR should pass all three driver profiles locally and in CI:
 Current selection counts:
 
 - fast: 35
-- medium: 48
-- slow: 53
+- medium: 49
+- slow: 54

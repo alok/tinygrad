@@ -1245,6 +1245,9 @@ private def swapLastPerm (rank dim : Nat) : List Nat :=
 private def replaceLast (s : Shape) (n : Nat) : Shape :=
   if s.isEmpty then [n] else s.take (s.length - 1) ++ [n]
 
+private def scatterPrepShape (selfShape idxShape : Shape) (dim : Nat) : Shape :=
+  selfShape ++ [listGetD idxShape dim 0]
+
 private def gatherShapeOk (shape idxShape : Shape) (dim : Nat) : Bool :=
   shape.length == idxShape.length &&
   listAll (fun i => if i == dim then true else listGetD shape i 0 >= listGetD idxShape i 0) (listRange shape.length)
@@ -1508,8 +1511,8 @@ private def preScatterF32 {s idxShape srcShape : Shape} {device : Backend.Device
     (_self : StaticTensor s .float32 device) (dim : Nat)
     (index : StaticTensor idxShape .float32 device) (src : StaticTensor srcShape .float32 device)
     : TensorM
-        (StaticTensor (s ++ [listGetD s dim 0]) .float32 device ×
-         StaticTensor (s ++ [listGetD s dim 0]) .bool device) := do
+        (StaticTensor (scatterPrepShape s idxShape dim) .float32 device ×
+         StaticTensor (scatterPrepShape s idxShape dim) .bool device) := do
   let selfShape := s
   let idxShape' := idxShape
   let srcShape' := srcShape
@@ -1543,8 +1546,8 @@ private def preScatterF32 {s idxShape srcShape : Shape} {device : Backend.Device
   let padSpec := padSpec ++ [(0, 0)]
   let srcP ← padUnsafe srcT padSpec
   let maskP ← padUnsafe maskP padSpec
-  let srcOut : StaticTensor (s ++ [listGetD s dim 0]) .float32 device  := StaticTensor.ofUOp srcP.uop
-  let maskOut : StaticTensor (s ++ [listGetD s dim 0]) .bool device  := StaticTensor.ofUOp maskP.uop
+  let srcOut : StaticTensor (scatterPrepShape s idxShape dim) .float32 device  := StaticTensor.ofUOp srcP.uop
+  let maskOut : StaticTensor (scatterPrepShape s idxShape dim) .bool device  := StaticTensor.ofUOp maskP.uop
   pure (srcOut, maskOut)
 
 private def sliceLast {s : Shape} {d : DType} {device : Backend.DeviceType}
@@ -2238,14 +2241,8 @@ def maxUnpool2dOut {batch cin h w outH outW : Nat} {device : Backend.DeviceType}
   let total := outH * outW
   let xFlat ← reshapeUnsafe x [batch, cin, n]
   let iFlat ← reshapeUnsafe indices [batch, cin, n]
-  let iFlatF ← cast iFlat .float32
-  let iUnsq ← unsqueezeUnsafe iFlatF 3
-  let oneHotMask ← oneHotLastF32 iUnsq total
-  let oneHot ← cast oneHotMask .float32
-  let xUnsq ← unsqueezeUnsafe xFlat 3
-  let xExpanded ← expandUnsafe xUnsq [batch, cin, n, total]
-  let weighted ← mul xExpanded oneHot
-  let scattered ← sumAxis weighted 2 false
+  let zeros ← Tensor.zeros (device := device) [batch, cin, total] .float32
+  let scattered ← scatter zeros 2 iFlat xFlat
   reshapeUnsafe scattered [batch, cin, outH, outW]
 
 /-- Max-unpool 2D default output-size lane using scalar kernel/stride/dilation/padding.

@@ -81,6 +81,55 @@ def testMaskedSelectPackedCountBounds : IO Unit := do
   assertRawAllClose (evalTensor packedMix) #[0.0, 1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0] 0.001
     "maskedSelectPacked mixed prefix payload"
 
+def testScatterAxisDimMismatch : IO Unit := do
+  let (scatterOut, scatterReduceOut) := runTensorM do
+    let base ← Tensor.zeros [1, 1, 16] .float32
+    let i0 ← Tensor.full [1] .int32 5.0
+    let i1 ← Tensor.full [1] .int32 7.0
+    let i2 ← Tensor.full [1] .int32 13.0
+    let i3 ← Tensor.full [1] .int32 15.0
+    let idx01 ← StaticTensor.cat i0 i1 0 (by native_decide)
+    let idx23 ← StaticTensor.cat i2 i3 0 (by native_decide)
+    let idxFlat ← StaticTensor.cat idx01 idx23 0 (by native_decide)
+    let idx ← reshapeUnsafe idxFlat [1, 1, 4]
+
+    let s0 ← Tensor.full [1] .float32 6.0
+    let s1 ← Tensor.full [1] .float32 8.0
+    let s2 ← Tensor.full [1] .float32 14.0
+    let s3 ← Tensor.full [1] .float32 16.0
+    let src01 ← StaticTensor.cat s0 s1 0 (by native_decide)
+    let src23 ← StaticTensor.cat s2 s3 0 (by native_decide)
+    let srcFlat ← StaticTensor.cat src01 src23 0 (by native_decide)
+    let src ← reshapeUnsafe srcFlat [1, 1, 4]
+    let scatterOut ← scatter base 2 idx src
+
+    let ridx0 ← Tensor.full [1] .int32 5.0
+    let ridx1 ← Tensor.full [1] .int32 5.0
+    let ridx2 ← Tensor.full [1] .int32 5.0
+    let ridx3 ← Tensor.full [1] .int32 2.0
+    let ridx01 ← StaticTensor.cat ridx0 ridx1 0 (by native_decide)
+    let ridx23 ← StaticTensor.cat ridx2 ridx3 0 (by native_decide)
+    let ridxFlat ← StaticTensor.cat ridx01 ridx23 0 (by native_decide)
+    let ridx ← reshapeUnsafe ridxFlat [1, 1, 4]
+
+    let rs0 ← Tensor.full [1] .float32 1.0
+    let rs1 ← Tensor.full [1] .float32 2.0
+    let rs2 ← Tensor.full [1] .float32 3.0
+    let rs3 ← Tensor.full [1] .float32 4.0
+    let rsrc01 ← StaticTensor.cat rs0 rs1 0 (by native_decide)
+    let rsrc23 ← StaticTensor.cat rs2 rs3 0 (by native_decide)
+    let rsrcFlat ← StaticTensor.cat rsrc01 rsrc23 0 (by native_decide)
+    let rsrc ← reshapeUnsafe rsrcFlat [1, 1, 4]
+    let scatterReduceOut ← scatterReduce base 2 ridx rsrc .sum false
+    pure (scatterOut, scatterReduceOut)
+
+  assertRawAllClose (evalTensor scatterOut)
+    #[0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 14.0, 0.0, 16.0] 0.001
+    "scatter dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceOut)
+    #[0.0, 0.0, 4.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
+    "scatterReduce dim-mismatch lane"
+
 def cases : List TestCase :=
   [
     {
@@ -135,6 +184,14 @@ def cases : List TestCase :=
       pythonRefs := ["test/test_ops.py::test_masked_select"]
       suite := fun _ =>
         ioTest "maskedSelectPacked count bounds and prefix payload" testMaskedSelectPackedCountBounds
+    },
+    {
+      name := "indexing.runtime.scatter_dim_mismatch"
+      group := "indexing"
+      minProfile := .medium
+      pythonRefs := ["test/test_ops.py::test_scatter", "test/test_ops.py::test_scatter_reduce", "test/test_ops.py::test_max_unpool2d"]
+      suite := fun _ =>
+        ioTest "scatter/scatterReduce dim-mismatch parity lane" testScatterAxisDimMismatch
     }
   ]
 

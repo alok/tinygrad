@@ -20,3 +20,11 @@
 - scorecard check passed; current fixtures=62, selections={fast:35, medium:49, slow:54}, parity missing=0, legacy markers=0
 - fixture freshness diff check passed (regen temp == lean4/testdata/parity/core_ops.json)
 - pre-commit run --all-files passed
+
+## 2026-02-26T04:12:32Z checkpoint
+- second scatter tranche: adding fixture-oracle parity for include_self mean/amax/amin lanes
+- regenerating core_ops fixtures and re-running full blocking gates
+
+## 2026-02-26T04:13:55Z checkpoint
+- landed fixture-oracle include_self lanes for scatter_reduce mean/amax/amin
+- regenerated fixtures and re-ran full blocking gates + pre-commit; all passed

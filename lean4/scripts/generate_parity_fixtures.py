@@ -47,6 +47,7 @@ def build_fixtures() -> dict:
   scatter_base = Tensor.zeros(1, 1, 16).float()
   scatter_ones = Tensor.ones(1, 1, 16).float()
   scatter_twos = Tensor.full((1, 1, 16), 2.0).float()
+  scatter_tens = Tensor.full((1, 1, 16), 10.0).float()
   scatter_idx = Tensor([5, 7, 13, 15], dtype="int").reshape(1, 1, 4)
   scatter_src = Tensor([6.0, 8.0, 14.0, 16.0]).float().reshape(1, 1, 4)
   scatter_ridx = Tensor([5, 5, 5, 2], dtype="int").reshape(1, 1, 4)
@@ -382,6 +383,24 @@ def build_fixtures() -> dict:
       "python_ref": "test/test_ops.py::test_scatter_reduce",
       "shape": [1, 1, 16],
       "expected": _flatten(scatter_ones.scatter_reduce(2, scatter_ridx, scatter_psrc, reduce="prod", include_self=True)),
+    },
+    {
+      "id": "scatter_reduce_mean_include_self_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_ones.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="mean", include_self=True)),
+    },
+    {
+      "id": "scatter_reduce_amax_include_self_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_ones.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="amax", include_self=True)),
+    },
+    {
+      "id": "scatter_reduce_amin_include_self_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_tens.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="amin", include_self=True)),
     },
     {
       "id": "scatter_add_scalar_dim_mismatch_1x1x16",

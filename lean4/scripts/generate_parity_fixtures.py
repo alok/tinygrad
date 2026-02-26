@@ -55,6 +55,12 @@ def build_fixtures() -> dict:
   scatter_psrc = Tensor([2.0, 3.0, 4.0, 5.0]).float().reshape(1, 1, 4)
   scatter_extreme_neg = Tensor([-2.0e38, -2.5e38, -1.5e38, -3.0e38]).float().reshape(1, 1, 4)
   scatter_extreme_pos = Tensor([2.0e38, 2.5e38, 1.5e38, 3.0e38]).float().reshape(1, 1, 4)
+  scatter_dim1_base = Tensor.zeros(1, 4, 4).float()
+  scatter_dim1_twos = Tensor.full((1, 4, 4), 2.0).float()
+  scatter_dim1_idx = Tensor([[[0, 1, 2, 3], [3, 2, 1, 0]]], dtype="int")
+  scatter_dim1_src = Tensor.arange(8).float().reshape(1, 2, 4) + 1
+  scatter_dim1_ridx = Tensor([[[1, 1, 2, 2], [1, 3, 3, 0]]], dtype="int")
+  scatter_dim1_rsrc = Tensor.arange(8).float().reshape(1, 2, 4) + 1
   conv_t_x = (Tensor.arange(4).reshape(1, 1, 2, 2) + 1).float()
   conv_t_w = Tensor.ones(1, 1, 2, 2).float()
   pooled_2x2 = Tensor([6.0, 8.0, 14.0, 16.0]).reshape(1, 1, 2, 2).float()
@@ -425,6 +431,24 @@ def build_fixtures() -> dict:
       "python_ref": "test/test_ops.py::test_scatter_add",
       "shape": [1, 1, 16],
       "expected": _flatten(scatter_twos.scatter(-1, scatter_ridx, 1.5, reduce="add")),
+    },
+    {
+      "id": "scatter_dim1_mismatch_1x4x4",
+      "python_ref": "test/test_ops.py::test_scatter",
+      "shape": [1, 4, 4],
+      "expected": _flatten(scatter_dim1_base.scatter(1, scatter_dim1_idx, scatter_dim1_src)),
+    },
+    {
+      "id": "scatter_reduce_sum_dim1_mismatch_1x4x4",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 4, 4],
+      "expected": _flatten(scatter_dim1_base.scatter_reduce(1, scatter_dim1_ridx, scatter_dim1_rsrc, reduce="sum", include_self=False)),
+    },
+    {
+      "id": "scatter_add_scalar_dim1_mismatch_1x4x4",
+      "python_ref": "test/test_ops.py::test_scatter_add",
+      "shape": [1, 4, 4],
+      "expected": _flatten(scatter_dim1_twos.scatter(1, scatter_dim1_ridx, 1.5, reduce="add")),
     },
     {
       "id": "scatter_multiply_scalar_dim_mismatch_1x1x16",

@@ -33,3 +33,7 @@
 - added signed-dim scatter/scatter_reduce/scalar wrappers and covered dim=-1 lane
 - expanded fixture-oracle ids for signed-dim scatter, signed-dim scatter_reduce sum, signed-dim scatter_add_scalar
 - re-ran full blocking gates + pre-commit; all passed
+
+## 2026-02-26T04:22:30Z checkpoint
+- added dim=1 scatter mismatch lane (scatter/scatterReduce sum/scatterAdd scalar) in runtime tests + fixtures
+- full gates passed; scorecard now shows selections={fast:35, medium:50, slow:55}, fixtures=71, missing=0

@@ -1,13 +1,13 @@
 # Parity Scorecard
 
-- generated_at: 2026-02-26T04:17:22.273040+00:00
+- generated_at: 2026-02-26T04:21:39.492254+00:00
 - baseline_source: 505b70a0506d72db10ada998280bf4ed10bbf5da
 - check_passed: True
 
 ## Current
 - parity: implemented=38, partial=14, missing=0
-- fixtures: 68
-- selections: fast=35, medium=49, slow=54
+- fixtures: 71
+- selections: fast=35, medium=50, slow=55
 - legacy markers: 0
 
 ## Baseline
@@ -19,13 +19,13 @@
 ## Deltas
 - parity missing decrease: 15
 - selection fast delta: 9
-- selection medium delta: 15
-- selection slow delta: 19
+- selection medium delta: 16
+- selection slow delta: 20
 
 ## Gates
 - [PASS] parity_missing_decrease: missing delta = 15 (baseline 15 -> current 0, requires >= 6)
 - [PASS] driver_selection_fast: fast delta = 9 (baseline 26 -> current 35, requires >= 8)
-- [PASS] driver_selection_medium: medium delta = 15 (baseline 34 -> current 49, requires >= 10)
-- [PASS] driver_selection_slow: slow delta = 19 (baseline 35 -> current 54, requires >= 12)
+- [PASS] driver_selection_medium: medium delta = 16 (baseline 34 -> current 50, requires >= 10)
+- [PASS] driver_selection_slow: slow delta = 20 (baseline 35 -> current 55, requires >= 12)
 - [PASS] legacy_placeholder_markers_zero: legacy marker count = 0 (requires 0)
 - [PASS] fixture_freshness: fixture file matches generator output

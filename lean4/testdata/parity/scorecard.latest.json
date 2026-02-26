@@ -16,7 +16,7 @@
   },
   "check_passed": true,
   "current": {
-    "fixture_case_count": 68,
+    "fixture_case_count": 71,
     "legacy_hits": [],
     "legacy_marker_count": 0,
     "parity_counts": {
@@ -26,15 +26,15 @@
     },
     "selection_counts": {
       "fast": 35,
-      "medium": 49,
-      "slow": 54
+      "medium": 50,
+      "slow": 55
     }
   },
   "deltas": {
     "parity_missing_decrease": 15,
     "selection_fast_delta": 9,
-    "selection_medium_delta": 15,
-    "selection_slow_delta": 19
+    "selection_medium_delta": 16,
+    "selection_slow_delta": 20
   },
   "gates": [
     {
@@ -50,12 +50,12 @@
     {
       "name": "driver_selection_medium",
       "passed": true,
-      "reason": "medium delta = 15 (baseline 34 -> current 49, requires >= 10)"
+      "reason": "medium delta = 16 (baseline 34 -> current 50, requires >= 10)"
     },
     {
       "name": "driver_selection_slow",
       "passed": true,
-      "reason": "slow delta = 19 (baseline 35 -> current 54, requires >= 12)"
+      "reason": "slow delta = 20 (baseline 35 -> current 55, requires >= 12)"
     },
     {
       "name": "legacy_placeholder_markers_zero",
@@ -68,5 +68,5 @@
       "reason": "fixture file matches generator output"
     }
   ],
-  "generated_at": "2026-02-26T04:17:22.273040+00:00"
+  "generated_at": "2026-02-26T04:21:39.492254+00:00"
 }

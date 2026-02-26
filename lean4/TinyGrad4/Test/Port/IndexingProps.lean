@@ -203,6 +203,58 @@ def testScatterAxisDimMismatch : IO Unit := do
     #[2.0, 2.0, 3.5, 2.0, 2.0, 6.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0] 0.001
     "scatter add scalar dim=-1 lane"
 
+def testScatterDim1Mismatch : IO Unit := do
+  let (scatterOut, scatterReduceSumOut, scatterAddScalarOut) := runTensorM do
+    let base ← Tensor.zeros [1, 4, 4] .float32
+    let i0 ← Tensor.full [1] .int32 0.0
+    let i1 ← Tensor.full [1] .int32 1.0
+    let i2 ← Tensor.full [1] .int32 2.0
+    let i3 ← Tensor.full [1] .int32 3.0
+    let r00 ← StaticTensor.cat i0 i1 0 (by native_decide)
+    let r01 ← StaticTensor.cat i2 i3 0 (by native_decide)
+    let row0 ← StaticTensor.cat r00 r01 0 (by native_decide)
+    let r10 ← StaticTensor.cat i3 i2 0 (by native_decide)
+    let r11 ← StaticTensor.cat i1 i0 0 (by native_decide)
+    let row1 ← StaticTensor.cat r10 r11 0 (by native_decide)
+    let idx01 ← StaticTensor.cat row0 row1 0 (by native_decide)
+    let idx ← reshapeUnsafe idx01 [1, 2, 4]
+    let src0 ← Tensor.arange 8 .float32
+    let src1 ← addScalar src0 1.0
+    let src ← reshapeUnsafe src1 [1, 2, 4]
+    let scatterOut ← scatter base 1 idx src
+
+    let j0 ← Tensor.full [1] .int32 1.0
+    let j1 ← Tensor.full [1] .int32 1.0
+    let j2 ← Tensor.full [1] .int32 2.0
+    let j3 ← Tensor.full [1] .int32 2.0
+    let k0 ← Tensor.full [1] .int32 1.0
+    let k1 ← Tensor.full [1] .int32 3.0
+    let k2 ← Tensor.full [1] .int32 3.0
+    let k3 ← Tensor.full [1] .int32 0.0
+    let s00 ← StaticTensor.cat j0 j1 0 (by native_decide)
+    let s01 ← StaticTensor.cat j2 j3 0 (by native_decide)
+    let ridxRow0 ← StaticTensor.cat s00 s01 0 (by native_decide)
+    let s10 ← StaticTensor.cat k0 k1 0 (by native_decide)
+    let s11 ← StaticTensor.cat k2 k3 0 (by native_decide)
+    let ridxRow1 ← StaticTensor.cat s10 s11 0 (by native_decide)
+    let ridx01 ← StaticTensor.cat ridxRow0 ridxRow1 0 (by native_decide)
+    let ridx ← reshapeUnsafe ridx01 [1, 2, 4]
+    let rsrc ← reshapeUnsafe src1 [1, 2, 4]
+    let scatterReduceSumOut ← scatterReduce base 1 ridx rsrc .sum false
+    let twosBase ← Tensor.full [1, 4, 4] .float32 2.0
+    let scatterAddScalarOut ← scatterAddScalar twosBase 1 ridx 1.5
+    pure (scatterOut, scatterReduceSumOut, scatterAddScalarOut)
+
+  assertRawAllClose (evalTensor scatterOut)
+    #[1.0, 0.0, 0.0, 8.0, 0.0, 2.0, 7.0, 0.0, 0.0, 6.0, 3.0, 0.0, 5.0, 0.0, 0.0, 4.0] 0.001
+    "scatter dim=1 mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceSumOut)
+    #[0.0, 0.0, 0.0, 8.0, 6.0, 2.0, 0.0, 0.0, 0.0, 0.0, 3.0, 4.0, 0.0, 6.0, 7.0, 0.0] 0.001
+    "scatterReduce sum dim=1 mismatch lane"
+  assertRawAllClose (evalTensor scatterAddScalarOut)
+    #[2.0, 2.0, 2.0, 3.5, 5.0, 3.5, 2.0, 2.0, 2.0, 2.0, 3.5, 3.5, 2.0, 3.5, 3.5, 2.0] 0.001
+    "scatter add scalar dim=1 mismatch lane"
+
 def cases : List TestCase :=
   [
     {
@@ -271,6 +323,14 @@ def cases : List TestCase :=
       ]
       suite := fun _ =>
         ioTest "scatter/scatterReduce dim-mismatch parity lane" testScatterAxisDimMismatch
+    },
+    {
+      name := "indexing.runtime.scatter_dim1_mismatch"
+      group := "indexing"
+      minProfile := .medium
+      pythonRefs := ["test/test_ops.py::test_scatter", "test/test_ops.py::test_scatter_reduce", "test/test_ops.py::test_scatter_add"]
+      suite := fun _ =>
+        ioTest "scatter/scatterReduce/scatterAdd dim=1 mismatch parity lane" testScatterDim1Mismatch
     }
   ]
 

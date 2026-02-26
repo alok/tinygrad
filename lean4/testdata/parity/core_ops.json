@@ -1089,6 +1089,87 @@
     },
     {
       "expected": [
+        1.0,
+        0.0,
+        0.0,
+        8.0,
+        0.0,
+        2.0,
+        7.0,
+        0.0,
+        0.0,
+        6.0,
+        3.0,
+        0.0,
+        5.0,
+        0.0,
+        0.0,
+        4.0
+      ],
+      "id": "scatter_dim1_mismatch_1x4x4",
+      "python_ref": "test/test_ops.py::test_scatter",
+      "shape": [
+        1,
+        4,
+        4
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        0.0,
+        0.0,
+        8.0,
+        6.0,
+        2.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        3.0,
+        4.0,
+        0.0,
+        6.0,
+        7.0,
+        0.0
+      ],
+      "id": "scatter_reduce_sum_dim1_mismatch_1x4x4",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [
+        1,
+        4,
+        4
+      ]
+    },
+    {
+      "expected": [
+        2.0,
+        2.0,
+        2.0,
+        3.5,
+        5.0,
+        3.5,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        3.5,
+        3.5,
+        2.0,
+        3.5,
+        3.5,
+        2.0
+      ],
+      "id": "scatter_add_scalar_dim1_mismatch_1x4x4",
+      "python_ref": "test/test_ops.py::test_scatter_add",
+      "shape": [
+        1,
+        4,
+        4
+      ]
+    },
+    {
+      "expected": [
         2.0,
         2.0,
         3.0,

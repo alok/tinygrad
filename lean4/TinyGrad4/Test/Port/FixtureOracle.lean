@@ -721,6 +721,76 @@ private def runCase (id : String) : IO (Shape × RawBuffer) := do
       let idx ← reshapeUnsafe idxFlat [1, 1, 4]
       scatterAddScalarDim base (-1) idx 1.5
     pure (t.uop.shape, evalTensor t)
+  | "scatter_dim1_mismatch_1x4x4" =>
+    let t := runTensorM do
+      let base ← Tensor.zeros [1, 4, 4] .float32
+
+      let i0 ← Tensor.full [1] .int32 0.0
+      let i1 ← Tensor.full [1] .int32 1.0
+      let i2 ← Tensor.full [1] .int32 2.0
+      let i3 ← Tensor.full [1] .int32 3.0
+      let r00 ← StaticTensor.cat i0 i1 0 (by native_decide)
+      let r01 ← StaticTensor.cat i2 i3 0 (by native_decide)
+      let row0 ← StaticTensor.cat r00 r01 0 (by native_decide)
+      let r10 ← StaticTensor.cat i3 i2 0 (by native_decide)
+      let r11 ← StaticTensor.cat i1 i0 0 (by native_decide)
+      let row1 ← StaticTensor.cat r10 r11 0 (by native_decide)
+      let idx01 ← StaticTensor.cat row0 row1 0 (by native_decide)
+      let idx ← reshapeUnsafe idx01 [1, 2, 4]
+
+      let src0 ← Tensor.arange 8 .float32
+      let src1 ← addScalar src0 1.0
+      let src ← reshapeUnsafe src1 [1, 2, 4]
+      scatter base 1 idx src
+    pure (t.uop.shape, evalTensor t)
+  | "scatter_reduce_sum_dim1_mismatch_1x4x4" =>
+    let t := runTensorM do
+      let base ← Tensor.zeros [1, 4, 4] .float32
+
+      let i0 ← Tensor.full [1] .int32 1.0
+      let i1 ← Tensor.full [1] .int32 1.0
+      let i2 ← Tensor.full [1] .int32 2.0
+      let i3 ← Tensor.full [1] .int32 2.0
+      let j0 ← Tensor.full [1] .int32 1.0
+      let j1 ← Tensor.full [1] .int32 3.0
+      let j2 ← Tensor.full [1] .int32 3.0
+      let j3 ← Tensor.full [1] .int32 0.0
+      let r00 ← StaticTensor.cat i0 i1 0 (by native_decide)
+      let r01 ← StaticTensor.cat i2 i3 0 (by native_decide)
+      let row0 ← StaticTensor.cat r00 r01 0 (by native_decide)
+      let r10 ← StaticTensor.cat j0 j1 0 (by native_decide)
+      let r11 ← StaticTensor.cat j2 j3 0 (by native_decide)
+      let row1 ← StaticTensor.cat r10 r11 0 (by native_decide)
+      let idx01 ← StaticTensor.cat row0 row1 0 (by native_decide)
+      let idx ← reshapeUnsafe idx01 [1, 2, 4]
+
+      let src0 ← Tensor.arange 8 .float32
+      let src1 ← addScalar src0 1.0
+      let src ← reshapeUnsafe src1 [1, 2, 4]
+      scatterReduce base 1 idx src .sum false
+    pure (t.uop.shape, evalTensor t)
+  | "scatter_add_scalar_dim1_mismatch_1x4x4" =>
+    let t := runTensorM do
+      let base ← Tensor.full [1, 4, 4] .float32 2.0
+
+      let i0 ← Tensor.full [1] .int32 1.0
+      let i1 ← Tensor.full [1] .int32 1.0
+      let i2 ← Tensor.full [1] .int32 2.0
+      let i3 ← Tensor.full [1] .int32 2.0
+      let j0 ← Tensor.full [1] .int32 1.0
+      let j1 ← Tensor.full [1] .int32 3.0
+      let j2 ← Tensor.full [1] .int32 3.0
+      let j3 ← Tensor.full [1] .int32 0.0
+      let r00 ← StaticTensor.cat i0 i1 0 (by native_decide)
+      let r01 ← StaticTensor.cat i2 i3 0 (by native_decide)
+      let row0 ← StaticTensor.cat r00 r01 0 (by native_decide)
+      let r10 ← StaticTensor.cat j0 j1 0 (by native_decide)
+      let r11 ← StaticTensor.cat j2 j3 0 (by native_decide)
+      let row1 ← StaticTensor.cat r10 r11 0 (by native_decide)
+      let idx01 ← StaticTensor.cat row0 row1 0 (by native_decide)
+      let idx ← reshapeUnsafe idx01 [1, 2, 4]
+      scatterAddScalar base 1 idx 1.5
+    pure (t.uop.shape, evalTensor t)
   | "scatter_multiply_scalar_dim_mismatch_1x1x16" =>
     let t := runTensorM do
       let base ← Tensor.full [1, 1, 16] .float32 2.0

@@ -82,7 +82,7 @@ def testMaskedSelectPackedCountBounds : IO Unit := do
     "maskedSelectPacked mixed prefix payload"
 
 def testScatterAxisDimMismatch : IO Unit := do
-  let (scatterOut, scatterReduceOut) := runTensorM do
+  let (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut) := runTensorM do
     let base ← Tensor.zeros [1, 1, 16] .float32
     let i0 ← Tensor.full [1] .int32 5.0
     let i1 ← Tensor.full [1] .int32 7.0
@@ -120,15 +120,27 @@ def testScatterAxisDimMismatch : IO Unit := do
     let rsrc23 ← StaticTensor.cat rs2 rs3 0 (by native_decide)
     let rsrcFlat ← StaticTensor.cat rsrc01 rsrc23 0 (by native_decide)
     let rsrc ← reshapeUnsafe rsrcFlat [1, 1, 4]
-    let scatterReduceOut ← scatterReduce base 2 ridx rsrc .sum false
-    pure (scatterOut, scatterReduceOut)
+    let scatterReduceSumOut ← scatterReduce base 2 ridx rsrc .sum false
+    let scatterReduceMeanOut ← scatterReduce base 2 ridx rsrc .mean false
+    let scatterReduceAmaxOut ← scatterReduce base 2 ridx rsrc .amax false
+    let scatterReduceAminOut ← scatterReduce base 2 ridx rsrc .amin false
+    pure (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut)
 
   assertRawAllClose (evalTensor scatterOut)
     #[0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 14.0, 0.0, 16.0] 0.001
     "scatter dim-mismatch lane"
-  assertRawAllClose (evalTensor scatterReduceOut)
+  assertRawAllClose (evalTensor scatterReduceSumOut)
     #[0.0, 0.0, 4.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
-    "scatterReduce dim-mismatch lane"
+    "scatterReduce sum dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceMeanOut)
+    #[0.0, 0.0, 4.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
+    "scatterReduce mean dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceAmaxOut)
+    #[0.0, 0.0, 4.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
+    "scatterReduce amax dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceAminOut)
+    #[0.0, 0.0, 4.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
+    "scatterReduce amin dim-mismatch lane"
 
 def cases : List TestCase :=
   [

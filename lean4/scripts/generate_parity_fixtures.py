@@ -343,6 +343,24 @@ def build_fixtures() -> dict:
       "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="sum", include_self=False)),
     },
     {
+      "id": "scatter_reduce_mean_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="mean", include_self=False)),
+    },
+    {
+      "id": "scatter_reduce_amax_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="amax", include_self=False)),
+    },
+    {
+      "id": "scatter_reduce_amin_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="amin", include_self=False)),
+    },
+    {
       "id": "conv_transpose2d_core_1x1x2x2",
       "python_ref": "test/test_ops.py::test_output_padded_conv_transpose2d",
       "shape": [1, 1, 5, 5],

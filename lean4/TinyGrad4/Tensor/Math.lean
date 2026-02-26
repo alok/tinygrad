@@ -470,6 +470,12 @@ private def intToFloat32 (x : Int) : Float32 :=
   else
     (-Float64.ofNat (-x).toNat).toFloat32
 
+private def float32FiniteMin : Float32 :=
+  Float32.ofBits (0xFF7FFFFF : UInt32)
+
+private def float32FiniteMax : Float32 :=
+  Float32.ofBits (0x7F7FFFFF : UInt32)
+
 /-- Round with ties-to-even behavior, matching tinygrad Tensor.round semantics. -/
 def round {s : List Nat} {d : DType} {device : Backend.DeviceType}
     (t : StaticTensor s d device) : TensorM (StaticTensor s d device) := do
@@ -1657,8 +1663,8 @@ private def scatterReduceF32 {s idxShape srcShape : Shape} {device : Backend.Dev
     let countT : StaticTensor s .float32 device  := StaticTensor.ofUOp countAddU
     div baseNum countT
   | .amax =>
-    let negInf ← UOp.const .float32 (-1.0e38)
-    let maskedMax ← UOp.where_ maskP.uop srcP.uop negInf
+    let minFinite ← UOp.const .float32 float32FiniteMin
+    let maskedMax ← UOp.where_ maskP.uop srcP.uop minFinite
     let maxU ← UOp.max_ maskedMax [lastAxis] false
     let maxT : StaticTensor s .float32 device  := StaticTensor.ofUOp maxU
     if includeSelf then
@@ -1668,19 +1674,18 @@ private def scatterReduceF32 {s idxShape srcShape : Shape} {device : Backend.Dev
       let outU ← UOp.where_ noUpdate.uop self.uop maxT.uop
       pure (StaticTensor.ofUOp outU)
   | .amin =>
-    let negInf ← UOp.const .float32 (-1.0e38)
-    let negSrc ← neg srcP
-    let negSelf ← neg self
-    let maskedNeg ← UOp.where_ maskP.uop negSrc.uop negInf
-    let maxNegU ← UOp.max_ maskedNeg [lastAxis] false
-    let maxNegT : StaticTensor s .float32 device  := StaticTensor.ofUOp maxNegU
-    let mergedNegU ←
-      if includeSelf then
-        UOp.maxBinary maxNegT.uop negSelf.uop
-      else
-        UOp.where_ noUpdate.uop negSelf.uop maxNegT.uop
-    let mergedNegT : StaticTensor s .float32 device  := StaticTensor.ofUOp mergedNegU
-    neg mergedNegT
+    let maxFinite ← UOp.const .float32 float32FiniteMax
+    let maskedMin ← UOp.where_ maskP.uop srcP.uop maxFinite
+    let negMasked ← UOp.neg maskedMin
+    let maxNegU ← UOp.max_ negMasked [lastAxis] false
+    let minU ← UOp.neg maxNegU
+    let minT : StaticTensor s .float32 device := StaticTensor.ofUOp minU
+    if includeSelf then
+      let outU ← minBinaryUOp minT.uop self.uop
+      pure (StaticTensor.ofUOp outU)
+    else
+      let outU ← UOp.where_ noUpdate.uop self.uop minT.uop
+      pure (StaticTensor.ofUOp outU)
 
 def scatterReduce {s idxShape srcShape : Shape} {device : Backend.DeviceType}
     (self : StaticTensor s .float32 device) (dim : Nat)
@@ -1712,12 +1717,57 @@ def scatter {s idxShape srcShape : Shape} {device : Backend.DeviceType}
   let indexF ← cast index .float32
   scatterF32 self dim indexF src
 
+/-- Scatter with a scalar source value, matching tinygrad `scatter(..., value=...)` behavior. -/
+def scatterScalar {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Nat)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) := do
+  let src ← Tensor.full (device := device) idxShape .float32 value
+  scatter self dim index src
+
+/-- Scatter-add with scalar source, matching tinygrad `scatter(..., reduce='add')`. -/
+def scatterAddScalar {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Nat)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) := do
+  let src ← Tensor.full (device := device) idxShape .float32 value
+  scatterReduce self dim index src .sum true
+
+/-- Scatter-multiply with scalar source, matching tinygrad `scatter(..., reduce='multiply')`. -/
+def scatterMultiplyScalar {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Nat)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) := do
+  let src ← Tensor.full (device := device) idxShape .float32 value
+  scatterReduce self dim index src .prod true
+
 /-- Axis-typed scatter: axis bounds are checked by the type system. -/
 def scatterAxis {s idxShape srcShape : Shape} {device : Backend.DeviceType}
     (self : StaticTensor s .float32 device) (dim : Fin s.length)
     (index : StaticTensor idxShape .int32 device) (src : StaticTensor srcShape .float32 device)
     : TensorM (StaticTensor s .float32 device) :=
   scatter self dim.1 index src
+
+/-- Axis-typed scalar scatter. -/
+def scatterScalarAxis {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Fin s.length)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatterScalar self dim.1 index value
+
+/-- Axis-typed scalar scatter-add. -/
+def scatterAddScalarAxis {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Fin s.length)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatterAddScalar self dim.1 index value
+
+/-- Axis-typed scalar scatter-multiply. -/
+def scatterMultiplyScalarAxis {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Fin s.length)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatterMultiplyScalar self dim.1 index value
 
 /-- Log-sum-exp along axis (numerically stable). -/
 def logsumexpAxis {s : List Nat} {d : DType} {device : Backend.DeviceType} (t : StaticTensor s d device) (axis : Nat) (keepdim : Bool := true)

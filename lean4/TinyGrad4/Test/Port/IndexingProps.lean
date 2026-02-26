@@ -83,7 +83,8 @@ def testMaskedSelectPackedCountBounds : IO Unit := do
 
 def testScatterAxisDimMismatch : IO Unit := do
   let (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut,
-      scatterReduceSumIncludeSelfOut, scatterReduceProdIncludeSelfOut) := runTensorM do
+      scatterReduceSumIncludeSelfOut, scatterReduceProdIncludeSelfOut, scatterReduceMeanIncludeSelfOut,
+      scatterReduceAmaxIncludeSelfOut, scatterReduceAminIncludeSelfOut, scatterAddScalarOut, scatterMulScalarOut) := runTensorM do
     let base ← Tensor.zeros [1, 1, 16] .float32
     let i0 ← Tensor.full [1] .int32 5.0
     let i1 ← Tensor.full [1] .int32 7.0
@@ -137,8 +138,16 @@ def testScatterAxisDimMismatch : IO Unit := do
     let onesBase ← Tensor.ones [1, 1, 16] .float32
     let scatterReduceSumIncludeSelfOut ← scatterReduce onesBase 2 ridx rsrc .sum true
     let scatterReduceProdIncludeSelfOut ← scatterReduce onesBase 2 ridx psrc .prod true
+    let scatterReduceMeanIncludeSelfOut ← scatterReduce onesBase 2 ridx rsrc .mean true
+    let scatterReduceAmaxIncludeSelfOut ← scatterReduce onesBase 2 ridx rsrc .amax true
+    let highBase ← Tensor.full [1, 1, 16] .float32 10.0
+    let scatterReduceAminIncludeSelfOut ← scatterReduce highBase 2 ridx rsrc .amin true
+    let twosBase ← Tensor.full [1, 1, 16] .float32 2.0
+    let scatterAddScalarOut ← scatterAddScalar twosBase 2 ridx 1.5
+    let scatterMulScalarOut ← scatterMultiplyScalar twosBase 2 ridx 1.5
     pure (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut,
-      scatterReduceSumIncludeSelfOut, scatterReduceProdIncludeSelfOut)
+      scatterReduceSumIncludeSelfOut, scatterReduceProdIncludeSelfOut, scatterReduceMeanIncludeSelfOut,
+      scatterReduceAmaxIncludeSelfOut, scatterReduceAminIncludeSelfOut, scatterAddScalarOut, scatterMulScalarOut)
 
   assertRawAllClose (evalTensor scatterOut)
     #[0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 14.0, 0.0, 16.0] 0.001
@@ -164,6 +173,21 @@ def testScatterAxisDimMismatch : IO Unit := do
   assertRawAllClose (evalTensor scatterReduceProdIncludeSelfOut)
     #[1.0, 1.0, 5.0, 1.0, 1.0, 24.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0] 0.001
     "scatterReduce prod include_self dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceMeanIncludeSelfOut)
+    #[1.0, 1.0, 2.5, 1.0, 1.0, 1.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0] 0.001
+    "scatterReduce mean include_self dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceAmaxIncludeSelfOut)
+    #[1.0, 1.0, 4.0, 1.0, 1.0, 3.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0] 0.001
+    "scatterReduce amax include_self dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterReduceAminIncludeSelfOut)
+    #[10.0, 10.0, 4.0, 10.0, 10.0, 1.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0] 0.001
+    "scatterReduce amin include_self dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterAddScalarOut)
+    #[2.0, 2.0, 3.5, 2.0, 2.0, 6.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0] 0.001
+    "scatter add scalar dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterMulScalarOut)
+    #[2.0, 2.0, 3.0, 2.0, 2.0, 6.75, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0] 0.001
+    "scatter multiply scalar dim-mismatch lane"
 
 def cases : List TestCase :=
   [
@@ -224,7 +248,13 @@ def cases : List TestCase :=
       name := "indexing.runtime.scatter_dim_mismatch"
       group := "indexing"
       minProfile := .medium
-      pythonRefs := ["test/test_ops.py::test_scatter", "test/test_ops.py::test_scatter_reduce", "test/test_ops.py::test_max_unpool2d"]
+      pythonRefs := [
+        "test/test_ops.py::test_scatter",
+        "test/test_ops.py::test_scatter_add",
+        "test/test_ops.py::test_scatter_mul",
+        "test/test_ops.py::test_scatter_reduce",
+        "test/test_ops.py::test_max_unpool2d"
+      ]
       suite := fun _ =>
         ioTest "scatter/scatterReduce dim-mismatch parity lane" testScatterAxisDimMismatch
     }

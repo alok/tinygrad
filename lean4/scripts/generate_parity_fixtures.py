@@ -46,11 +46,14 @@ def build_fixtures() -> dict:
   ms_packed[:ms_sel.numel()] = ms_sel.numpy().reshape(-1)
   scatter_base = Tensor.zeros(1, 1, 16).float()
   scatter_ones = Tensor.ones(1, 1, 16).float()
+  scatter_twos = Tensor.full((1, 1, 16), 2.0).float()
   scatter_idx = Tensor([5, 7, 13, 15], dtype="int").reshape(1, 1, 4)
   scatter_src = Tensor([6.0, 8.0, 14.0, 16.0]).float().reshape(1, 1, 4)
   scatter_ridx = Tensor([5, 5, 5, 2], dtype="int").reshape(1, 1, 4)
   scatter_rsrc = Tensor([1.0, 2.0, 3.0, 4.0]).float().reshape(1, 1, 4)
   scatter_psrc = Tensor([2.0, 3.0, 4.0, 5.0]).float().reshape(1, 1, 4)
+  scatter_extreme_neg = Tensor([-2.0e38, -2.5e38, -1.5e38, -3.0e38]).float().reshape(1, 1, 4)
+  scatter_extreme_pos = Tensor([2.0e38, 2.5e38, 1.5e38, 3.0e38]).float().reshape(1, 1, 4)
   conv_t_x = (Tensor.arange(4).reshape(1, 1, 2, 2) + 1).float()
   conv_t_w = Tensor.ones(1, 1, 2, 2).float()
   pooled_2x2 = Tensor([6.0, 8.0, 14.0, 16.0]).reshape(1, 1, 2, 2).float()
@@ -379,6 +382,30 @@ def build_fixtures() -> dict:
       "python_ref": "test/test_ops.py::test_scatter_reduce",
       "shape": [1, 1, 16],
       "expected": _flatten(scatter_ones.scatter_reduce(2, scatter_ridx, scatter_psrc, reduce="prod", include_self=True)),
+    },
+    {
+      "id": "scatter_add_scalar_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_add",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_twos.scatter(2, scatter_ridx, 1.5, reduce="add")),
+    },
+    {
+      "id": "scatter_multiply_scalar_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_mul",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_twos.scatter(2, scatter_ridx, 1.5, reduce="multiply")),
+    },
+    {
+      "id": "scatter_reduce_amax_extreme_neg_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_extreme_neg, reduce="amax", include_self=False)),
+    },
+    {
+      "id": "scatter_reduce_amin_extreme_pos_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_extreme_pos, reduce="amin", include_self=False)),
     },
     {
       "id": "conv_transpose2d_core_1x1x2x2",

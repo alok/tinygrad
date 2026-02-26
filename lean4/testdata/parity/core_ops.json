@@ -900,6 +900,114 @@
     },
     {
       "expected": [
+        2.0,
+        2.0,
+        3.5,
+        2.0,
+        2.0,
+        6.5,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "id": "scatter_add_scalar_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_add",
+      "shape": [
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "expected": [
+        2.0,
+        2.0,
+        3.0,
+        2.0,
+        2.0,
+        6.75,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "id": "scatter_multiply_scalar_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_mul",
+      "shape": [
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        0.0,
+        -3.0000000054977558e+38,
+        0.0,
+        0.0,
+        -1.5000000027488779e+38,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "id": "scatter_reduce_amax_extreme_neg_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "expected": [
+        0.0,
+        0.0,
+        3.0000000054977558e+38,
+        0.0,
+        0.0,
+        1.5000000027488779e+38,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "id": "scatter_reduce_amin_extreme_pos_dim_mismatch_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "expected": [
         1.0,
         1.0,
         2.0,

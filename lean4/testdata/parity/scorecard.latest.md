@@ -1,12 +1,12 @@
 # Parity Scorecard
 
-- generated_at: 2026-02-26T03:18:48.057496+00:00
+- generated_at: 2026-02-26T04:08:56.319140+00:00
 - baseline_source: 505b70a0506d72db10ada998280bf4ed10bbf5da
 - check_passed: True
 
 ## Current
 - parity: implemented=38, partial=14, missing=0
-- fixtures: 58
+- fixtures: 62
 - selections: fast=35, medium=49, slow=54
 - legacy markers: 0
 

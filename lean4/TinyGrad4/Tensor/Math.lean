@@ -1235,6 +1235,16 @@ private def resolveDim (dim rank : Nat) : Nat :=
   if dim < rank then dim else
     panic! s!"dim {dim} out of range for rank {rank}"
 
+private def resolveDimSigned (dim : Int) (rank : Nat) : Nat :=
+  if dim >= 0 then
+    resolveDim dim.toNat rank
+  else
+    let fromBack := (-dim).toNat
+    if fromBack == 0 || fromBack > rank then
+      panic! s!"dim {dim} out of range for rank {rank}"
+    else
+      rank - fromBack
+
 private def replaceDim (shape : Shape) (axis newDim : Nat) : Shape :=
   (listEnum shape).map fun p =>
     if p.1 == axis then newDim else p.2
@@ -1695,6 +1705,14 @@ def scatterReduce {s idxShape srcShape : Shape} {device : Backend.DeviceType}
   let indexF ← cast index .float32
   scatterReduceF32 self dim indexF src reduce includeSelf
 
+/-- Signed-dimension scatterReduce wrapper (supports Python-style negative dims). -/
+def scatterReduceDim {s idxShape srcShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Int)
+    (index : StaticTensor idxShape .int32 device) (src : StaticTensor srcShape .float32 device)
+    (reduce : ScatterReduce) (includeSelf : Bool := true)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatterReduce self (resolveDimSigned dim s.length) index src reduce includeSelf
+
 /-- Axis-typed scatterReduce: axis bounds are checked by the type system. -/
 def scatterReduceAxis {s idxShape srcShape : Shape} {device : Backend.DeviceType}
     (self : StaticTensor s .float32 device) (dim : Fin s.length)
@@ -1717,6 +1735,13 @@ def scatter {s idxShape srcShape : Shape} {device : Backend.DeviceType}
   let indexF ← cast index .float32
   scatterF32 self dim indexF src
 
+/-- Signed-dimension scatter wrapper (supports Python-style negative dims). -/
+def scatterDim {s idxShape srcShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Int)
+    (index : StaticTensor idxShape .int32 device) (src : StaticTensor srcShape .float32 device)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatter self (resolveDimSigned dim s.length) index src
+
 /-- Scatter with a scalar source value, matching tinygrad `scatter(..., value=...)` behavior. -/
 def scatterScalar {s idxShape : Shape} {device : Backend.DeviceType}
     (self : StaticTensor s .float32 device) (dim : Nat)
@@ -1724,6 +1749,13 @@ def scatterScalar {s idxShape : Shape} {device : Backend.DeviceType}
     : TensorM (StaticTensor s .float32 device) := do
   let src ← Tensor.full (device := device) idxShape .float32 value
   scatter self dim index src
+
+/-- Signed-dimension scalar scatter wrapper. -/
+def scatterScalarDim {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Int)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatterScalar self (resolveDimSigned dim s.length) index value
 
 /-- Scatter-add with scalar source, matching tinygrad `scatter(..., reduce='add')`. -/
 def scatterAddScalar {s idxShape : Shape} {device : Backend.DeviceType}
@@ -1733,6 +1765,13 @@ def scatterAddScalar {s idxShape : Shape} {device : Backend.DeviceType}
   let src ← Tensor.full (device := device) idxShape .float32 value
   scatterReduce self dim index src .sum true
 
+/-- Signed-dimension scalar scatter-add wrapper. -/
+def scatterAddScalarDim {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Int)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatterAddScalar self (resolveDimSigned dim s.length) index value
+
 /-- Scatter-multiply with scalar source, matching tinygrad `scatter(..., reduce='multiply')`. -/
 def scatterMultiplyScalar {s idxShape : Shape} {device : Backend.DeviceType}
     (self : StaticTensor s .float32 device) (dim : Nat)
@@ -1740,6 +1779,13 @@ def scatterMultiplyScalar {s idxShape : Shape} {device : Backend.DeviceType}
     : TensorM (StaticTensor s .float32 device) := do
   let src ← Tensor.full (device := device) idxShape .float32 value
   scatterReduce self dim index src .prod true
+
+/-- Signed-dimension scalar scatter-multiply wrapper. -/
+def scatterMultiplyScalarDim {s idxShape : Shape} {device : Backend.DeviceType}
+    (self : StaticTensor s .float32 device) (dim : Int)
+    (index : StaticTensor idxShape .int32 device) (value : Float32)
+    : TensorM (StaticTensor s .float32 device) :=
+  scatterMultiplyScalar self (resolveDimSigned dim s.length) index value
 
 /-- Axis-typed scatter: axis bounds are checked by the type system. -/
 def scatterAxis {s idxShape srcShape : Shape} {device : Backend.DeviceType}

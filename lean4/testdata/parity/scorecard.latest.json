@@ -16,7 +16,7 @@
   },
   "check_passed": true,
   "current": {
-    "fixture_case_count": 65,
+    "fixture_case_count": 68,
     "legacy_hits": [],
     "legacy_marker_count": 0,
     "parity_counts": {
@@ -68,5 +68,5 @@
       "reason": "fixture file matches generator output"
     }
   ],
-  "generated_at": "2026-02-26T04:12:53.993426+00:00"
+  "generated_at": "2026-02-26T04:17:22.273040+00:00"
 }

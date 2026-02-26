@@ -343,10 +343,22 @@ def build_fixtures() -> dict:
       "expected": _flatten(scatter_base.scatter(2, scatter_idx, scatter_src)),
     },
     {
+      "id": "scatter_neg_dim_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_base.scatter(-1, scatter_idx, scatter_src)),
+    },
+    {
       "id": "scatter_reduce_sum_dim_mismatch_1x1x16",
       "python_ref": "test/test_ops.py::test_scatter_reduce",
       "shape": [1, 1, 16],
       "expected": _flatten(scatter_base.scatter_reduce(2, scatter_ridx, scatter_rsrc, reduce="sum", include_self=False)),
+    },
+    {
+      "id": "scatter_reduce_sum_neg_dim_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_reduce",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_base.scatter_reduce(-1, scatter_ridx, scatter_rsrc, reduce="sum", include_self=False)),
     },
     {
       "id": "scatter_reduce_mean_dim_mismatch_1x1x16",
@@ -407,6 +419,12 @@ def build_fixtures() -> dict:
       "python_ref": "test/test_ops.py::test_scatter_add",
       "shape": [1, 1, 16],
       "expected": _flatten(scatter_twos.scatter(2, scatter_ridx, 1.5, reduce="add")),
+    },
+    {
+      "id": "scatter_add_scalar_neg_dim_1x1x16",
+      "python_ref": "test/test_ops.py::test_scatter_add",
+      "shape": [1, 1, 16],
+      "expected": _flatten(scatter_twos.scatter(-1, scatter_ridx, 1.5, reduce="add")),
     },
     {
       "id": "scatter_multiply_scalar_dim_mismatch_1x1x16",

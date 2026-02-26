@@ -25,7 +25,7 @@ Legend: [x] implemented, [~] partial/bridge, [ ] missing
 ## Indexing & masking
 - [x] where (elementwise select)
 - [x] gather (general axis + typed-axis helpers)
-- [x] scatter / scatter_reduce (general axis + typed-axis helpers, plus scalar-source `scatterScalar`/`scatterAddScalar`/`scatterMultiplyScalar`)
+- [x] scatter / scatter_reduce (general axis + typed-axis helpers, signed-dim wrappers, plus scalar-source `scatterScalar`/`scatterAddScalar`/`scatterMultiplyScalar`)
 - [~] masked_fill / masked_select (`maskedFill` exact shape-preserving, `maskedSelectPacked` front-packed bridge + count)
 - [x] take / item (`take` static index-shape lane, `item` scalar-only with runtime error for non-scalar)
 - [~] diag / diagonal / tril / triu (`tril`/`triu` include diagonal offsets; `diag`/`diagonal` core vector<->matrix forms without offset)

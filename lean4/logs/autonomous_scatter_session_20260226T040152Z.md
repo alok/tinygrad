@@ -28,3 +28,8 @@
 ## 2026-02-26T04:13:55Z checkpoint
 - landed fixture-oracle include_self lanes for scatter_reduce mean/amax/amin
 - regenerated fixtures and re-ran full blocking gates + pre-commit; all passed
+
+## 2026-02-26T04:18:11Z checkpoint
+- added signed-dim scatter/scatter_reduce/scalar wrappers and covered dim=-1 lane
+- expanded fixture-oracle ids for signed-dim scatter, signed-dim scatter_reduce sum, signed-dim scatter_add_scalar
+- re-ran full blocking gates + pre-commit; all passed

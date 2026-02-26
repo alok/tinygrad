@@ -84,7 +84,8 @@ def testMaskedSelectPackedCountBounds : IO Unit := do
 def testScatterAxisDimMismatch : IO Unit := do
   let (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut,
       scatterReduceSumIncludeSelfOut, scatterReduceProdIncludeSelfOut, scatterReduceMeanIncludeSelfOut,
-      scatterReduceAmaxIncludeSelfOut, scatterReduceAminIncludeSelfOut, scatterAddScalarOut, scatterMulScalarOut) := runTensorM do
+      scatterReduceAmaxIncludeSelfOut, scatterReduceAminIncludeSelfOut, scatterAddScalarOut, scatterMulScalarOut,
+      scatterOutNegDim, scatterReduceSumNegDimOut, scatterAddScalarNegDimOut) := runTensorM do
     let base ← Tensor.zeros [1, 1, 16] .float32
     let i0 ← Tensor.full [1] .int32 5.0
     let i1 ← Tensor.full [1] .int32 7.0
@@ -104,6 +105,7 @@ def testScatterAxisDimMismatch : IO Unit := do
     let srcFlat ← StaticTensor.cat src01 src23 0 (by native_decide)
     let src ← reshapeUnsafe srcFlat [1, 1, 4]
     let scatterOut ← scatter base 2 idx src
+    let scatterOutNegDim ← scatterDim base (-1) idx src
 
     let ridx0 ← Tensor.full [1] .int32 5.0
     let ridx1 ← Tensor.full [1] .int32 5.0
@@ -145,9 +147,12 @@ def testScatterAxisDimMismatch : IO Unit := do
     let twosBase ← Tensor.full [1, 1, 16] .float32 2.0
     let scatterAddScalarOut ← scatterAddScalar twosBase 2 ridx 1.5
     let scatterMulScalarOut ← scatterMultiplyScalar twosBase 2 ridx 1.5
+    let scatterReduceSumNegDimOut ← scatterReduceDim base (-1) ridx rsrc .sum false
+    let scatterAddScalarNegDimOut ← scatterAddScalarDim twosBase (-1) ridx 1.5
     pure (scatterOut, scatterReduceSumOut, scatterReduceMeanOut, scatterReduceAmaxOut, scatterReduceAminOut, scatterReduceProdOut,
       scatterReduceSumIncludeSelfOut, scatterReduceProdIncludeSelfOut, scatterReduceMeanIncludeSelfOut,
-      scatterReduceAmaxIncludeSelfOut, scatterReduceAminIncludeSelfOut, scatterAddScalarOut, scatterMulScalarOut)
+      scatterReduceAmaxIncludeSelfOut, scatterReduceAminIncludeSelfOut, scatterAddScalarOut, scatterMulScalarOut,
+      scatterOutNegDim, scatterReduceSumNegDimOut, scatterAddScalarNegDimOut)
 
   assertRawAllClose (evalTensor scatterOut)
     #[0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 14.0, 0.0, 16.0] 0.001
@@ -188,6 +193,15 @@ def testScatterAxisDimMismatch : IO Unit := do
   assertRawAllClose (evalTensor scatterMulScalarOut)
     #[2.0, 2.0, 3.0, 2.0, 2.0, 6.75, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0] 0.001
     "scatter multiply scalar dim-mismatch lane"
+  assertRawAllClose (evalTensor scatterOutNegDim)
+    #[0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 14.0, 0.0, 16.0] 0.001
+    "scatter dim=-1 lane"
+  assertRawAllClose (evalTensor scatterReduceSumNegDimOut)
+    #[0.0, 0.0, 4.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 0.001
+    "scatterReduce sum dim=-1 lane"
+  assertRawAllClose (evalTensor scatterAddScalarNegDimOut)
+    #[2.0, 2.0, 3.5, 2.0, 2.0, 6.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0] 0.001
+    "scatter add scalar dim=-1 lane"
 
 def cases : List TestCase :=
   [

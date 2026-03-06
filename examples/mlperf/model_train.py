@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling, profile_marker, DEBUG
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
@@ -1008,6 +1008,7 @@ def train_bert():
   config["DISABLE_DROPOUT"] = getenv("DISABLE_DROPOUT", 0)
   config["TRAIN_BEAM"]    = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["EVAL_BEAM"]     = EVAL_BEAM  = getenv("EVAL_BEAM", BEAM.value)
+  config["FP8_TRAIN"]     = getenv("FP8_TRAIN", 0)
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
@@ -1147,7 +1148,7 @@ def train_bert():
 
         device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
         loss = loss.item()
-        assert not math.isnan(loss)
+        if not getenv("FP8_TRAIN"): assert not math.isnan(loss)
         lr = lr.item()
 
       cl = time.perf_counter()
@@ -1160,7 +1161,7 @@ def train_bert():
       if WANDB:
         wandb.log({"lr": lr, "train/loss": loss, "train/global_norm": global_norm.item(), "train/step_time": cl - st,
                     "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*GBS})
+                    "train/mem":GlobalCounters.mem_used / 1e9, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*GBS})
 
       train_data, next_data = next_data, None
       i += 1
@@ -1284,18 +1285,26 @@ def train_llama3():
   from extra.models.llama import Transformer
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
+  from examples.mlperf.optim import GradAccClipAdamW
+
+  BENCHMARK = getenv("BENCHMARK")
 
   config = {}
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
-  assert grad_acc == 1, f"{grad_acc=} is not supported"
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
+  DATA_SEED          = config["DATA_SEED"]              = getenv("DATA_SEED", SEED)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
   SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
+  EVAL_SAMPLES       = config["EVAL_SAMPLES"]           = getenv("EVAL_SAMPLES", 5760 if not SMALL else 1024)
+  MAX_STEPS          = config["MAX_STEPS"]              = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS))
+  WARMUP_STEPS       = config["WARMUP_STEPS"]           = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
+  LR                 = config["LR"]                     = getenv("LR", 8e-5 * GBS / 1152)
+  END_LR             = config["END_LR"]                 = getenv("END_LR", 8e-7)
   EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
   EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
@@ -1309,10 +1318,12 @@ def train_llama3():
   opt_adamw_weight_decay = 0.1
 
   opt_gradient_clip_norm = 1.0
-  opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
-  opt_learning_rate_decay_steps = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS)) - opt_learning_rate_warmup_steps
-  opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
-  opt_end_learning_rate = getenv("END_LR", 8e-7)
+  opt_learning_rate_warmup_steps = WARMUP_STEPS
+  opt_learning_rate_decay_steps = MAX_STEPS - opt_learning_rate_warmup_steps
+  opt_base_learning_rate = LR
+  opt_end_learning_rate = END_LR
+
+  Tensor.manual_seed(SEED)  # seed for weight initialization
 
   # ** init wandb **
   WANDB = getenv("WANDB")
@@ -1324,7 +1335,14 @@ def train_llama3():
   model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
+  real_vocab_size = model_params['vocab_size']
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
+  print(f"model parameters: {model_params}")
+
+  # pad vocab
+  if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
+  vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
+
   model = Transformer(**model_params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
   params = get_parameters(model)
   # weights are all bfloat16 for now
@@ -1339,6 +1357,8 @@ def train_llama3():
     for v in get_parameters(model):
       v.shard_(device, axis=None)
 
+    vocab_mask.shard_(device, axis=None)
+
   if (MP := getenv("MP", 1)) > 1:
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
     for k,v in get_state_dict(model).items():
@@ -1346,6 +1366,7 @@ def train_llama3():
       elif '.attention.wq' in k: v.shard_(device, axis=0)
       elif '.attention.wk' in k: v.shard_(device, axis=0)
       elif '.attention.wv' in k: v.shard_(device, axis=0)
+      elif '.attention.wqkv' in k: v.shard_(device, axis=0)
       elif '.attention.wo' in k: v.shard_(device, axis=1)
       elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
       elif '.feed_forward.w2.' in k: v.shard_(device, axis=1)
@@ -1358,8 +1379,19 @@ def train_llama3():
       # prevents memory spike on device 0
       v.realize()
 
-  optim = AdamW(get_parameters(model), lr=0.0,
-                b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
+    vocab_mask.shard_(device, axis=2).realize()
+
+  optim_device = "CPU" if getenv("OFFLOAD_OPTIM") else None
+  optim = GradAccClipAdamW(get_parameters(model), lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+                           eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
+
+  # init grads
+  for p in optim.params:
+    p.grad = p.empty_like().realize()
+  grads: list[Tensor] = [p.grad for p in optim.params]
+  for p in optim.params:
+    p.grad.assign(p.grad.zeros_like()).realize()
+
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
   if resume_ckpt := getenv("RESUME_CKPT"):
@@ -1372,98 +1404,137 @@ def train_llama3():
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   @TinyJit
-  @Tensor.train()
-  def train_step(model, tokens:Tensor):
-    optim.zero_grad()
+  def minibatch(tokens:Tensor):
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-      tokens = tokens.shard(device, 0)
+      tokens = tokens.to(None).shard(device, 0)
     if (MP := getenv("MP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
+    if DP == 1 and MP == 1: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
-    # L2 norm grad clip
-    # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
-    # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
-    if not getenv("DISABLE_GRAD_CLIP_NORM"):
-      total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
-      for p in optim.params:
-        total_norm += p.grad.float().square().sum()
-      total_norm = total_norm.sqrt().contiguous()
-      for p in optim.params:
-        p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
+    assert all(p.grad is g for p,g in zip(optim.params, grads))
+    Tensor.realize(loss, *grads)
+    return loss.flatten().float().to("CPU")
 
-    optim.step()
+  @TinyJit
+  def optim_step():
+    grad_norm = optim.fstep(grads)
     scheduler.step()
 
+    for g in grads:
+      g.assign(g.zeros_like()).realize()
+
     lr = optim.lr
-    loss.realize(lr)
-    return loss, lr
+    Tensor.realize(lr, *grads)
+
+    return lr.float().to("CPU"), grad_norm.float().to("CPU")
 
   @TinyJit
   @Tensor.train(False)
-  def eval_step(model, tokens:Tensor):
+  def eval_step(tokens:Tensor):
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-      tokens = tokens.shard(device, 0)
+      tokens = tokens.to(None).shard(device, 0)
     if (MP := getenv("MP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
+    if DP == 1 and MP == 1: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
-    return loss.flatten().float()
+    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
+    return loss.flatten().float().to("CPU")
 
   # ** data iters **
   def fake_data(bs, samples):
+    import numpy as np
     for _ in range(samples // bs):
-      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=model_params["vocab_size"], dtype=dtypes.int32, device=Device.DEFAULT)
+      fake_data_np = np.random.randint(0, model_params["vocab_size"], size=(bs, SEQLEN + 1), dtype=np.int32)
+      yield Tensor(fake_data_np, device="NPY")
 
   def get_train_iter():
     if getenv("FAKEDATA", 0):
       return fake_data(BS, SAMPLES)
     else:
       from examples.mlperf.dataloader import batch_load_llama3
-      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL))
+      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL))
 
   if getenv("FAKEDATA", 0):
     eval_dataset = None
   else:
     from examples.mlperf.dataloader import get_llama3_dataset
-    eval_dataset = get_llama3_dataset(5760, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
+    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
 
   def get_eval_iter():
     if eval_dataset is None:
-      return fake_data(EVAL_BS, 5760)
+      return fake_data(EVAL_BS, EVAL_SAMPLES)
     from examples.mlperf.dataloader import iterate_llama3_dataset
     return iterate_llama3_dataset(eval_dataset, EVAL_BS)
 
-  iter = get_train_iter()
+  num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
+  train_iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
-  for tokens in tqdm(iter, total=SAMPLES//GBS):
+  step_times = []
+  while i < MAX_STEPS:
     GlobalCounters.reset()
+    actual_gbs = GBS if i >= 2 else BS
     if getenv("TRAIN", 1):
-      t = time.perf_counter()
-      loss, lr = train_step(model, tokens)
-      loss = loss.float().item()
-      lr = lr.item()
+      profile_marker(f"train @ {i}")
+      st = time.perf_counter()
+
+      stopped = False
+      losses, data_time, dev_time = [], 0, 0
+      for _ in range(grad_acc if i >= 2 else 1):
+        ist = time.perf_counter()
+        try: tokens = next(train_iter)
+        except StopIteration:
+          stopped = True
+          break
+        mst = time.perf_counter()
+        data_time += mst - ist
+        losses.append(minibatch(tokens).item())
+        dev_time += time.perf_counter() - mst
+      if stopped: break
+
+      gt = time.perf_counter()
+      ret = optim_step()
+      lr, grad_norm = ret[0].item(), ret[1].item()
+      et = time.perf_counter()
+
+      loss = sum(losses) / len(losses)
+      optim_time = et - gt
+      dev_time += optim_time
+      step_time = et - st
+      gbs_time = gt - st
+      if BENCHMARK: step_times.append(step_time)
 
       i += 1
-      sequences_seen += tokens.shape[0]
+      sequences_seen += actual_gbs
 
-      sec = time.perf_counter()-t
       mem_gb = GlobalCounters.mem_used / 1e9
-      gflops = GlobalCounters.global_ops / 1e9 / sec
+      gflops = GlobalCounters.global_ops / 1e9 / dev_time
+      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * max(getenv("DP", 1), getenv("MP", 1)) * 2.3e15)) * 100
       tqdm.write(
-        f"{i:5} {sec:.2f} s run, {loss:.4f} loss, {lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
-
-      if (fname:=getenv("LOSS_FILE", "")):
-        with open(fname, "a") as f:
-          f.write(f"{i} {loss:.4f} {lr:.12f} {mem_gb:.2f}\n")
+          f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
+          f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
+      if DEBUG >= 1: tqdm.write("  mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
 
       if WANDB:
-        wandb.log({"lr": lr, "train/loss": loss, "train/step_time": sec, "train/GFLOPS": gflops, "train/sequences_seen": sequences_seen})
+        wandb.log({
+          "train/loss": loss,
+          "train/lr": lr,
+          "train/grad_norm": grad_norm,
+          "train/step_time": step_time,
+          "train/gbs_time": gbs_time,
+          "train/optim_time": optim_time,
+          "train/dev_time": dev_time,
+          "train/data_time": data_time,
+          "train/mem": mem_gb,
+          "train/GFLOPS": gflops,
+          "train/MFU": mfu,
+          "train/sequences_seen": sequences_seen
+        })
 
       if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
         tqdm.write("saving checkpoint")
@@ -1475,16 +1546,29 @@ def train_llama3():
         fn = f"{ckpt_dir}/llama3_{i}_optim.safe"
         safe_save(get_state_dict(scheduler), fn)
 
-    if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1):
+      if i == BENCHMARK:
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]
+        estimated_total_minutes = int(median_step_time * (SAMPLES // GBS) / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+        print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
+              f"epoch global_mem: {GlobalCounters.global_mem:_}")
+
+    if (sequences_seen // EVAL_FREQ != (sequences_seen - actual_gbs) // EVAL_FREQ and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
+      if EVAL_BS == 0: return
       tqdm.write(f"evaluating after {sequences_seen} sequences")
+      profile_marker(f"eval @ {i}")
 
       # run eval
       eval_losses = []
       eval_iter = get_eval_iter()
-      tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
+      tqdm.write(f"evaluating {EVAL_SAMPLES//EVAL_BS} batches of {EVAL_BS} sequences")
 
-      for tokens in tqdm(eval_iter, total=5760//EVAL_BS):
-        eval_losses += eval_step(model, tokens).tolist()
+      for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
+        eval_losses += eval_step(tokens).tolist()
+
+        if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
+          return
+
       log_perplexity = Tensor(eval_losses).mean().float().item()
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
@@ -1570,7 +1654,7 @@ def train_stable_diffusion():
     loss, out_lr = loss.detach().to("CPU"), optimizer.lr.to("CPU")
     Tensor.realize(loss, out_lr)
     return loss, out_lr
-    
+
   # checkpointing takes ~9 minutes without this, and ~1 minute with this
   @TinyJit
   def ckpt_to_cpu():
@@ -1609,7 +1693,7 @@ def train_stable_diffusion():
     if i == 3:
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
-      
+
     total_train_time = time.perf_counter() - train_start_time
     if WANDB:
       wandb.log({"train/loss": loss_item, "train/lr": lr_item, "train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,

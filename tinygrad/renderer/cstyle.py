@@ -46,10 +46,10 @@ base_rewrite = PatternMatcher([
   # new load/store
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True),
    lambda ctx,buf,idx: f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"),
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("gate"))).or_casted("bidx"), UPat.var("var")), allow_any_len=True),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("gate"))).or_casted("bidx"), UPat.var("var"))),
    lambda ctx,bidx,var,gate: f"({ctx[gate]}?*{ctx[bidx]}:{ctx[var]})"),
-  (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"(*{ctx[bidx]})"),
-  (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True), lambda ctx,bidx,var: f"*{ctx[bidx]} = {ctx[var]};"),
+  (UPat(Ops.LOAD, src=(UPat.var('bidx'),)), lambda ctx,bidx: f"(*{ctx[bidx]})"),
+  (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var"))), lambda ctx,bidx,var: f"*{ctx[bidx]} = {ctx[var]};"),
   # alu/gep
   # TODO: look for left-associative
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
@@ -87,7 +87,8 @@ def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
 def cast_float_to_bf16(x: UOp) -> UOp:
   assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
   x = x.bitcast(dtypes.uint)
-  x = ((-x & 0x7f800000) != 0).where(x + ((x >> 16) & 1) + 0x7fff, ((x & 0xffff) != 0).where((x | 0x10000), x))
+  # NOTE: != returns UOp, not bool, issue with mypy
+  x = ((-x & 0x7f800000) != 0).where(x + ((x >> 16) & 1) + 0x7fff, ((x & 0xffff) != 0).where((x | 0x10000), x))  # type: ignore[comparison-overlap]
   return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
 # manual bfloat16 casting patterns (shared between LLVM, Clang, and AMD renderers to avoid compiler intrinsics)
@@ -163,6 +164,8 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
+    # find which PARAMs are stored to with a single toposort
+    writable_params = {u for u in UOp.sink(*[u.src[0] for u in uops if u.op is Ops.STORE]).toposort() if u.op is Ops.PARAM}
     bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
@@ -176,15 +179,12 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-        r[u] = (f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}") if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
-        bufs[u] = (r[u], (u.dtype, False))
+      if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
+        if u.op is not Ops.PARAM: r[u] = u.arg[0]
+        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
+        else: r[u] = f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}"
+        bufs[u] = (r[u], (u.dtype, u in writable_params))
         continue
-
-      # mark buffers that we store to writable
-      if u.op is Ops.STORE:
-        for up in u.src[0].toposort():
-          if up.op is Ops.DEFINE_GLOBAL: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
 
       # naming
       prefix = None
@@ -206,8 +206,8 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.VECTORIZE, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} or u.dtype == dtypes.void: pass
-        else: l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
+        if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} and u.dtype != dtypes.void:
+          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1
@@ -227,8 +227,6 @@ class ClangRenderer(CStyleLanguage):
   global_max = (CPU_COUNT.value, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
-  code_for_workitem = {"g": lambda _: "core_id"}
-  extra_args = ['int core_id']
   if AMX: tensor_cores = tc.amx
 
   # language options
@@ -319,7 +317,12 @@ class OpenCLRenderer(CStyleLanguage):
     if any(uop.dtype.base == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL),)
+  def aux(self, uops:list[UOp]):
+    arg_dtypes:list[list[tuple[int, DType]]] = []
+    for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
+      if len(arg_dtypes) >= u.arg: arg_dtypes.append([])
+      arg_dtypes[u.arg].append((i, u.dtype))
+    return tuple(tuple(a) for a in arg_dtypes),
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
@@ -341,7 +344,9 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+  def __init__(self):
+    from tinygrad.runtime.ops_metal import MetalCompiler
+    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
   # language options
   kernel_typedef = "kernel void"
@@ -383,15 +388,17 @@ class MetalRenderer(CStyleLanguage):
 _nms = list("xyzwabcdefghijkl") + [f'v{i}' for i in range(16, 32)]
 
 class CUDARenderer(CStyleLanguage):
-  device = "CUDA"
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
-  def __init__(self, arch:str):
-    self.arch, arch_ver = arch, int(arch[3:])
-    self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch,)
+  def __init__(self, arch:str, device:str="NV", use_nvcc=False):
+    from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
+    from tinygrad.runtime.support.hcq import MOCKGPU
+    self.device, self.arch, self.use_nvcc = device, arch, use_nvcc
+    self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or device == "CUDA", cache_key=device.lower())
+    self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
+  def __reduce__(self): return self.__class__, (self.arch, self.device, self.use_nvcc)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -454,6 +461,7 @@ class CUDARenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
 def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
+def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
 
 class AMDHIPRenderer(CStyleLanguage):
   device = "AMD"
@@ -466,10 +474,13 @@ class AMDHIPRenderer(CStyleLanguage):
     return {"gfx942": tc.amd_cdna3, "gfx950": tc.amd_cdna4, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch.split(":")[0], tc.amd_rdna3)
   @staticmethod
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
+  @staticmethod
+  def is_cdna4(arch): return arch.split(":")[0] == "gfx950"
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
     self.arch, self.compiler = arch, HIPCompiler(arch)
     self.tensor_cores = self.get_tensor_cores(arch)
+    if not self.is_cdna4(self.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(self.arch):
       self.string_rewrite = PatternMatcher([
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"
@@ -487,12 +498,8 @@ class AMDHIPRenderer(CStyleLanguage):
   kernel_typedef = 'extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, {launch_bounds})))'
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
-  code_for_op = { **CStyleLanguage.code_for_op,
-    Ops.TRUNC: lambda x,dtype: f"__ocml_trunc_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-    Ops.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-    Ops.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-    Ops.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-    Ops.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})" }
+  code_for_op = {**CStyleLanguage.code_for_op, Ops.TRUNC: _ocml("trunc"), Ops.SIN: _ocml("sin"),
+                 Ops.LOG2: _ocml("log2"), Ops.EXP2: _ocml("exp2"), Ops.SQRT: _ocml("sqrt")}
   smem_prefix = "__attribute__((shared, aligned(16)))"
   smem_prefix_for_cast: bool = False
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
@@ -505,7 +512,7 @@ class AMDHIPRenderer(CStyleLanguage):
         x.src[2]), (*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
     # bfloat16 constant casting
     (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
-  ]) + pm_manual_bf16_cast + extra_pm
+  ])
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
@@ -524,7 +531,8 @@ class AMDHIPRenderer(CStyleLanguage):
     ocml_ops = {Ops.EXP2: ("exp2", "pure"), Ops.LOG2: ("log2", "pure"), Ops.SQRT: ("sqrt", "const"), Ops.SIN: ("sin", ""), Ops.TRUNC: ("trunc", "")}
     ocml = [(f"__ocml_{ocml_ops[op][0]}_f{dt.bitsize}", dt.name, dt.name, ocml_ops[op][1])
       for op, dt in dedup((u.op, u.dtype.scalar()) for u in uops) if op in ocml_ops and dt in (dtypes.half, dtypes.float, dtypes.double)]
-    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("typedef unsigned short hip_bfloat16;")
+    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes):
+      prefix.append(f"typedef {'__bf16' if self.is_cdna4(self.arch) else 'unsigned short'} hip_bfloat16;")
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#define half _Float16")
     if any(dt.scalar() in dtypes.fp8s for dt in used_dtypes):
       prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
@@ -551,7 +559,6 @@ class AMDHIPRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDHIPRenderer): device = "HIP"
 class AMDHIPCCRenderer(AMDHIPRenderer):
   def __init__(self, arch:str):
@@ -559,4 +566,9 @@ class AMDHIPCCRenderer(AMDHIPRenderer):
     super().__init__(arch)
     self.compiler = HIPCCCompiler(arch)
 
-class QCOMRenderer(OpenCLRenderer): device = "QCOM"
+class QCOMCLRenderer(OpenCLRenderer):
+  device = "QCOM"
+
+  def __init__(self, chip_id):
+    from tinygrad.runtime.support.compiler_qcom import QCOMCompiler
+    self.compiler = QCOMCompiler(chip_id)

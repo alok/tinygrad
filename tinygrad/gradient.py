@@ -13,6 +13,22 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
+def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
+  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
+  # auto-differentiate the function
+  fxn, args = k.src[0], k.src[1:]
+  params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
+  grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params.values()))
+  ret: list[UOp|None] = [None]
+  for i in range(len(args)):
+    if (p:=params.get(i, None)) is not None and p in grads:
+      # TODO: compact the args and remove unused ones
+      assert not grads[p].op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
+      ret.append(grads[p].call(*args, ctx, name=(k.arg.name or "")+f"_backward_{i}"))
+    else:
+      ret.append(None)
+  return tuple(ret)
+
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
@@ -30,7 +46,6 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
   (UPat(Ops.REDUCE_AXIS, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg[0])),
-  (UPat(Ops.REDUCE, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg) + (None,)*(len(ret.src)-1)),
   (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
@@ -43,7 +58,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   # NOTE: this is only correct when the KERNEL has a single output
   (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
-  (UPat(Ops.CUSTOM_KERNEL, name="k"), lambda ctx, k: k.arg.grad_fxn(ctx, k)),
+  # gradient on CALL: use provided grad_fxn or auto-differentiate
+  (UPat(Ops.CALL, name="k"), call_gradient),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])

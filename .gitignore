@@ -58,13 +58,17 @@ weights
 *.lprof
 comgr_*
 *.pkl
+!extra/sqtt/examples/**/*.pkl
 site/
 profile_stats
 *.log
 target
 .mypy_cache
 mutants
+.mutmut-cache
 .mutmut-cache.claude/
 lean4/.lake/
 tinygrad_all.py
 data/
+dagre/
+graphlib/

@@ -1,15 +1,15 @@
-import math, functools, operator
+import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
-from tinygrad.helpers import all_int, dedup, get_contraction
+from tinygrad.helpers import dedup, get_contraction
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.renderer import Renderer
 
+def _dim_max(d:sint) -> int: return d if isinstance(d, int) else int(d.vmax)
+
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
-  # TODO: symbolic shape
-  if not all_int(dims): return dims
   while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
     for i,m in enumerate(max_sizes):
-      if i < (len(dims)-1) and dims[i] * dims[i+1] <= m:
+      if i < (len(dims)-1) and _dim_max(dims[i]) * _dim_max(dims[i+1]) <= m:
         dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
         break
     else: return None
@@ -48,10 +48,9 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
   elif (a:=len(limited)) > (b:=len(dims)):
     if a == 2 and b == 1: return [raw_idxs[0] * limited[1] + raw_idxs[1]]
     if a == 3 and b == 1: return [(raw_idxs[0] * limited[1] + raw_idxs[1]) * limited[2] + raw_idxs[2]]
-    if a == 3 and b == 2: return [raw_idxs[0] * limited[1] + raw_idxs[1], raw_idxs[2]]
-  elif limited != dims:
+  if limited != dims:
     # Convert to 1D
-    flat = raw_idxs[0]*limited[1]+raw_idxs[1] if len(dims) == 2 else raw_idxs[0]*(limited[1]*limited[2])+raw_idxs[1]*limited[2]+raw_idxs[2]
+    flat = raw_idxs[0]*limited[1]+raw_idxs[1] if len(limited) == 2 else raw_idxs[0]*(limited[1]*limited[2])+raw_idxs[1]*limited[2]+raw_idxs[2]
     # Get back original indices from 1D
     return [flat//dims[1], flat%dims[1]] if len(dims) == 2 else [flat//(dims[2]*dims[1]), (flat//dims[2])%dims[1], flat%dims[2]]
   return raw_idxs
@@ -76,7 +75,8 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
   # get the idxs
   ki: KernelInfo = s.arg
-  if ki.dont_use_locals:
+  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int).cast(dtypes.index)]
+  elif ki.dont_use_locals:
     assert not local_dims, "can't use locals if there's no local dims"
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
   else:
@@ -87,12 +87,11 @@ def add_gpudims(ctx:Renderer, s:UOp):
   subs = {}
   for r in s_topo:
     # look for local INDEXes that are not used in the GLOBAL store, then add them as an INVALID
-    if r.op is Ops.STORE and r.buf_target().ptrdtype.addrspace == AddrSpace.GLOBAL:
-      idx = r.src[0]
+    if r.op is Ops.STORE and (idx := r.src[0]).src[0].ptrdtype.addrspace == AddrSpace.GLOBAL:
       missing_locals = [all_ranges[rng] for rng in local_dims if all_ranges[rng] not in idx.ranges]
       if len(missing_locals):
         assert len(idx.src) == 2, "index has 2 sources"
-        mask: UOp = functools.reduce(operator.and_, [x.eq(0) for x in missing_locals])
+        mask: UOp = UOp.prod(*[x.eq(0) for x in missing_locals])
         subs[idx] = idx.replace(src=(idx.src[0], mask.broadcast(idx.src[1].dtype.count).where(idx.src[1], Invalid)))
     if r.op is not Ops.RANGE: continue
     try:

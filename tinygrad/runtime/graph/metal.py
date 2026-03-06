@@ -5,14 +5,14 @@ from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE
 from tinygrad.device import Buffer, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
-from tinygrad.runtime.ops_metal import wait_check, to_ns_str
+from tinygrad.runtime.ops_metal import wait_check, to_ns_str, MetalBuffer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support import objc
 
 class MetalGraph(GraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
-    super().__init__(jit_cache, input_buffers, var_vals)
-    if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
+               orig_valid_positions: dict[int, set[int]]|None = None):
+    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
 
     # create metal batch exec
     icb_descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
@@ -39,7 +39,7 @@ class MetalGraph(GraphRunner):
       all_pipelines.append(prg._prg.pipeline_state)
       icb_command.setComputePipelineState(prg._prg.pipeline_state)
       for i,b in enumerate(ji.bufs):
-        if b is not None and b not in input_buffers:
+        if b is not None and (j,i) not in self.input_replace:
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist.index(v.expr)*4, len(ji.bufs)+i)
@@ -100,7 +100,7 @@ class MetalGraph(GraphRunner):
   def collect_timestamps(self):
     # create a graph event and evenly space each program
     st, en = decimal.Decimal(self.command_buffer.GPUStartTime()) * 1000000, decimal.Decimal(self.command_buffer.GPUEndTime()) * 1000000
-    ents = [ProfileGraphEntry(self.device, cast(CompiledRunner, ji.prg)._prg.name, i, i+1, is_copy=False) for i,ji in enumerate(self.jit_cache)]
+    ents = [ProfileGraphEntry(self.device, cast(CompiledRunner, ji.prg)._prg.name, i, i+1) for i,ji in enumerate(self.jit_cache)]
     step = (en-st)/len(ents)
     self.dev.profile_events += [ProfileGraphEvent(ents, [], [st+step*i for i in range(len(ents)+1)])]
 
@@ -108,3 +108,9 @@ class MetalGraph(GraphRunner):
     if PROFILE and self.command_buffer is not None:
       wait_check(self.command_buffer)
       self.collect_timestamps()
+
+  @staticmethod
+  def supports_exec_item(devs, ei:ExecItem) -> bool:
+    # Metal ICB replay encodes offsets as uint32; reject if any Metal buffer offset exceeds 32-bit range.
+    if any(b is not None and isinstance(b._buf, MetalBuffer) and b._buf.offset > 0xFFFFFFFF for b in ei.bufs): return False
+    return GraphRunner.supports_exec_item(devs, ei)

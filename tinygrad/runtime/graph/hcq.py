@@ -1,6 +1,6 @@
 import collections, time
 from typing import Any, cast
-from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, dedup, suppress_finalizing
+from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, dedup, suppress_finalizing, TracingKey
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator, MMIOInterface
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
@@ -9,8 +9,9 @@ from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, Buffer
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
-    super().__init__(jit_cache, input_buffers, var_vals)
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
+               orig_valid_positions: dict[int, set[int]]|None = None):
+    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # CPU Device is always last
@@ -70,7 +71,7 @@ class HCQGraph(MultiGraphRunner):
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
     self.input_replace_map: dict[HCQCompiled, set[int]] = collections.defaultdict(set)
-    self.fixedvars: dict[HCQCompiled, dict[str, int]] = {}
+    self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
 
     for j,ji in enumerate(jit_cache):
       if is_exec_prg:=isinstance(ji.prg, CompiledRunner): enqueue_dev: HCQCompiled = ji.prg.dev
@@ -80,7 +81,8 @@ class HCQGraph(MultiGraphRunner):
           if (enqueue_dev:=cast(HCQCompiled, Device[b.device])).hw_copy_queue_t is not None: break
 
       # set any fixedvars on the device
-      self.fixedvars[enqueue_dev] = merge_dicts([self.fixedvars.get(enqueue_dev, {}), ji.fixedvars])
+      self.device_vars[enqueue_dev] = merge_dicts([self.device_vars.get(enqueue_dev, {}), ji.fixedvars])
+      if is_exec_prg: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], cast(CompiledRunner, ji.prg).p.runtimevars])
 
       if is_exec_prg:
         enqueue_queue = self.comp_queues[enqueue_dev]
@@ -127,9 +129,10 @@ class HCQGraph(MultiGraphRunner):
         sig_st = prev_ji * 2 + 1 if len(opt_deps) == 0 and (prev_ji:=last_j[enqueue_queue]) is not None else j * 2
 
         # Description based on the command.
-        prof_ji_desc = ji.prg._prg.name if is_exec_prg else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
+        prof_ji_desc = ji.prg._prg.name if is_exec_prg else TracingKey(f"{ji.bufs[1].device} -> {ji.bufs[0].device}", ret=ji.bufs[0].nbytes) # type: ignore
 
-        self.prof_graph_entries.append(ProfileGraphEntry(enqueue_dev.device, prof_ji_desc, sig_st, j * 2 + 1, is_copy=not is_exec_prg))
+        prof_name = f"{enqueue_dev.device}:SDMA:{queue_idx}" if not is_exec_prg else enqueue_dev.device
+        self.prof_graph_entries.append(ProfileGraphEntry(prof_name, prof_ji_desc, sig_st, j * 2 + 1))
         self.prof_graph_deps.append([d - 1 for _, d in rdeps])
 
       last_j[enqueue_queue] = j
@@ -208,7 +211,7 @@ class HCQGraph(MultiGraphRunner):
       hcq_var_vals[self.input_replace_to_var[(j,i)].expr] = input_buffers[input_idx]._buf.va_addr
 
     for dev in self.devices:
-      self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.fixedvars.get(dev, {}))
+      self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.device_vars.get(dev, {}))
       for copy_queue in self._dev_copy_queues(dev): copy_queue.submit(dev, hcq_var_vals_local)
       self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
 
@@ -243,7 +246,7 @@ class HCQGraph(MultiGraphRunner):
     if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False
 
     # If all of devices are mapped into CPU address space, can use CPU inside the peer group.
-    cpu_support = all(isinstance(d.timeline_signal.base_buf.view, MMIOInterface) for d in all_devs)
+    cpu_support = all(type(d.timeline_signal.base_buf.view) is MMIOInterface for d in all_devs)
 
     # Check if all devices are within the same peer group. If CPU is supported, don't count it as a separate peer group.
     if len(set(d.peer_group for d in all_devs if not (cpu_support and d._is_cpu()))) > 1: return False

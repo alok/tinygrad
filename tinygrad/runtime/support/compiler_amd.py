@@ -1,5 +1,5 @@
 import ctypes, hashlib, tempfile, subprocess, pathlib, shutil
-from tinygrad.helpers import system
+from tinygrad.helpers import system, getenv
 from tinygrad.runtime.autogen import comgr
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
@@ -10,6 +10,7 @@ try:
 except AttributeError: pass  # ignore if ROCm isn't installed
 from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
+from tinygrad.runtime.support import c
 from tinygrad.helpers import OSX, to_char_p_p
 
 def _find_llvm_objdump():
@@ -39,8 +40,10 @@ def _get_comgr_data(data_set, data_type):
 # amd_comgr_action_info_set_options was deprecated
 def set_options(action_info, options:bytes):
   # TODO: this type should be correct in the autogen stub
-  comgr.amd_comgr_action_info_set_option_list.argtypes = [comgr.amd_comgr_action_info_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), comgr.size_t]
-  return comgr.amd_comgr_action_info_set_option_list(action_info, to_char_p_p(options_list:=options.split(b' ')), len(options_list))
+  @comgr.dll.bind
+  def amd_comgr_action_info_set_option_list(ai:comgr.amd_comgr_action_info_t, o:c.POINTER[c.POINTER[ctypes.c_char]], # type: ignore
+                                            c:comgr.size_t) -> comgr.amd_comgr_status_t: pass
+  return amd_comgr_action_info_set_option_list(action_info, to_char_p_p(options_list:=options.split(b' ')), len(options_list))
 
 # AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
 def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
@@ -107,8 +110,9 @@ class HIPCCCompiler(Compiler):
         srcf.write(src.encode())
         srcf.flush()
 
+        rocm_path = getenv("ROCM_PATH", "/opt/rocm")
         subprocess.run(["hipcc", "-c", "-emit-llvm", "--cuda-device-only", "-O3", "-mcumode",
-                        f"--offload-arch={self.arch}", "-I/opt/rocm/include/hip", "-o", bcf.name, srcf.name] + self.extra_options, check=True)
+                        f"--offload-arch={self.arch}", f"-I{rocm_path}/include/hip", "-o", bcf.name, srcf.name] + self.extra_options, check=True)
         subprocess.run(["hipcc", "-target", "amdgcn-amd-amdhsa", f"-mcpu={self.arch}",
                         "-O3", "-mllvm", "-amdgpu-internalize-symbols", "-c", "-o", libf.name, bcf.name] + self.extra_options, check=True)
 

@@ -5,21 +5,22 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.realize import get_runner
 from tinygrad.engine.schedule import ExecItem
 from tinygrad.engine.jit import TinyJit
-from tinygrad.helpers import CI
 import numpy as np
 
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
 from extra.thunder.tiny.tk.tiles import ST_16X32, RT_16X32, RT_16X16, TileLayout
 
-@unittest.skipIf(CI or Device.DEFAULT not in ["AMD"], "only amd")
+def assert_allclose(cmp:Tensor, ref:Tensor, **kwargs) -> None:
+  if Device.DEFAULT == "NULL": Tensor.realize(cmp, ref)
+  else: np.testing.assert_allclose(cmp.numpy(), ref.numpy(), **kwargs)
+
 class TestTK(unittest.TestCase):
   def setUp(self):
-    arch = Device["AMD"].arch
+    arch = getattr(Device[Device.DEFAULT].renderer, "arch", "")
     if not arch.startswith("gfx9"):
       self.skipTest(f"arch {arch} not supported")
 
-  @unittest.skipIf(CI, "no wmma in ci")
   def test_simple_matmul(self):
     N = 8192
     BLOCK_SIZE = 64
@@ -71,9 +72,8 @@ class TestTK(unittest.TestCase):
 
     ref = a.matmul(b, dtype=dtypes.float32).float()
 
-    np.testing.assert_allclose(c.numpy(), ref.numpy())
+    assert_allclose(c, ref)
 
-  @unittest.skipIf(CI, "no wmma in ci")
   def test_simple_matmul_transposed(self):
     N = 8192
     BLOCK_N, BLOCK_M, BLOCK_K = 64, 64, 128
@@ -120,7 +120,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.matmul(b.transpose(2, 3), dtype=dtypes.float32).float()
 
-    np.testing.assert_allclose(c.numpy(), ref.numpy())
+    assert_allclose(c, ref)
 
   def test_load_store(self):
     N = 64
@@ -156,7 +156,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float()
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy())
+    assert_allclose(b, ref)
 
   def test_load_store_local_hop(self):
     N = 64
@@ -195,7 +195,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float()
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy())
+    assert_allclose(b, ref)
 
   def test_load_store_multioutput(self):
     N = 64
@@ -238,8 +238,8 @@ class TestTK(unittest.TestCase):
 
     ref = a.float()
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy())
-    np.testing.assert_allclose(c.numpy(), ref.numpy())
+    assert_allclose(b, ref)
+    assert_allclose(c, ref)
 
   def test_load_store_group(self):
     N = 1024
@@ -277,7 +277,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float()
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy())
+    assert_allclose(b, ref)
 
   def test_add(self):
     N = 64
@@ -314,7 +314,7 @@ class TestTK(unittest.TestCase):
 
       ref = a.float() + 1
 
-      np.testing.assert_allclose(b.numpy(), ref.numpy())
+      assert_allclose(b, ref)
 
   def test_max(self):
     N = 64
@@ -359,7 +359,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().max(axis=2, keepdim=True).expand(a.shape)
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy())
+    assert_allclose(b, ref)
 
   def test_max_nonsquare(self):
     N, M = 32, 128
@@ -404,7 +404,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().max(axis=2, keepdim=True).expand(a.shape)
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy())
+    assert_allclose(b, ref)
 
   def test_sum(self):
     N = 64
@@ -449,7 +449,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().sum(axis=2, keepdim=True).expand(a.shape)
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
+    assert_allclose(b, ref, atol=1e-5, rtol=1e-5)
 
   def test_sum_nonsquare(self):
     N, M = 32, 128
@@ -494,7 +494,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().sum(axis=2, keepdim=True).expand(a.shape)
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
+    assert_allclose(b, ref, atol=1e-5, rtol=1e-5)
 
   def test_softmax(self):
     N = 64
@@ -554,7 +554,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().softmax(axis=3)
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
+    assert_allclose(b, ref, atol=1e-5, rtol=1e-5)
 
   def test_softmax_col(self):
     N = 64
@@ -614,7 +614,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().softmax(axis=2)
 
-    np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
+    assert_allclose(b, ref, atol=1e-5, rtol=1e-5)
 
   def test_fa(self):
     NUM_WORKERS = 1
@@ -733,9 +733,38 @@ class TestTK(unittest.TestCase):
     ref = q_permuted.scaled_dot_product_attention(k_permuted, v_permuted, is_causal=True, enable_gqa=True).float()
     ref = ref.permute(0, 2, 1, 3)
 
-    np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=2e-2, rtol=2e-2)
+    assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
 
   def test_fast_fa(self):
+    from extra.thunder.tiny.fa import flash_attention
+
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
+
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(q, k, v)
+
+    q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+
+    fa_jitted = TinyJit(flash_attention)
+
+    for _ in range(10):
+      st = time.perf_counter()
+      out = fa_jitted(q, k, v, is_causal=False)
+      et = time.perf_counter() - st
+      attn_flops = 2 * B * H * N * N * D + \
+                   4 * B * H * N * N + \
+                   2 * B * H * N * N * D
+      print(f"{attn_flops/(et*1e9):2f} GFLOPS")
+    out = out.float().transpose(1, 2)
+
+    ref = q.scaled_dot_product_attention(k, v, is_causal=False, enable_gqa=True).float().transpose(1, 2)
+
+    assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
+
+  def test_fast_fa_causal(self):
     from extra.thunder.tiny.fa import flash_attention
 
     B, N, H, H_KV, D = 2, 8192, 32, 8, 128
@@ -762,7 +791,7 @@ class TestTK(unittest.TestCase):
 
     ref = q.scaled_dot_product_attention(k, v, is_causal=True, enable_gqa=True).float().transpose(1, 2)
 
-    np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=2e-2, rtol=2e-2)
+    assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
 
   def test_fast_fa_bwd(self):
     from extra.thunder.tiny.fa import flash_attention
@@ -798,16 +827,16 @@ class TestTK(unittest.TestCase):
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
+    assert_allclose(q.grad, q_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_allclose(k.grad, k_ref.grad, atol=5e-2, rtol=2e-2)
 
   def test_fast_fa_bwd_causal(self):
     from extra.thunder.tiny.fa import flash_attention
 
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 1024, 32, 32, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
@@ -831,22 +860,21 @@ class TestTK(unittest.TestCase):
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True)
+    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True, enable_gqa=True)
     ref = ref.float().transpose(1, 2)
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
+    assert_allclose(q.grad, q_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_allclose(k.grad, k_ref.grad, atol=6e-2, rtol=2e-2)
 
-  @unittest.expectedFailure
   def test_fast_fa_bwd_causal_jitted(self):
     from extra.thunder.tiny.fa import flash_attention
 
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 1024, 32, 32, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
@@ -883,14 +911,63 @@ class TestTK(unittest.TestCase):
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True)
+    ref = flash_attention(q_ref_, k_ref_, v_ref_, is_causal=True)
     ref = ref.float().transpose(1, 2)
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
+    assert_allclose(q.grad, q_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(k.grad, k_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(v.grad, v_ref.grad, atol=1e-5, rtol=1e-5)
+
+  def test_fast_fa_bwd_multidevice(self):
+    from extra.thunder.tiny.fa import flash_attention
+
+    Tensor.manual_seed(42)
+
+    B, N, H, H_KV, D = 2, 1024, 32, 32, 128
+    GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(B))
+
+    with Context(DEBUG=0):
+      base_q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      base_k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      base_v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+
+      base_do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
+
+    with Context(DEBUG=0):
+      q = base_q.clone().requires_grad_(True).shard(GPUS, axis=0)
+      k = base_k.clone().requires_grad_(True).shard(GPUS, axis=0)
+      v = base_v.clone().requires_grad_(True).shard(GPUS, axis=0)
+      Tensor.realize(q, k, v)
+
+      do = base_do.clone().shard(GPUS, axis=0)
+      Tensor.realize(do)
+
+    q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+    out = flash_attention(q_, k_, v_, is_causal=True)
+    out = out.float().transpose(1, 2)
+    out.backward(do)
+    Tensor.realize(q.grad, k.grad, v.grad)
+
+    with Context(DEBUG=0):
+      q_ref = base_q.clone().requires_grad_(True)
+      k_ref = base_k.clone().requires_grad_(True)
+      v_ref = base_v.clone().requires_grad_(True)
+      Tensor.realize(q_ref, k_ref, v_ref)
+
+      do_ref = base_do.clone()
+      Tensor.realize(do_ref)
+
+    q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
+    ref = flash_attention(q_ref_, k_ref_, v_ref_, is_causal=True)
+    ref = ref.float().transpose(1, 2)
+    ref.backward(do_ref)
+    Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
+
+    assert_allclose(q.grad, q_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(v.grad, v_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(k.grad, k_ref.grad, atol=1e-5, rtol=1e-5)
 
 if __name__ == "__main__":
   unittest.main()

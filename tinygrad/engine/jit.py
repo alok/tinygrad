@@ -24,7 +24,8 @@ def _check_no_non_tensor_return(ret):
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
-def apply_graph_to_jit(jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int], max_batch_size=0) -> list[ExecItem]:
+def apply_graph_to_jit(jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
+                       orig_valid_positions: dict[int, set[int]]|None = None, max_batch_size=0) -> list[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   graphed_jit_cache: list[ExecItem] = []
@@ -36,7 +37,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_buffers: list[Buffer], v
     try:
       if len(current_batch_devs) == 0: raise GraphException("no device for graph")
       if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): raise GraphException("only one kernel doesn't graph")
-      graph_runner = current_batch_devs[0].graph(current_batch, input_buffers, var_vals)
+      graph_runner = current_batch_devs[0].graph(current_batch, input_buffers, var_vals, orig_valid_positions=orig_valid_positions)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
       graphed_jit_cache.append(ExecItem(UOp(Ops.NOOP), cast(list[Buffer|None], input_buffers), prg=graph_runner))
@@ -72,18 +73,22 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_buffers: list[Buffer], v
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
 
-def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer]) -> dict[tuple[int, int], int]:
+def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer],
+                      orig_valid_positions: dict[int, set[int]]|None = None) -> dict[tuple[int, int], int]:
   input_replace: dict[tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.bufs):
       if a in input_buffers:
+        # filter out positions that weren't valid inputs in the original capture (prevents aliasing bugs)
+        if orig_valid_positions is not None and i not in orig_valid_positions.get(id(ji), set()): continue
         input_replace[(j,i)] = input_buffers.index(a)
   return input_replace
 
 class GraphRunner(Runner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
+               orig_valid_positions: dict[int, set[int]]|None = None):
     self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
-    self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_buffers)
+    self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_buffers, orig_valid_positions)
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
     self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
@@ -100,7 +105,8 @@ class GraphRunner(Runner):
       assert ji.prg is not None
       estimates += ji.prg.estimates
       if isinstance(ji.prg, CompiledRunner):
-        if ji.prg.p.vars: self.var_vals_replace[j] = [(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars]
+        if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars | ji.prg.p.runtimevars]):
+          self.var_vals_replace[j] = replace
 
         global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
         if global_dim_idx is not None or local_dim_idx is not None:
@@ -178,6 +184,13 @@ class CapturedJit(Generic[ReturnType]):
     self._jit_cache: list[ExecItem] = self.jit_cache
     self._input_replace: dict[tuple[int, int], int] = self.input_replace
     self._first_run = True
+    # precompute read-after-write hazard detection
+    self._output_to_writer = {b: j for j, ei in enumerate(self.jit_cache) for b in get_out_buffers_for_ei(ei)}
+    self._input_to_max_reader: dict[int, int] = {}
+    for (j, i), idx in self.input_replace.items():
+      # only buffers that were different during capture but alias at jit time (e.g. feeding output back as input) need the copy.
+      if self.jit_cache[j].bufs[i] not in get_out_buffers_for_ei(self.jit_cache[j]):
+        self._input_to_max_reader[idx] = max(self._input_to_max_reader.get(idx, -1), j)
     self._clear_inputs()
 
   def _clear_inputs(self):
@@ -197,7 +210,7 @@ class CapturedJit(Generic[ReturnType]):
     asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
     self.jit_cache = [replace(item, bufs=[asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
     for old, new in asgn.items():
-      if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
+      if old.is_allocated(): new.ensure_allocated().copyin(old.as_memoryview())
     self.__post_init__()
 
   # jit exec
@@ -205,6 +218,12 @@ class CapturedJit(Generic[ReturnType]):
     # assign inputs
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
+
+    # copy aliased inputs to prevent read-after-write hazard
+    for i, ib in enumerate(input_buffers):
+      if (writer := self._output_to_writer.get(ib)) is not None and self._input_to_max_reader.get(i, -1) >= writer:
+        input_buffers[i] = Buffer(ib.device, ib.size, ib.dtype).ensure_allocated().copyin(ib.as_memoryview())
+
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
 
     # Condense the items into a graph executor.
@@ -215,8 +234,14 @@ class CapturedJit(Generic[ReturnType]):
           if b is not None: b.ensure_allocated()
       # create graph if needed
       if JIT < 2:
-        self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=JIT_BATCH_SIZE.value)
-        self._input_replace = get_input_replace(self._jit_cache, input_buffers)
+        # build a map from ExecItem object to the buffer positions that are valid inputs (from original input_replace)
+        orig_valid_positions: dict[int, set[int]] = {}  # id(ExecItem) -> set of valid buffer indices
+        for (j, i) in self.input_replace: orig_valid_positions.setdefault(id(self.jit_cache[j]), set()).add(i)
+        self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, orig_valid_positions, max_batch_size=JIT_BATCH_SIZE.value)
+        # recompute input_replace: GraphRunner items have all positions valid, non-GraphRunner items use orig_valid_positions
+        valid_positions = {id(ji): set(range(len(ji.bufs))) if isinstance(ji.prg, GraphRunner) else orig_valid_positions.get(id(ji), set())
+                          for ji in self._jit_cache}
+        self._input_replace = get_input_replace(self._jit_cache, input_buffers, valid_positions)
       self._first_run = False
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
@@ -235,8 +260,7 @@ def _prepare_jit_inputs(args, kwargs):
   input_uops: list[UOp] = flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
   if any(u.base.op is Ops.CONST for u in input_uops):
     raise JitError("JIT inputs cannot be const, create a buffer with .contiguous()")
-  input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b:=u.base.realized, MultiBuffer) else [b]
-                                         for u in input_uops if u.base.realized is not None])
+  input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=u.base.realized) is not None])
   if len(set(input_buffers)) != len(input_buffers): raise JitError("duplicate inputs to JIT")
   inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
@@ -289,7 +313,7 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
         ret = self.fxn(*args, **kwargs)
-        if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+        if len(params:=get_parameters(ret)): Tensor.realize(*params)
     elif self.cnt == 1:
       # jit capture
       assert self.fxn is not None
@@ -301,8 +325,7 @@ class TinyJit(Generic[ReturnType]):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
-          if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
-        except Exception as e: raise e
+          if len(params:=get_parameters(ret)): Tensor.realize(*params)
         finally: capturing.clear()
       jit_cache = self._jit_cache
       del self._buffer_replace, self._jit_cache
@@ -325,6 +348,8 @@ class TinyJit(Generic[ReturnType]):
         update_depends(depends, jit_cache)
         pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
+        # sync before re-executing onetime kernels
+        for dev in set(Device[b.device] for ei in onetime for b in ei.bufs if b is not None): dev.synchronize()
         # run the onetime kernels here
         for ei in onetime:
           for b in ei.bufs: cast(Buffer, b).ensure_allocated()

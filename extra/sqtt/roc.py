@@ -4,6 +4,8 @@ from typing import Generator
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.runtime.autogen import rocprof
+from tinygrad.renderer.amd.dsl import Inst
+from test.amd.disasm import disasm
 
 @dataclasses.dataclass(frozen=True)
 class InstExec:
@@ -22,9 +24,7 @@ class WaveSlot:
   @property
   def cu_loc(self) -> str: return f"SE:{self.se} CU:{self.cu}"
   @property
-  def simd_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd}"
-  @property
-  def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
+  def wave_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd} W:{self.wave_id}"
 
 @dataclasses.dataclass(frozen=True)
 class WaveExec(WaveSlot):
@@ -46,8 +46,8 @@ class OccEvent(WaveSlot):
 RunKey = tuple[str, int]
 
 class _ROCParseCtx:
-  def __init__(self, sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[str, int]]]):
-    self.sqtt_evs, self.disasms = iter(sqtt_evs), disasms
+  def __init__(self, sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]):
+    self.sqtt_evs, self.disasms = iter(sqtt_evs), {k:{k2:(disasm(v2), v2.size()) for k2,v2 in v.items()} for k,v in disasms.items()}
     self.inst_execs:dict[RunKey, list[WaveExec]] = {}
     self.occ_events:dict[RunKey, list[OccEvent]] = {}
 
@@ -73,7 +73,7 @@ class _ROCParseCtx:
     self.inst_execs.setdefault(unwrap(self.active_run), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
                                                                              ev.end_time, insts_blob))
 
-def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[str, int]]]) -> _ROCParseCtx:
+def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]) -> _ROCParseCtx:
   ROCParseCtx = _ROCParseCtx(sqtt_evs, disasms)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
@@ -113,12 +113,17 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[st
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
+  exc:Exception|None = None
   def worker():
+    nonlocal exc
     try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
     except AttributeError as e:
-      raise RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install") from e
+      exc = RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_rocprof_decoder.py to install")
+      exc.__cause__ = e
   (t:=threading.Thread(target=worker, daemon=True)).start()
   t.join()
+  if exc is not None:
+    raise exc
   return ROCParseCtx
 
 def print_data(data:dict) -> None:
@@ -156,6 +161,7 @@ def main() -> None:
   if not trace: raise RuntimeError(f"no matching trace for {args.kernel}")
   n = 0
   for s in trace["steps"]:
+    if "PKTS" in s["name"]: continue
     print(s["name"])
     data = viz.get_render(s["query"])
     print_data(data)

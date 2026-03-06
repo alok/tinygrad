@@ -20,6 +20,7 @@ require Cli from git "https://github.com/leanprover/lean4-cli" @ "28e0856d442486
 require LeanBench from "../LeanBench"
 require plausible from git "https://github.com/leanprover-community/plausible" @ "7311586e1a56af887b1081d05e80c11b6c41d212"
 require lspec from git "https://github.com/yatima-inc/LSpec" @ "8e6ddb17c2b7e2bbb63585aa4225c5b0701b8ad2"
+require verso from git "https://github.com/leanprover/verso" @ "6f0c12be90063de6d4e5ca14867ad7243064ad99"
 
 def cFlags : Array String :=
   if System.Platform.isWindows then
@@ -476,3 +477,11 @@ lean_exe mac_e2e_train_smoke where
 lean_exe mac_e2e_train_bench where
   root := `TinyGrad4.Test.MacEndToEndTrainBench
   moreLinkArgs := metalLinkArgs
+
+lean_lib TinyGrad4EssayDoc where
+  roots := #[`TinyGrad4.Essay, `TinyGrad4.EssayMain]
+  precompileModules := false
+
+lean_exe tg4_essay_docs where
+  root := `TinyGrad4.EssayMain
+  supportInterpreter := true

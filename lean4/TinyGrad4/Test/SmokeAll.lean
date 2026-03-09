@@ -32,6 +32,7 @@ import TinyGrad4.Test.ViewFusionSmoke
 import TinyGrad4.Test.ViewStackFusionSmoke
 import TinyGrad4.Test.WeightInitSmoke
 import TinyGrad4.Test.SpecBroadcastIndexingSmoke
+import TinyGrad4.Test.SpecSemanticsSmoke
 import TinyGrad4.Test.ShapeTrackerSmoke
 import TinyGrad4.Test.Conv2dSmoke
 
@@ -79,6 +80,7 @@ def runAll : IO Unit := do
   TinyGrad4.Test.ViewStackFusionSmoke.runAll
   TinyGrad4.Test.CompiledTrainingSmoke.runAll
   TinyGrad4.Test.SpecBroadcastIndexingSmoke.runAll
+  TinyGrad4.Test.SpecSemanticsSmoke.runAll
   TinyGrad4.Test.ShapeTrackerSmoke.runAll
   TinyGrad4.Test.Conv2dSmoke.runAll
   IO.println "=== SmokeAll OK ==="

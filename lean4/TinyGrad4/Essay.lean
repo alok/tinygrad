@@ -70,6 +70,32 @@ Lean keeps much of it in the type.
 That choice is why some Python features are already pleasant in Lean, and why other Python features are currently
 bridged instead of copied exactly.
 
+# What The Spec Layer Says
+
+That typed bias now has a more explicit spec story too.
+
+The new `TinyGrad4.Spec.Semantics` module is the Lean-side counterpart to `tinyspec`.
+Instead of only writing the rules down as tables, it packages them as executable pure functions over:
+
+* `TensorDesc`, a compact tensor signature with only `shape` and `dtype`
+* `MovementOp`, a closed datatype for reshape / expand / permute / pad / shrink / flip
+* `ReduceSpec`, which records the reduce op, axes, and `keepdim`
+
+The key improvement is not that Lean now has more prose about the spec.
+It is that the spec itself can be imported and tested.
+For example, movement, basic indexing, binary broadcasting, concat, and matmul output inference are now expressed as
+functions such as:
+
+* `MovementOp.apply?`
+* `basicIndex?`
+* `binaryResult?`
+* `catResult?`
+* `contract2DResult?`
+
+That is a better fit for Lean than a direct PDF transcription.
+`tinyspec` is still useful as the semantic checklist, but the Lean version should cash out as small typed definitions
+that runtime code and tests can point at directly.
+
 # What Works
 
 The present codebase already supports a substantial parity story for core tensor semantics.

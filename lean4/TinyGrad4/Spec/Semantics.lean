@@ -58,6 +58,9 @@ end MovementOp
 def basicIndex? (desc : TensorDesc) (items : List BasicIndexItem) : Option TensorDesc :=
   (inferBasicIndexShape desc.shape items).map fun shape => { desc with shape }
 
+private def scalarDesc (dtype : DType) : TensorDesc :=
+  { shape := [], dtype }
+
 private def gatherShapeOk (shape idxShape : Shape) (dim : Nat) : Bool :=
   shape.length == idxShape.length &&
   dim < shape.length &&
@@ -78,6 +81,54 @@ def takeResult? (src index : TensorDesc) : Option TensorDesc :=
     some { shape := index.shape, dtype := src.dtype }
   else
     none
+
+private def scatterShapeOk (selfShape idxShape srcShape : Shape) (dim : Nat) : Bool :=
+  selfShape.length == idxShape.length &&
+  selfShape.length == srcShape.length &&
+  dim < selfShape.length &&
+  listAll (fun i =>
+    if i == dim then
+      true
+    else
+      listGetD selfShape i 0 >= listGetD idxShape i 0 &&
+      listGetD srcShape i 0 >= listGetD idxShape i 0) (listRange selfShape.length)
+
+/-- Basic scatter preserves the destination signature when the indexing shapes line up. -/
+def scatterResult? (self index src : TensorDesc) (dim : Nat) : Option TensorDesc :=
+  if !index.dtype.isInt || self.dtype != src.dtype then
+    none
+  else if scatterShapeOk self.shape index.shape src.shape dim then
+    some self
+  else
+    none
+
+/-- Scalar scatter fills an index-shaped source tensor conceptually, then preserves the destination signature. -/
+def scatterScalarResult? (self index : TensorDesc) (dim : Nat) : Option TensorDesc :=
+  if !index.dtype.isInt then
+    none
+  else if scatterShapeOk self.shape index.shape index.shape dim then
+    some self
+  else
+    none
+
+/-- Scatter-reduce modes exposed by the pure spec layer. -/
+inductive ScatterReduceMode where
+  | sum
+  | prod
+  | mean
+  | amax
+  | amin
+  deriving Repr, BEq, DecidableEq, Inhabited
+
+/-- Scatter-reduce preserves the destination signature when the indexing shapes line up. -/
+def scatterReduceResult? (self index src : TensorDesc) (dim : Nat)
+    (_mode : ScatterReduceMode) (_includeSelf : Bool := true) : Option TensorDesc :=
+  scatterResult? self index src dim
+
+/-- Scalar scatter-reduce preserves the destination signature when the indexing shapes line up. -/
+def scatterReduceScalarResult? (self index : TensorDesc) (dim : Nat)
+    (_mode : ScatterReduceMode) (_includeSelf : Bool := true) : Option TensorDesc :=
+  scatterScalarResult? self index dim
 
 /-- Vector-to-matrix diagonal constructor. -/
 def diagResult? (desc : TensorDesc) : Option TensorDesc :=
@@ -114,6 +165,13 @@ def unfoldResult? (desc : TensorDesc) (dim size step : Nat) : Option TensorDesc 
       none
     else
       some { shape := Shape.poolOut shape [size] [step] [1], dtype := desc.dtype }
+
+/-- Packed masked-select bridge: front-packed payload plus a scalar valid-count. -/
+def maskedSelectPackedResult? (src mask : TensorDesc) : Option (TensorDesc × TensorDesc) :=
+  if src.shape != mask.shape || mask.dtype != .bool then
+    none
+  else
+    some ({ shape := [Shape.numel src.shape], dtype := src.dtype }, scalarDesc .int32)
 
 /-- Reduce spec: reduce op + axes + keepdim flag. -/
 structure ReduceSpec where

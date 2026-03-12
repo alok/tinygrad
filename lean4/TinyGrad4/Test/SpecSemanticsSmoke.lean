@@ -56,6 +56,33 @@ private def testHighLevelIndexing : IO Unit := do
     none
     "unfold non-last axis"
 
+private def testScatterAndBridges : IO Unit := do
+  let self : TensorDesc := { shape := [1, 1, 16], dtype := .float32 }
+  let idx : TensorDesc := { shape := [1, 1, 4], dtype := .int32 }
+  let src : TensorDesc := { shape := [1, 1, 4], dtype := .float32 }
+  assertEq (scatterResult? self idx src 2)
+    (some self)
+    "scatter"
+  assertEq (scatterReduceResult? self idx src 2 .sum false)
+    (some self)
+    "scatterReduce"
+  assertEq (scatterScalarResult? self idx 2)
+    (some self)
+    "scatter scalar"
+  assertEq (scatterReduceScalarResult? self idx 2 .prod true)
+    (some self)
+    "scatter scalar reduce"
+  assertEq (scatterResult? self { shape := [1, 4], dtype := .int32 } { shape := [1, 4], dtype := .float32 } 1)
+    none
+    "scatter rank mismatch"
+
+  assertEq (maskedSelectPackedResult? { shape := [3, 3], dtype := .float32 } { shape := [3, 3], dtype := .bool })
+    (some ({ shape := [9], dtype := .float32 }, { shape := [], dtype := .int32 }))
+    "maskedSelectPacked"
+  assertEq (maskedSelectPackedResult? { shape := [3, 3], dtype := .float32 } { shape := [3, 2], dtype := .bool })
+    none
+    "maskedSelectPacked mismatch"
+
 private def testReductions : IO Unit := do
   let x : TensorDesc := { shape := [2, 3, 4], dtype := .float32 }
   let spec : ReduceSpec := { op := .ADD, axes := [1], keepdim := false }
@@ -109,6 +136,8 @@ def runAll : IO Unit := do
   IO.println "✓ movement + indexing"
   testHighLevelIndexing
   IO.println "✓ high-level indexing"
+  testScatterAndBridges
+  IO.println "✓ scatter + bridges"
   testReductions
   IO.println "✓ reductions"
   testElementwise

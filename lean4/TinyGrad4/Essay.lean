@@ -83,13 +83,15 @@ Instead of only writing the rules down as tables, it packages them as executable
 
 The key improvement is not that Lean now has more prose about the spec.
 It is that the spec itself can be imported and tested.
-For example, movement, basic indexing, gather / take / diag / diagonal / unfold shape rules, binary broadcasting,
-concat, and matmul output inference are now expressed as
+For example, movement, basic indexing, gather / take / scatter / diag / diagonal / unfold shape rules, the explicit
+`maskedSelectPacked` bridge, binary broadcasting, concat, and matmul output inference are now expressed as
 functions such as:
 
 * `MovementOp.apply?`
 * `basicIndex?`
 * `gatherResult?`
+* `scatterReduceResult?`
+* `maskedSelectPackedResult?`
 * `unfoldResult?`
 * `binaryResult?`
 * `catResult?`

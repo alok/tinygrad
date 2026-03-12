@@ -18,6 +18,13 @@ private def assertEq {α} [DecidableEq α] (got expected : α) (msg : String) : 
 
 private def testMovementAndIndexing : IO Unit := do
   let x : TensorDesc := { shape := [2, 3], dtype := .float32 }
+  assertEq (constResult .float32) ({ shape := [], dtype := .float32 } : TensorDesc) "const"
+  assertEq (vconstResult 4 .int32) ({ shape := [4], dtype := .int32 } : TensorDesc) "vconst"
+  assertEq (fullResult [2, 3] .float32) x "full"
+  assertEq (fullBoolResult [2, 3]) ({ shape := [2, 3], dtype := .bool } : TensorDesc) "fullBool"
+  assertEq (eyeResult 2 4 .float16) ({ shape := [2, 4], dtype := .float16 } : TensorDesc) "eye"
+  assertEq (arangeResult 7 .int32) ({ shape := [7], dtype := .int32 } : TensorDesc) "arange"
+  assertEq (likeResult x) x "like"
   assertEq (MovementOp.apply? x (.permute [1, 0]))
     (some { shape := [3, 2], dtype := .float32 })
     "permute"
@@ -60,6 +67,10 @@ private def testScatterAndBridges : IO Unit := do
   let self : TensorDesc := { shape := [1, 1, 16], dtype := .float32 }
   let idx : TensorDesc := { shape := [1, 1, 4], dtype := .int32 }
   let src : TensorDesc := { shape := [1, 1, 4], dtype := .float32 }
+  assertEq (copyResult self) self "copy"
+  assertEq (identityLikeUnaryResult? .DETACH self) (some self) "detach"
+  assertEq (identityLikeUnaryResult? .CONTIGUOUS self) (some self) "contiguous"
+  assertEq (identityLikeUnaryResult? .CONTIGUOUS_BACKWARD self) (some self) "contiguous backward"
   assertEq (scatterResult? self idx src 2)
     (some self)
     "scatter"

@@ -20,6 +20,33 @@ structure TensorDesc where
   dtype : DType
   deriving Repr, BEq, DecidableEq
 
+/-- Scalar constant signature. -/
+def constResult (dtype : DType) : TensorDesc :=
+  { shape := [], dtype }
+
+/-- Vector constant signature. -/
+def vconstResult (size : Nat) (dtype : DType) : TensorDesc :=
+  { shape := [size], dtype }
+
+/-- Full/zeros/ones-style constructors produce exactly the requested shape and dtype. -/
+def fullResult (shape : Shape) (dtype : DType) : TensorDesc :=
+  { shape, dtype }
+
+/-- Boolean full constructor. -/
+def fullBoolResult (shape : Shape) : TensorDesc :=
+  { shape, dtype := .bool }
+
+/-- Eye constructor yields a matrix with the requested dtype. -/
+def eyeResult (rows : Nat) (cols : Nat := rows) (dtype : DType := .float32) : TensorDesc :=
+  { shape := [rows, cols], dtype }
+
+/-- Arange/linspace/rand/randn/randint/randperm all produce a flat vector over their requested extent. -/
+def arangeResult (size : Nat) (dtype : DType := .float32) : TensorDesc :=
+  { shape := [size], dtype }
+
+/-- Like-style constructors preserve the source tensor's signature. -/
+def likeResult (desc : TensorDesc) : TensorDesc := desc
+
 /-- Tensor movement operators with pure shape semantics. -/
 inductive MovementOp where
   | reshape (newShape : Shape)
@@ -59,7 +86,7 @@ def basicIndex? (desc : TensorDesc) (items : List BasicIndexItem) : Option Tenso
   (inferBasicIndexShape desc.shape items).map fun shape => { desc with shape }
 
 private def scalarDesc (dtype : DType) : TensorDesc :=
-  { shape := [], dtype }
+  constResult dtype
 
 private def gatherShapeOk (shape idxShape : Shape) (dim : Nat) : Bool :=
   shape.length == idxShape.length &&
@@ -172,6 +199,15 @@ def maskedSelectPackedResult? (src mask : TensorDesc) : Option (TensorDesc × Te
     none
   else
     some ({ shape := [Shape.numel src.shape], dtype := src.dtype }, scalarDesc .int32)
+
+/-- Copy preserves tensor signature inside this pure shape/dtype layer. -/
+def copyResult (desc : TensorDesc) : TensorDesc := desc
+
+/-- Marker ops that are identity at the signature level. -/
+def identityLikeUnaryResult? (op : Ops) (desc : TensorDesc) : Option TensorDesc :=
+  match op with
+  | .DETACH | .CONTIGUOUS | .CONTIGUOUS_BACKWARD => some desc
+  | _ => none
 
 /-- Reduce spec: reduce op + axes + keepdim flag. -/
 structure ReduceSpec where

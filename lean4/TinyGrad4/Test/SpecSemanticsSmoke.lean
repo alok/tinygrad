@@ -31,6 +31,31 @@ private def testMovementAndIndexing : IO Unit := do
     (some { shape := [10, 30], dtype := .float32 })
     "basic index"
 
+private def testHighLevelIndexing : IO Unit := do
+  let src : TensorDesc := { shape := [2, 3], dtype := .float32 }
+  let idx : TensorDesc := { shape := [2, 2], dtype := .int32 }
+  assertEq (gatherResult? src idx 1)
+    (some { shape := [2, 2], dtype := .float32 })
+    "gather"
+  assertEq (takeResult? src { shape := [5], dtype := .int32 })
+    (some { shape := [5], dtype := .float32 })
+    "take"
+  assertEq (diagResult? { shape := [3], dtype := .float32 })
+    (some { shape := [3, 3], dtype := .float32 })
+    "diag"
+  assertEq (diagonalResult? { shape := [3, 3], dtype := .float32 })
+    (some { shape := [3], dtype := .float32 })
+    "diagonal"
+  assertEq (triuResult? { shape := [3, 4], dtype := .float32 })
+    (some { shape := [3, 4], dtype := .float32 })
+    "triu"
+  assertEq (unfoldResult? { shape := [8], dtype := .float32 } 0 3 2)
+    (some { shape := [3, 3], dtype := .float32 })
+    "unfold"
+  assertEq (unfoldResult? { shape := [2, 8], dtype := .float32 } 0 3 2)
+    none
+    "unfold non-last axis"
+
 private def testReductions : IO Unit := do
   let x : TensorDesc := { shape := [2, 3, 4], dtype := .float32 }
   let spec : ReduceSpec := { op := .ADD, axes := [1], keepdim := false }
@@ -82,6 +107,8 @@ def runAll : IO Unit := do
   IO.println "=== SpecSemanticsSmoke Tests ==="
   testMovementAndIndexing
   IO.println "✓ movement + indexing"
+  testHighLevelIndexing
+  IO.println "✓ high-level indexing"
   testReductions
   IO.println "✓ reductions"
   testElementwise

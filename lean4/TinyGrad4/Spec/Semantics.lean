@@ -58,6 +58,63 @@ end MovementOp
 def basicIndex? (desc : TensorDesc) (items : List BasicIndexItem) : Option TensorDesc :=
   (inferBasicIndexShape desc.shape items).map fun shape => { desc with shape }
 
+private def gatherShapeOk (shape idxShape : Shape) (dim : Nat) : Bool :=
+  shape.length == idxShape.length &&
+  dim < shape.length &&
+  listAll (fun i => if i == dim then true else listGetD shape i 0 >= listGetD idxShape i 0) (listRange shape.length)
+
+/-- Gather returns the index tensor's shape and preserves the payload dtype. -/
+def gatherResult? (src index : TensorDesc) (dim : Nat) : Option TensorDesc :=
+  if !index.dtype.isInt then
+    none
+  else if gatherShapeOk src.shape index.shape dim then
+    some { shape := index.shape, dtype := src.dtype }
+  else
+    none
+
+/-- Flattened `take` keeps the index shape and source dtype. -/
+def takeResult? (src index : TensorDesc) : Option TensorDesc :=
+  if index.dtype.isInt then
+    some { shape := index.shape, dtype := src.dtype }
+  else
+    none
+
+/-- Vector-to-matrix diagonal constructor. -/
+def diagResult? (desc : TensorDesc) : Option TensorDesc :=
+  match desc.shape with
+  | [n] => some { shape := [n, n], dtype := desc.dtype }
+  | _ => none
+
+/-- Main diagonal view for square matrices. -/
+def diagonalResult? (desc : TensorDesc) : Option TensorDesc :=
+  match desc.shape with
+  | [rows, cols] =>
+    if rows == cols then some { shape := [rows], dtype := desc.dtype } else none
+  | _ =>
+    none
+
+/-- Triangular masking preserves shape and dtype on rank-2+ tensors. -/
+def triuResult? (desc : TensorDesc) : Option TensorDesc :=
+  if desc.shape.length < 2 then none else some desc
+
+/-- Triangular masking preserves shape and dtype on rank-2+ tensors. -/
+def trilResult? (desc : TensorDesc) : Option TensorDesc :=
+  if desc.shape.length < 2 then none else some desc
+
+/-- Static-lane unfold currently supports only the last axis, matching the runtime implementation. -/
+def unfoldResult? (desc : TensorDesc) (dim size step : Nat) : Option TensorDesc :=
+  let shape := desc.shape
+  if size == 0 || step == 0 || shape.isEmpty then
+    none
+  else if dim >= shape.length || dim != shape.length - 1 then
+    none
+  else
+    let axisSize := listGetD shape dim 0
+    if size > axisSize then
+      none
+    else
+      some { shape := Shape.poolOut shape [size] [step] [1], dtype := desc.dtype }
+
 /-- Reduce spec: reduce op + axes + keepdim flag. -/
 structure ReduceSpec where
   op : Ops

@@ -81,6 +81,10 @@ Instead of only writing the rules down as tables, it packages them as executable
 * `MovementOp`, a closed datatype for reshape / expand / permute / pad / shrink / flip
 * `ReduceSpec`, which records the reduce op, axes, and `keepdim`
 
+On top of that, `TinyGrad4.Spec.Typed` now exposes a lower-level proof-carrying signature layer where shape and dtype
+live in the Lean type itself. That is the right place to squeeze performance-relevant information out of the type
+system without forcing the ergonomic layer to become unreadable.
+
 The key improvement is not that Lean now has more prose about the spec.
 It is that the spec itself can be imported and tested.
 For example, constructors, identity-style ops such as `detach` / `contiguous`, movement, basic indexing, gather /

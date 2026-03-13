@@ -88,7 +88,8 @@ def basicIndex? (desc : TensorDesc) (items : List BasicIndexItem) : Option Tenso
 private def scalarDesc (dtype : DType) : TensorDesc :=
   constResult dtype
 
-private def gatherShapeOk (shape idxShape : Shape) (dim : Nat) : Bool :=
+/-- Compatibility predicate for gather-style indexing. -/
+def gatherShapeOk (shape idxShape : Shape) (dim : Nat) : Bool :=
   shape.length == idxShape.length &&
   dim < shape.length &&
   listAll (fun i => if i == dim then true else listGetD shape i 0 >= listGetD idxShape i 0) (listRange shape.length)
@@ -109,7 +110,8 @@ def takeResult? (src index : TensorDesc) : Option TensorDesc :=
   else
     none
 
-private def scatterShapeOk (selfShape idxShape srcShape : Shape) (dim : Nat) : Bool :=
+/-- Compatibility predicate for scatter-style updates. -/
+def scatterShapeOk (selfShape idxShape srcShape : Shape) (dim : Nat) : Bool :=
   selfShape.length == idxShape.length &&
   selfShape.length == srcShape.length &&
   dim < selfShape.length &&

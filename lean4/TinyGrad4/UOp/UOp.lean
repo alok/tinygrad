@@ -95,6 +95,15 @@ instance : Inhabited UOpId where
 instance : ToString UOpId where
   toString uid := s!"u{uid.id}"
 
+/-- Non-semantic metadata attached to a `UOp`.
+    This is explicit in the IR so later passes do not need to recover it ad hoc. -/
+structure UOpMeta where
+  fusionTag? : Option String := none
+  costTag? : Option Nat := none
+  deviceTag? : Option Backend.DeviceType := none
+  shardAxis? : Option Nat := none
+  deriving Repr, Inhabited, BEq
+
 /-- Core UOp structure -/
 structure UOp where
   uid : UOpId
@@ -103,10 +112,11 @@ structure UOp where
   src : List UOp
   arg : UArg
   shape : Shape
+  metaInfo : UOpMeta := default
   deriving Repr
 
 instance : Inhabited UOp where
-  default := { uid := ⟨0⟩, op := .CONST, dtype := .float32, src := [], arg := .empty, shape := [] }
+  default := { uid := ⟨0⟩, op := .CONST, dtype := .float32, src := [], arg := .empty, shape := [], metaInfo := default }
 
 namespace UOp
 
@@ -118,6 +128,8 @@ def isMovement (u : UOp) : Bool := u.op.isMovement
 def isReduce (u : UOp) : Bool := u.op.isReduce
 def numel (u : UOp) : Nat := u.shape.numel
 def rank (u : UOp) : Nat := u.shape.rank
+def device? (u : UOp) : Option Backend.DeviceType := u.metaInfo.deviceTag?
+def shardAxis? (u : UOp) : Option Nat := u.metaInfo.shardAxis?
 
 end UOp
 
@@ -160,6 +172,85 @@ namespace UOp
 private def keyOf (op : Ops) (dtype : DType) (src : List UOp) (arg : UArg) (shape : Shape) : UOpKey :=
   { op, dtype, src := src.map (·.uid), arg, shape }
 
+private def prefixProd (shape : Shape) (n : Nat) : Nat :=
+  listProd (shape.take n)
+
+private def remapShardAxis? (fromShape toShape : Shape) (axis : Nat) : Option Nat :=
+  let boundary := prefixProd fromShape (axis + 1)
+  let rec loop (i : Nat) : Option Nat :=
+    if i >= toShape.length then
+      none
+    else if prefixProd toShape (i + 1) == boundary then
+      some i
+    else
+      loop (i + 1)
+  loop 0
+
+private def permuteShardAxis? (perm : List Nat) (axis : Nat) : Option Nat :=
+  let idx := listIndexOf perm axis
+  if idx < perm.length then some idx else none
+
+private def reduceShardAxis? (rank : Nat) (axes : List Nat) (keepdim : Bool) (axis : Nat) : Option Nat :=
+  if axis >= rank || axes.contains axis then
+    none
+  else if keepdim then
+    some axis
+  else
+    some (axis - (axes.filter (· < axis)).length)
+
+private def broadcastShardAxis? (srcShape outShape : Shape) (axis? : Option Nat) : Option Nat :=
+  match axis? with
+  | none => none
+  | some axis =>
+    let delta := outShape.length - srcShape.length
+    let axis' := axis + delta
+    if axis' < outShape.length then some axis' else none
+
+private def firstDevice? (srcs : List UOp) : Option Backend.DeviceType :=
+  srcs.head?.bind (·.device?)
+
+private def agreeingDevice? (srcs : List UOp) : Option Backend.DeviceType :=
+  let ds := srcs.filterMap (·.device?)
+  match ds with
+  | [] => none
+  | d :: rest =>
+    if rest.all (· == d) then some d else none
+
+private def agreeingShardAxis? (srcs : List UOp) (outShape : Shape) : Option Nat :=
+  let axes := srcs.filterMap (fun s => broadcastShardAxis? s.shape outShape s.shardAxis?)
+  match axes with
+  | [] => none
+  | a :: rest =>
+    if rest.all (· == a) then some a else none
+
+private def deriveMeta (op : Ops) (src : List UOp) (arg : UArg) (shape : Shape) : UOpMeta :=
+  let deviceFromArg := match arg with | .device dev => some (Backend.parseDeviceType dev) | _ => none
+  let deviceTag? :=
+    match op with
+    | .BUFFER => deviceFromArg
+    | .COPY => deviceFromArg <|> firstDevice? src
+    | .SOURCE | .LINEAR | .PROGRAM | .RANGE | .SPECIAL | .CONST | .VCONST => none
+    | _ => deviceFromArg <|> agreeingDevice? src <|> firstDevice? src
+  let shardAxis? :=
+    match op, src with
+    | .RESHAPE, [x] => x.shardAxis?.bind (remapShardAxis? x.shape shape)
+    | .PERMUTE, [x] =>
+      match arg with
+      | .permutation perm => x.shardAxis?.bind (permuteShardAxis? perm)
+      | _ => x.shardAxis?
+    | .REDUCE_AXIS, [x] =>
+      match arg with
+      | .reduceWithAxes _ axes =>
+        match x.shardAxis? with
+        | some axis => reduceShardAxis? x.shape.length axes (shape.length == x.shape.length) axis
+        | none => none
+      | _ => x.shardAxis?
+    | .COPY, _ => none
+    | .WHERE, _ => agreeingShardAxis? src shape
+    | _, [x] => x.shardAxis?
+    | _, _ => agreeingShardAxis? src shape
+  { deviceTag?, shardAxis? }
+
 private def shouldIntern : Ops → Bool
   | .BUFFER | .RANGE | .SPECIAL | .UNIQUE | .LUNIQUE => false
   | _ => true
@@ -167,7 +258,8 @@ private def shouldIntern : Ops → Bool
 private def mkUOp (op : Ops) (dtype : DType) (src : List UOp) (arg : UArg) (shape : Shape) : UOpM UOp := do
   if !shouldIntern op then
     let uid ← freshUOpId
-    pure { uid, op, dtype, src, arg, shape }
+    let info := deriveMeta op src arg shape
+    pure { uid, op, dtype, src, arg, shape, metaInfo := info }
   else
     let k := keyOf op dtype src arg shape
     let st ← get
@@ -175,7 +267,8 @@ private def mkUOp (op : Ops) (dtype : DType) (src : List UOp) (arg : UArg) (shap
     | some u => pure u
     | none =>
       let uid ← freshUOpId
-      let u : UOp := { uid, op, dtype, src, arg, shape }
+      let info := deriveMeta op src arg shape
+      let u : UOp := { uid, op, dtype, src, arg, shape, metaInfo := info }
       let st1 ← get
       let st' := { st1 with intern := st1.intern.insert k u }
       let st'' :=
@@ -434,6 +527,18 @@ def catValid (xs : List UOp) (axis : Nat) (dtype : DType)
   let shapes := xs.map (fun u => u.shape)
   let outShape := Shape.concatOutList shapes axis
   mkUOp .CAT dtype xs (.axes [axis]) outShape
+
+instance : FusionTaggable UOp where
+  applyFusion tag u := { u with metaInfo := { u.metaInfo with fusionTag? := some tag } }
+
+instance : CostTaggable UOp where
+  applyCost score u := { u with metaInfo := { u.metaInfo with costTag? := some score } }
+
+instance : DeviceTaggable UOp where
+  applyDevice dev u := { u with metaInfo := { u.metaInfo with deviceTag? := some (Backend.parseDeviceType dev) } }
+
+instance : AxisTaggable UOp where
+  applyAxis axis u := { u with metaInfo := { u.metaInfo with shardAxis? := some axis } }
 
 end UOp
 

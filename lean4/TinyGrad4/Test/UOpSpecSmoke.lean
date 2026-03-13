@@ -90,6 +90,18 @@ private def testBackendFacingNodes : IO Unit := do
     { dtype := .float32, shape := [4], device? := some .CUDA }
     "copy"
 
+private def testExplicitTags : IO Unit := do
+  let tagged := runTensorM do
+    let x ← Tensor.buffer [8] .float32
+    pure (axis[2] (device["CUDA"] (fusion["ewise"] (cost[7] x.uop))))
+  assertEq tagged.metaInfo.fusionTag? (some "ewise") "fusion tag"
+  assertEq tagged.metaInfo.costTag? (some 7) "cost tag"
+  assertEq tagged.metaInfo.deviceTag? (some .CUDA) "device tag"
+  assertEq tagged.metaInfo.shardAxis? (some 2) "axis tag"
+  assertSome (check? tagged)
+    { dtype := .float32, shape := [8], device? := some .CUDA, shardAxis? := some 2 }
+    "tagged signature"
+
 def runAll : IO Unit := do
   IO.println "=== UOpSpecSmoke Tests ==="
   testHighLevelGraph
@@ -98,6 +110,8 @@ def runAll : IO Unit := do
   IO.println "✓ manual low-level nodes"
   testBackendFacingNodes
   IO.println "✓ backend-facing nodes"
+  testExplicitTags
+  IO.println "✓ explicit tags"
   IO.println "=== UOpSpecSmoke OK ==="
 
 end TinyGrad4.Test.UOpSpecSmoke

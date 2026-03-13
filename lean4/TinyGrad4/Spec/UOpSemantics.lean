@@ -19,6 +19,7 @@ structure UOpSig where
   dtype : DType
   shape : Shape
   device? : Option Backend.DeviceType := none
+  shardAxis? : Option Nat := none
   deriving Repr, BEq, DecidableEq
 
 private def uargDevice? : UArg → Option Backend.DeviceType
@@ -44,7 +45,7 @@ private def arityOk (u : UOp) : Bool :=
   | .variadic => true
 
 private def sigOf (u : UOp) (device? : Option Backend.DeviceType) : UOpSig :=
-  { dtype := u.dtype, shape := u.shape, device? }
+  { dtype := u.dtype, shape := u.shape, device? := u.device? <|> device?, shardAxis? := u.shardAxis? }
 
 /-- Checked signature for a `UOp`, if it matches the currently modeled lower-level rules. -/
 partial def check? (u : UOp) : Option UOpSig := do

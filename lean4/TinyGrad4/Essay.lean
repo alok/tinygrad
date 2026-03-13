@@ -86,9 +86,10 @@ live in the Lean type itself. That is the right place to squeeze performance-rel
 system without forcing the ergonomic layer to become unreadable.
 
 Below the tensor layer, `TinyGrad4.Spec.UOpSpec` now mirrors the current `UOp` validator and returns checked
-lower-level signatures with best-known device inference. That gives the Lean port an executable story for `BUFFER`,
-`RANGE`, `SPECIAL`, `PROGRAM`, `LINEAR`, `SOURCE`, and conservative backend-facing rules for nodes such as `LOAD`,
-`STORE`, `AFTER`, and `COPY`.
+lower-level signatures with explicit metadata-aware device and shard-axis facts. `UOp` itself now stores non-semantic
+metadata instead of dropping it on the floor, so tags such as fusion/cost/device and explicit shard-axis annotations
+survive in the IR. That gives the Lean port an executable story for `BUFFER`, `RANGE`, `SPECIAL`, `PROGRAM`,
+`LINEAR`, `SOURCE`, and conservative backend-facing rules for nodes such as `LOAD`, `STORE`, `AFTER`, and `COPY`.
 
 The key improvement is not that Lean now has more prose about the spec.
 It is that the spec itself can be imported and tested.

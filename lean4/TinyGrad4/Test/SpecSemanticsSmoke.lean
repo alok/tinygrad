@@ -94,6 +94,52 @@ private def testScatterAndBridges : IO Unit := do
     none
     "maskedSelectPacked mismatch"
 
+private def testNnShapes : IO Unit := do
+  let x : TensorDesc := { shape := [8, 32], dtype := .float32 }
+  let w : TensorDesc := { shape := [32, 64], dtype := .float32 }
+  let b : TensorDesc := { shape := [64], dtype := .float32 }
+  assertEq (linearResult? x w)
+    (some { shape := [8, 64], dtype := .float32 })
+    "linear"
+  assertEq (linearBiasResult? x w b)
+    (some { shape := [8, 64], dtype := .float32 })
+    "linear bias"
+
+  let convIn1 : TensorDesc := { shape := [1, 3, 32], dtype := .float32 }
+  let convW1 : TensorDesc := { shape := [16, 3, 3], dtype := .float32 }
+  assertEq (conv1dResult? convIn1 convW1 1 2 1)
+    (some { shape := [1, 16, 16], dtype := .float32 })
+    "conv1d"
+
+  let convIn2 : TensorDesc := { shape := [1, 3, 32, 32], dtype := .float32 }
+  let convW2 : TensorDesc := { shape := [16, 3, 3, 3], dtype := .float32 }
+  assertEq (conv2dResult? convIn2 convW2 1 2 1)
+    (some { shape := [1, 16, 16, 16], dtype := .float32 })
+    "conv2d"
+
+  assertEq (pool2dResult? convIn2 2 0 2)
+    (some { shape := [1, 3, 16, 16], dtype := .float32 })
+    "pool2d"
+
+  let meanNC : TensorDesc := { shape := [32], dtype := .float32 }
+  let invstdNC : TensorDesc := { shape := [32], dtype := .float32 }
+  assertEq (batchnormNCResult? x meanNC invstdNC)
+    (some x)
+    "batchnorm NC"
+
+  let x4 : TensorDesc := { shape := [2, 32, 8, 8], dtype := .float32 }
+  let meanNCHW : TensorDesc := { shape := [32], dtype := .float32 }
+  let invstdNCHW : TensorDesc := { shape := [32], dtype := .float32 }
+  assertEq (batchnormNCHWResult? x4 meanNCHW invstdNCHW)
+    (some x4)
+    "batchnorm NCHW"
+
+  let pooled : TensorDesc := { shape := [2, 32, 4, 4], dtype := .float32 }
+  let idx : TensorDesc := { shape := [2, 32, 4, 4], dtype := .int32 }
+  assertEq (maxUnpool2dOutResult? pooled idx 8 8)
+    (some { shape := [2, 32, 8, 8], dtype := .float32 })
+    "maxUnpool2dOut"
+
 private def testReductions : IO Unit := do
   let x : TensorDesc := { shape := [2, 3, 4], dtype := .float32 }
   let spec : ReduceSpec := { op := .ADD, axes := [1], keepdim := false }
@@ -149,6 +195,8 @@ def runAll : IO Unit := do
   IO.println "✓ high-level indexing"
   testScatterAndBridges
   IO.println "✓ scatter + bridges"
+  testNnShapes
+  IO.println "✓ nn shapes"
   testReductions
   IO.println "✓ reductions"
   testElementwise

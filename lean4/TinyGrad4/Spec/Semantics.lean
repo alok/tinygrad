@@ -209,6 +209,96 @@ def identityLikeUnaryResult? (op : Ops) (desc : TensorDesc) : Option TensorDesc 
   | .DETACH | .CONTIGUOUS | .CONTIGUOUS_BACKWARD => some desc
   | _ => none
 
+private def channelVectorOk (desc : TensorDesc) (channels : Nat) (dtype : DType) : Bool :=
+  desc.shape == [channels] && desc.dtype == dtype
+
+/-- Batchnorm on `NC` tensors preserves the input signature when channel stats line up. -/
+def batchnormNCResult? (x mean invstd : TensorDesc)
+    (weight? bias? : Option TensorDesc := none) : Option TensorDesc :=
+  match x.shape with
+  | [_, channels] =>
+    if x.dtype != .float32 ||
+        !channelVectorOk mean channels .float32 ||
+        !channelVectorOk invstd channels .float32 then
+      none
+    else
+      let weightOk := weight?.map (fun w => channelVectorOk w channels .float32) |>.getD true
+      let biasOk := bias?.map (fun b => channelVectorOk b channels .float32) |>.getD true
+      if weightOk && biasOk then some x else none
+  | _ =>
+    none
+
+/-- Batchnorm on `NCHW` tensors preserves the input signature when channel stats line up. -/
+def batchnormNCHWResult? (x mean invstd : TensorDesc)
+    (weight? bias? : Option TensorDesc := none) : Option TensorDesc :=
+  match x.shape with
+  | [_, channels, _, _] =>
+    if x.dtype != .float32 ||
+        !channelVectorOk mean channels .float32 ||
+        !channelVectorOk invstd channels .float32 then
+      none
+    else
+      let weightOk := weight?.map (fun w => channelVectorOk w channels .float32) |>.getD true
+      let biasOk := bias?.map (fun b => channelVectorOk b channels .float32) |>.getD true
+      if weightOk && biasOk then some x else none
+  | _ =>
+    none
+
+/-- Linear layer shape contract: `[batch, in] @ [in, out] -> [batch, out]`. -/
+def linearResult? (input weight : TensorDesc) : Option TensorDesc :=
+  match input.shape, weight.shape with
+  | [batch, inDim], [inDim', outDim] =>
+    if input.dtype == weight.dtype && inDim == inDim' then
+      some { shape := [batch, outDim], dtype := input.dtype }
+    else
+      none
+  | _, _ =>
+    none
+
+/-- Linear layer with bias requires a trailing `[out]` bias vector. -/
+def linearBiasResult? (input weight bias : TensorDesc) : Option TensorDesc := do
+  let out ← linearResult? input weight
+  match out.shape with
+  | [_, outDim] =>
+    if bias.shape == [outDim] && bias.dtype == out.dtype then some out else none
+  | _ =>
+    none
+
+/-- Conv1d shape contract lifted from `Shape.conv1dShape`. -/
+def conv1dResult? (input weight : TensorDesc) (padding stride dilation : Nat) : Option TensorDesc := do
+  if input.dtype != weight.dtype then
+    none
+  else
+    let shape ← Shape.conv1dShape input.shape weight.shape padding stride dilation
+    pure { shape, dtype := input.dtype }
+
+/-- Conv2d shape contract lifted from `Shape.conv2dShape`. -/
+def conv2dResult? (input weight : TensorDesc) (padding stride dilation : Nat) : Option TensorDesc := do
+  if input.dtype != weight.dtype then
+    none
+  else
+    let shape ← Shape.conv2dShape input.shape weight.shape padding stride dilation
+    pure { shape, dtype := input.dtype }
+
+/-- Pool2d shape contract lifted from `Shape.pool2dShape`. -/
+def pool2dResult? (input : TensorDesc) (kernelSize padding stride : Nat) : Option TensorDesc :=
+  match input.shape with
+  | [_, _, _, _] =>
+    some { shape := Shape.pool2dShape input.shape kernelSize padding stride, dtype := input.dtype }
+  | _ =>
+    none
+
+/-- Max-unpool with explicit output size preserves batch/channel dims and payload dtype. -/
+def maxUnpool2dOutResult? (input indices : TensorDesc) (outH outW : Nat) : Option TensorDesc :=
+  match input.shape, indices.shape with
+  | [batch, channels, _, _], [batch', channels', _, _] =>
+    if batch == batch' && channels == channels' && indices.dtype.isInt then
+      some { shape := [batch, channels, outH, outW], dtype := input.dtype }
+    else
+      none
+  | _, _ =>
+    none
+
 /-- Reduce spec: reduce op + axes + keepdim flag. -/
 structure ReduceSpec where
   op : Ops

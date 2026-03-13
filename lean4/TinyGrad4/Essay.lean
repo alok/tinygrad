@@ -106,6 +106,11 @@ That is a better fit for Lean than a direct PDF transcription.
 `tinyspec` is still useful as the semantic checklist, but the Lean version should cash out as small typed definitions
 that runtime code and tests can point at directly.
 
+The main remaining `tinyspec` categories are now mostly below this layer rather than missing from it.
+In particular, load / store / ordering / codegen nodes, multi-device axis bookkeeping, and device-specific `copy`
+semantics belong either in `UOp` validation or in lower backend specs, not in the current tensor-facing
+`Spec.Semantics` module.
+
 # What Works
 
 The present codebase already supports a substantial parity story for core tensor semantics.

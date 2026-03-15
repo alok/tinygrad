@@ -340,6 +340,9 @@ lean_exe tg4_bench where
   root := `TinyGrad4.Benchmark.Main
   moreLinkArgs := metalLinkArgs
 
+lean_exe tg4_autoresearch where
+  root := `TinyGrad4.AutoResearch.Main
+
 -- Comprehensive Metal benchmark (requires scripts/build_metal.sh first)
 lean_exe comprehensive_bench where
   root := `TinyGrad4.Test.ComprehensiveBench

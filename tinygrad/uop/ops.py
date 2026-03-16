@@ -103,7 +103,8 @@ class UOpMetaClass(type):
 buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
-# recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
+# recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError.
+# It computes the property for the whole reachable DAG in a topo pass and memoizes the results into each node's __dict__.
 class recursive_property(property):
   def __init__(self, fxn):
     self.fxn = fxn
@@ -142,6 +143,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def rtag(self, tag=True): return self.replace(tag=tag)
   @recursive_property
   def key(self) -> bytes:
+    """Stable hash of the UOp DAG (op/dtype/arg/src). Computed non-recursively to avoid Python recursion limits on deep graphs."""
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self)
   def argstr(self):
@@ -160,8 +162,18 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
+    if self.op in ops: return True
+    # Fast path: reuse cached backward_slice if present.
+    if (bs:=self.__dict__.get("backward_slice")) is not None: return any(x.op in ops for x in bs)
+    # Early-stop DFS without building a full toposort dict.
+    seen: set[UOp] = set()
+    stack = [*self.src]
+    while stack:
+      if (x:=stack.pop()) in seen: continue
+      seen.add(x)
+      if x.op in ops: return True
+      stack.extend(x.src)
+    return False
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}

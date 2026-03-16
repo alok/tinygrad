@@ -1,0 +1,42 @@
+{
+  "timestamp": "2025-12-26T17:55:00Z",
+  "device": "Apple M4 Max",
+  "benchmarks": [
+    {
+      "name": "vector_add_1M",
+      "size": 1000000,
+      "time_us": 59.73,
+      "bandwidth_gbs": 200.92,
+      "throughput_gflops": 16.74
+    },
+    {
+      "name": "vector_add_float4_1M",
+      "size": 1000000,
+      "time_us": 26.08,
+      "bandwidth_gbs": 460.19,
+      "throughput_gflops": 38.35
+    },
+    {
+      "name": "reduce_sum_1M",
+      "size": 1000000,
+      "time_us": 218.30,
+      "bandwidth_gbs": 18.32
+    },
+    {
+      "name": "fused_relu_mul_add_1M",
+      "size": 1000000,
+      "time_us": 155.81,
+      "bandwidth_gbs": 102.69,
+      "throughput_gflops": 19.25
+    }
+  ],
+  "comparison": {
+    "vs_python_tinygrad": {
+      "python_time_us": 212.24,
+      "lean_scalar_time_us": 59.73,
+      "lean_vec4_time_us": 26.08,
+      "scalar_speedup": 3.55,
+      "vec4_speedup": 8.14
+    }
+  }
+}

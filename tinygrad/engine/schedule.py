@@ -88,13 +88,23 @@ from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.uop.ops import PatternMatcher, UPat
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
-  if (ret:=ctx[0].get(b, None)) is None: ctx[0][b] = ret = UOp.new_buffer(b.device, b.arg, b.dtype)
+  if (ret:=ctx[0].get(b, None)) is None:
+    if b.op is Ops.BUFFER:
+      # if it's not in the cache, create a new buffer
+      ctx[0][b] = ret = UOp.new_buffer(b.device, b.arg, b.dtype)
+    else:
+      assert b.op is Ops.CONST
+      # schedule cache can contain CONST(LUNIQUE, device) placeholders that aren't in the current input_buffers map
+      # (ex: internal consts).
+      # rebuild a fresh unique_const.
+      ctx[0][b] = ret = UOp.unique_const(b.dtype, b.arg, device=b.src[1].arg)
   return ret
 
 pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg]),
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
+  (UPat(Ops.CONST, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
 ])
 
 pm_resolve_linear_call = PatternMatcher([

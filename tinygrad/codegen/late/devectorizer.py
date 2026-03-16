@@ -52,7 +52,8 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)),
+   lambda buf,x,i,cond: simplify_valid_load(buf, x, cond) if isinstance(buf.dtype, ImageDType) else None),
   # simplify away long after index has been lowered
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x", dtypes.long), UPat.var("c", dtypes.bool))), lambda buf,x,c: simplify_valid_load(buf, x, c)),
   # drop true gate
@@ -369,4 +370,3 @@ pm_add_loads = PatternMatcher([
   # remove loads from stores
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD), UPat(name="val")), name="s"), lambda s,val: s.replace(src=(s.src[0].src[0], val))),
 ])
-

@@ -66,5 +66,9 @@ target
 .mypy_cache
 mutants
 .mutmut-cache
+.mutmut-cache.claude/
+lean4/.lake/
+tinygrad_all.py
+data/
 dagre/
 graphlib/

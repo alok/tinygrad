@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-12-26T17:45:00Z",
+  "test": "vector_add_1M",
+  "size": 1000000,
+  "results": {
+    "lean_metal": {
+      "time_us": 90.55,
+      "bandwidth_gbs": 132.5,
+      "throughput_gflops": 11.04
+    },
+    "python_tinygrad": {
+      "time_us": 212.24,
+      "bandwidth_gbs": 56.54,
+      "throughput_gflops": 4.71
+    }
+  },
+  "speedup": 2.34,
+  "device": "Apple M4 Max"
+}

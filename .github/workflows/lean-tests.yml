@@ -1,0 +1,73 @@
+name: Lean Tests
+
+on:
+  pull_request:
+    paths:
+      - "lean4/**"
+      - "lakefile.lean"
+      - "lake-manifest.json"
+      - "lean-toolchain"
+      - ".github/workflows/lean-tests.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "lean4/**"
+      - "lakefile.lean"
+      - "lake-manifest.json"
+      - "lean-toolchain"
+      - ".github/workflows/lean-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  lean-tests:
+    name: Lake Driver + Profiles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Checkout LeanBench Sibling
+        run: git clone --depth 1 https://github.com/alok/LeanBench.git ../LeanBench
+
+      - name: Install Elan
+        run: |
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Show Lake Version
+        run: lake --version
+
+      - name: Check Test Driver
+        run: lake check-test
+
+      - name: Build Test Driver
+        run: lake build tg4_tests
+
+      - name: Run Parity Scorecard Check
+        run: |
+          uv run python lean4/scripts/parity_scorecard.py \
+            --json-out lean4/testdata/parity/scorecard.latest.json \
+            --md-out lean4/testdata/parity/scorecard.latest.md \
+            --check
+
+      - name: Check Fixture Freshness
+        run: |
+          tmp_json="$(mktemp)"
+          uv run python lean4/scripts/generate_parity_fixtures.py --out "$tmp_json"
+          diff -u "$tmp_json" lean4/testdata/parity/core_ops.json
+
+      - name: Run Fast Profile
+        run: lake test
+
+      - name: Run Medium Profile
+        run: lake test -- --profile medium
+
+      - name: Run Slow Profile
+        run: lake test -- --profile slow

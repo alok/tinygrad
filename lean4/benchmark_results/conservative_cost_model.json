@@ -1,0 +1,12 @@
+{
+  "kernelOverhead": 100,
+  "elem": 1,
+  "moveElem": 2,
+  "memReadByte": 1,
+  "memWriteByte": 1,
+  "memReadViewByte": 3,
+  "memWriteViewByte": 1,
+  "reduceElem": 2,
+  "matmulMulAdd": 1,
+  "matmulViewMulAdd": 3
+}

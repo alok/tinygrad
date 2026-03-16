@@ -1,0 +1,14 @@
+{
+  "timestamp": "2025-12-26T17:27:42Z",
+  "results": [
+    {
+      "name": "vector_add",
+      "implementation": "python",
+      "size": 1000000,
+      "time_us": 189.96542000000002,
+      "bandwidth_gbs": 63.16939156610713,
+      "throughput_gflops": 5.2641159638422605,
+      "verified": true
+    }
+  ]
+}

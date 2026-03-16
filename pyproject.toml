@@ -9,7 +9,9 @@ classifiers = ["Programming Language :: Python :: 3"]
 license = 'MIT'
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "z3-solver",
+]
 
 [build-system]
 requires = ["setuptools"]
@@ -51,7 +53,7 @@ tinygrad = ["py.typed"]
 
 [project.optional-dependencies]
 arm = ["unicorn"]
-triton = ["triton-nightly>=2.1.0.dev20231014192330"]
+triton = ["triton-nightly; sys_platform == 'linux'"]
 linting = [
   "pylint",
   "mypy==1.19.1",
@@ -257,3 +259,11 @@ select = [
 
 [tool.ruff.format]
 exclude = ["*"]
+
+[tool.uv.sources]
+triton-nightly = { index = "triton-nightly" }
+
+[[tool.uv.index]]
+name = "triton-nightly"
+url = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/"
+explicit = true

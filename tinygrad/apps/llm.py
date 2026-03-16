@@ -117,7 +117,7 @@ class TransformerBlock:
       self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
       self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
-  @function(precompile=bool(getenv("PRECOMPILE", 0)))
+  @function(precompile=bool(getenv("PRECOMPILE", 0)), allow_implicit=False)
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
@@ -129,9 +129,8 @@ class TransformerBlock:
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     if self.qk_norm == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]
-    q = apply_rope(q, freqs_cis)
-    k = apply_rope(k, freqs_cis)
+    q = apply_rope(q, self.freqs_cis[start_pos:start_pos+T])
+    k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T])
 
     # TODO: fix assign to behave like this
     assigned_kv = self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.assign(Tensor.stack(k, v).contiguous().uop))
@@ -151,7 +150,7 @@ class TransformerBlock:
     attn = self.attn_output(attn)
     return x + attn
 
-  @function(precompile=bool(getenv("PRECOMPILE", 0)))
+  @function(precompile=bool(getenv("PRECOMPILE", 0)), allow_implicit=False)
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
@@ -168,6 +167,7 @@ class TransformerBlock:
       # TODO: how is the dtype of this determined?
       # NOTE: clone is used to promise the creation of a specific buffer
       self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
+      self.freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
@@ -239,10 +239,10 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
     start_pos = self.get_start_pos(tokens)
-    out = None
+    out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
-      out = self(t[:, sp:sp+nt] if out is None else out, sp).realize()
+      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp).realize()
       start_pos += nt.val
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue

@@ -355,6 +355,10 @@ lean_exe mnist_gpu_bench where
   root := `TinyGrad4.Test.MNISTGPUBench
   moreLinkArgs := metalLinkArgs
 
+lean_exe mnist_train where
+  root := `TinyGrad4.Test.MNISTTrain
+  moreLinkArgs := metalLinkArgs
+
 lean_exe matmul_nan_debug where
   root := `TinyGrad4.Test.MatmulNaNDebug
   moreLinkArgs := metalLinkArgs

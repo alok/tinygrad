@@ -27,8 +27,10 @@ def sigmoidish := kernel! "bench_sigmoidish" fun x => recip (1.0 + exp2 (-1.4426
 private def packF32 (data : Array Float64) : ByteArray :=
   Native.packF32FromF64 ⟨data⟩
 
-/-- Steady-state GPU benchmark: alloc+copy once, launch `iters` times, sync once. -/
-def benchGpu (name : String) (source : String) (arity numel iters : Nat) : IO Unit := do
+/-- Steady-state GPU benchmark: alloc+copy once, launch `iters` times, sync once.
+    `threads` defaults to one per element; pass `numel/4` for float4 kernels. -/
+def benchGpu (name : String) (source : String) (arity numel iters : Nat)
+    (threads : Option Nat := none) : IO Unit := do
   let data := (Array.range numel).map fun i => (Float64.ofNat (i % 1000)) / 500.0 - 1.0
   let bytes := packF32 data
   let mut bufs : Array MetalBuffer := #[]
@@ -39,12 +41,13 @@ def benchGpu (name : String) (source : String) (arity numel iters : Nat) : IO Un
   let out ← metalAllocBytes bytes.size
   bufs := bufs.push out
   let prog ← MetalEwise.getOrCompile name source
+  let nThreads := threads.getD numel
   -- warmup
-  metalLaunch prog bufs numel 1 1 256 1 1
+  metalLaunch prog bufs nThreads 1 1 256 1 1
   metalSync
   let start ← IO.monoNanosNow
   for _ in [:iters] do
-    metalLaunch prog bufs numel 1 1 256 1 1
+    metalLaunch prog bufs nThreads 1 1 256 1 1
   metalSync
   let stop ← IO.monoNanosNow
   let usPerIter : Float64 := (stop - start).toFloat / 1000.0 / Float64.ofNat iters
@@ -53,7 +56,9 @@ def benchGpu (name : String) (source : String) (arity numel iters : Nat) : IO Un
   IO.println s!"  {name}: {usPerIter} μs/iter, {gbps} GB/s ({numel} elems, {iters} iters)"
   for b in bufs do metalFree b
 
-/-- CPU per-element `fn` loop (interpreted native path, for scale). -/
+/-- CPU per-element closure loop. NOT a kernel and not like-for-like with the
+    GPU numbers (fresh closure per element, serial dependency through `acc`,
+    smaller N) — a scale reference only. -/
 def benchCpuFn (numel iters : Nat) : IO Unit := do
   let xs := (Array.range numel).map fun i => ((Float64.ofNat (i % 1000)) / 500.0 - 1.0).toFloat32
   let start ← IO.monoNanosNow
@@ -73,6 +78,8 @@ def runAll : IO Unit := do
     let numel := 1 <<< 20
     benchGpu "bench_saxpy" saxpy.metal 3 numel 200
     benchGpu "bench_sigmoidish" sigmoidish.metal 1 numel 200
+    benchGpu "bench_saxpy_v4" saxpy.metalVec 3 numel 200 (threads := some (numel / 4))
+    benchGpu "bench_sigmoidish_v4" sigmoidish.metalVec 1 numel 200 (threads := some (numel / 4))
   else
     IO.println "  (Metal not available)"
   benchCpuFn (1 <<< 16) 10

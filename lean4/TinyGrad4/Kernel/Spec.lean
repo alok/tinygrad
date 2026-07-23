@@ -84,7 +84,8 @@ def evalExpr (ops : ScalarOps Float32) (read : (t : Ty) → Nat → Ty.denote t)
   | .max a b => ops.max (evalExpr ops read a) (evalExpr ops read b)
   | .cmplt a b => ops.cmplt (evalExpr ops read a) (evalExpr ops read b)
   | .where_ c x y => ops.where_ (evalExpr ops read c) (evalExpr ops read x) (evalExpr ops read y)
-  | .truthy x => (evalExpr ops read x).toBits != 0
+  -- value semantics (matches device code and Python truthiness): -0.0 is falsy, NaN is truthy
+  | .truthy x => (show Float32 from evalExpr ops read x) != (0.0 : Float32)
 
 private def finRange : (n : Nat) → List (Fin n)
   | 0 => []

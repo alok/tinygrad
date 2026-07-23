@@ -232,3 +232,50 @@ To add an op (say `min`), touch in order:
 The invariant to preserve throughout: **`fn` and the embedded spec are two
 renderings of one reified AST, built from the same tokens.** Everything
 else — the proof, the codegen, the GPU agreement — follows from that.
+
+## 10. Round two: semantics hardening and the vectorized win
+
+An adversarial review pass (plus a head-to-head against upstream Python
+tinygrad) drove a second round of changes worth understanding:
+
+**Semantics must match the proof, not the platform's favorite intrinsic.**
+`max` originally rendered as `max()`/`fmaxf()` — which *discards* NaN, while
+the proven `fn` uses Lean's `Max.max` (`maxOfLe`), which *propagates* the
+first NaN argument and prefers `-0.0` differently. The generated code now
+renders `((a<=b)?b:a)` (scalar) / `select(a,b,a<=b)` (vector): exactly
+`maxOfLe`, lane for lane. Same class of fix: `truthy` in the spec was a bit
+test (`toBits != 0`, making `-0.0` truthy) while device code value-tests;
+the spec now value-tests, matching device and Python semantics. The C
+preamble `#define`s `sqrt/exp2/log2/sin` to their `f`-suffixed forms so C
+doesn't silently promote through double. Hex-float literals are
+parenthesized so `x-(-1.0f)` can't lex as `--`.
+
+**Cache keys are correctness, not hygiene.** The Metal program cache is
+keyed by kernel name, so two anonymous kernels sharing the default name
+would silently run each other's code. Anonymous kernels now get a
+content-derived name (`tg4_k<hash of rendered code>`). Explicitly named
+kernels are the user's responsibility, tinygrad-style.
+
+**Vectorize in the generator, not the runtime.** Every kernel now also gets
+a float4 variant (`metalVec`, name-suffixed `_v4`, `numel/4` threads) from
+the same reified AST — ~25 extra lines of renderer. `runMetal` auto-selects
+it when `numel % 4 == 0`. Steady-state on M4 Max, 2^20 elements:
+
+| kernel | scalar | float4 | Python tinygrad (same op) |
+|---|---|---|---|
+| saxpy | 98 μs, 170 GB/s | **40 μs, 418 GB/s** | ~80 μs wall, 282 GB/s GPU |
+| sigmoidish | 81 μs, 104 GB/s | **27 μs, 310 GB/s** | ~78 μs wall |
+
+The elaborated kernels beat upstream Python tinygrad by ~2× wall time on
+this op class — the entire runtime cost is one cached-pipeline dispatch,
+because everything else already happened at compile time.
+
+**Guards where proofs end.** `runMetal` now validates input byte sizes
+(the generated kernel has no `gid` guard — dispatch is exact, so undersized
+buffers meant silent OOB), the elaborator rejects duplicate binders and
+non-`Float32` binder ascriptions, and `Data/Shard.lean` gained the strong
+strided-mode theorem (`localToGlobal_interleaved_lt`) that the earlier
+fallback lemma deliberately didn't claim. The last `sorry` in the port
+(MNIST one-hot) is gone — implemented as the UOp-graph transcription of the
+proven `oneHotF32` pattern (labels-as-column vs class-range-as-row `CMPEQ`,
+then `WHERE` 1/0).

@@ -27,6 +27,8 @@ def relu := kernel! "tg4_relu" fun x => if x < 0.0 then 0.0 else x
 def norm2 := kernel! "tg4_norm2" fun x y => sqrt (x * x + y * y)
 def sigmoidish := kernel! "tg4_sigmoidish" fun x => recip (1.0 + exp2 (-1.442695 * x))
 def clampMax := kernel! "tg4_clamp" fun x lo => max x lo
+def minK := kernel! "tg4_min" fun x y => min x y
+def absK := kernel! "tg4_abs" fun x => abs x
 
 /-- The proof fields are real: spec and implementation agree definitionally. -/
 example (env : Fin 3 → Float32) : denote saxpy.expr env = saxpy.fn env := saxpy.denote_eq env
@@ -52,6 +54,9 @@ def testFn : IO Unit := do
   assertClose (relu.fn (envOf #[7.5])).toFloat 7.5 "relu.fn pos"
   assertClose (norm2.fn (envOf #[3.0, 4.0])).toFloat 5.0 "norm2.fn"
   assertClose (clampMax.fn (envOf #[-2.0, 0.0])).toFloat 0.0 "clampMax.fn"
+  assertClose (minK.fn (envOf #[3.0, -1.5])).toFloat (-1.5) "minK.fn"
+  assertClose (absK.fn (envOf #[-4.25])).toFloat 4.25 "absK.fn pos"
+  assertClose (absK.fn (envOf #[4.25])).toFloat 4.25 "absK.fn id"
   IO.println "  ✓ fn values"
 
 def testDenoteAgreesAtRuntime : IO Unit := do
@@ -97,6 +102,21 @@ def testMetal : IO Unit := do
     let expected := (sigmoidish.fn (envOf #[xs[i]!])).toFloat
     assertClose dec.data[i]! expected s!"sigmoidish gpu @{i}" 1e-5
   IO.println s!"  ✓ sigmoidish on GPU matches fn ({numel} elements)"
+
+  -- min (where_/cmplt composition) and abs (max/neg composition)
+  let out ← minK.runMetal #[packF32 xs, packF32 ys] numel
+  let dec := out.decode
+  for i in [:numel] do
+    let expected := (minK.fn (envOf #[xs[i]!, ys[i]!])).toFloat
+    assertClose dec.data[i]! expected s!"min gpu @{i}" 1e-6
+  IO.println s!"  ✓ min on GPU matches fn ({numel} elements)"
+
+  let out ← absK.runMetal #[packF32 xs] numel
+  let dec := out.decode
+  for i in [:numel] do
+    let expected := (absK.fn (envOf #[xs[i]!])).toFloat
+    assertClose dec.data[i]! expected s!"abs gpu @{i}" 1e-6
+  IO.println s!"  ✓ abs on GPU matches fn ({numel} elements)"
 
 def runAll : IO Unit := do
   IO.println "InlineKernelSmoke:"

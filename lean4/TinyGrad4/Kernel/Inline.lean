@@ -22,8 +22,10 @@ def saxpy := kernel! "saxpy" fun a x y => a * x + y
 ```
 
 Supported fragment (elementwise f32): `+ - * /`, unary `-`, `sqrt`, `recip`,
-`exp2`, `log2`, `sin`, `max`, `if a < b then _ else _`, float/nat literals.
-Unsupported constructs give a compile-time error at the offending subterm.
+`exp2`, `log2`, `sin`, `max`, `min`, `abs`, `if a < b then _ else _`,
+float/nat literals. `min`/`abs` are sugar compiled to `where_`/`cmplt` and
+`max`/`neg` spec compositions. Unsupported constructs give a compile-time
+error at the offending subterm.
 -/
 
 namespace TinyGrad4.Kernel.Inline
@@ -41,6 +43,7 @@ inductive RExpr where
   | exp2 (a : RExpr) | log2 (a : RExpr) | sin (a : RExpr)
   | add (a b : RExpr) | sub (a b : RExpr) | mul (a b : RExpr)
   | div (a b : RExpr) | max (a b : RExpr)
+  | min (a b : RExpr) | abs (a : RExpr)  -- sugar: compile to where_/cmplt and max/neg
   | ite (a b x y : RExpr)  -- if a < b then x else y
 
 /-- Project to the spec language (used at elaboration time for codegen). -/
@@ -58,6 +61,8 @@ def RExpr.toKernel : RExpr → Expr .f32
   | .mul a b => .mul a.toKernel b.toKernel
   | .div a b => .div a.toKernel b.toKernel
   | .max a b => .max a.toKernel b.toKernel
+  | .min a b => .where_ (.cmplt a.toKernel b.toKernel) a.toKernel b.toKernel
+  | .abs a => .max a.toKernel (.neg a.toKernel)
   | .ite a b x y => .where_ (.cmplt a.toKernel b.toKernel) x.toKernel y.toKernel
 
 /-- Render the AST as a `Kernel.Expr` term (the embedded spec). -/
@@ -75,6 +80,9 @@ partial def RExpr.toExprTerm : RExpr → TermElabM Term
   | .mul a b => do `(Expr.mul $(← a.toExprTerm) $(← b.toExprTerm))
   | .div a b => do `(Expr.div $(← a.toExprTerm) $(← b.toExprTerm))
   | .max a b => do `(Expr.max $(← a.toExprTerm) $(← b.toExprTerm))
+  | .min a b => do
+    `(Expr.where_ (Expr.cmplt $(← a.toExprTerm) $(← b.toExprTerm)) $(← a.toExprTerm) $(← b.toExprTerm))
+  | .abs a => do `(Expr.max $(← a.toExprTerm) (Expr.neg $(← a.toExprTerm)))
   | .ite a b x y => do
     `(Expr.where_ (Expr.cmplt $(← a.toExprTerm) $(← b.toExprTerm)) $(← x.toExprTerm) $(← y.toExprTerm))
 
@@ -94,6 +102,10 @@ partial def RExpr.toFnTerm (env : Ident) : RExpr → TermElabM Term
   | .mul a b => do let a' ← a.toFnTerm env; let b' ← b.toFnTerm env; `($a' * $b')
   | .div a b => do let a' ← a.toFnTerm env; let b' ← b.toFnTerm env; `($a' / $b')
   | .max a b => do let a' ← a.toFnTerm env; let b' ← b.toFnTerm env; `(Max.max $a' $b')
+  | .min a b => do
+    let a' ← a.toFnTerm env; let b' ← b.toFnTerm env
+    `(if $a' < $b' then $a' else $b')
+  | .abs a => do let a' ← a.toFnTerm env; `(Max.max $a' (-$a'))
   | .ite a b x y => do
     let a' ← a.toFnTerm env; let b' ← b.toFnTerm env
     let x' ← x.toFnTerm env; let y' ← y.toFnTerm env
@@ -115,6 +127,8 @@ partial def reify (vars : Std.HashMap Name Nat) (stx : Term) : TermElabM RExpr :
   | `($a / $b) => return .div (← reify vars a) (← reify vars b)
   | `(-$a) => return .neg (← reify vars a)
   | `(max $a $b) => return .max (← reify vars a) (← reify vars b)
+  | `(min $a $b) => return .min (← reify vars a) (← reify vars b)
+  | `(abs $a) => return .abs (← reify vars a)
   | `(sqrt $a) => return .sqrt (← reify vars a)
   | `(Float32.sqrt $a) => return .sqrt (← reify vars a)
   | `(recip $a) => return .recip (← reify vars a)
@@ -142,7 +156,13 @@ private def binderNames (b : Syntax) : TermElabM (Array Name) := do
   if b.isIdent then
     return #[b.getId]
   else if b.getKind == ``Lean.Parser.Term.explicitBinder then
-    -- (x y : T) — idents live in the second child
+    -- (x y : T) — idents live in the second child; if a type ascription is
+    -- present it must be Float32 (the only scalar type the DSL models)
+    let tyGroup := b[2]
+    if tyGroup.getNumArgs > 0 then
+      let ty := tyGroup[1]
+      unless ty.isIdent && ty.getId == `Float32 do
+        throwErrorAt ty "kernel!: binders must be Float32"
     return b[1].getArgs.filterMap fun s => if s.isIdent then some s.getId else none
   else
     throwErrorAt b "kernel!: use plain binders, e.g. `fun x y => ...` or `fun (x y : Float32) => ...`"
@@ -156,18 +176,24 @@ elab_rules : term
     let mut vars : Std.HashMap Name Nat := {}
     for b in binders do
       for x in ← binderNames b do
+        if vars.contains x then
+          throwErrorAt b "kernel!: duplicate binder `{x}`"
         vars := vars.insert x vars.size
     let n := vars.size
     if n == 0 then throwError "kernel!: at least one binder required"
     let r ← reify vars body
-    let name := (nm?.map (·.getString)).getD "tg4_inline"
     let k := r.toKernel
+    -- default name is content-derived: the Metal program cache is keyed by
+    -- kernel name, so two distinct anonymous kernels must not share one
+    let name := (nm?.map (·.getString)).getD s!"tg4_k{hash (Expr.toCode k) % 1000000007}"
     let metal := metalSource name n k
+    let metalVec := metalSourceVec (name ++ "_v4") n k
     let cSrc := cSource name n k
     let env := mkIdent `env
     let stx ← `((({ name := $(Syntax.mkStrLit name)
                     expr := $(← r.toExprTerm)
                     metal := $(Syntax.mkStrLit metal)
+                    metalVec := $(Syntax.mkStrLit metalVec)
                     cSrc := $(Syntax.mkStrLit cSrc)
                     fn := fun $env => $(← r.toFnTerm env)
                     denote_eq := by

@@ -305,6 +305,15 @@ shape from `AGENTS.md` collapsed to a single stage boundary: the surface
 language is Lean, the optimizer is the elaborator, and the artifact carries
 its own correctness certificate.
 
+Each kernel also ships a float4-vectorized Metal variant (`metalVec`,
+generated at the same elaboration), which `runMetal` auto-selects when
+`numel % 4 == 0`. Measured on an M4 Max at 2^20 elements, steady-state
+(`lake exe inline_kernel_bench`): saxpy 40 μs/iter (418 GB/s), a
+sigmoid-shaped kernel 27 μs/iter (310 GB/s). Upstream Python tinygrad on the
+same machine, op, and size (TinyJit, single fused kernel confirmed at
+DEBUG=2) measures ~80 μs/iter wall with ~282 GB/s GPU-side — the elaborated
+Lean kernels are about 2× faster end to end, with the proof attached.
+
 # What Actually Feels Solid
 
 A useful rule of thumb is:

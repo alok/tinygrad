@@ -172,7 +172,7 @@ kernel void {name}(
     Returns float32 RawBuffer with result.
 -/
 def runEwiseKernel (name : String) (shader : String) (inputs : Array RawBuffer)
-    (numel : Nat) (dtype : DType := .float32) : IO RawBuffer := do
+    (numel : Nat) (dtype : DType := .float32) (threads : Option Nat := none) : IO RawBuffer := do
   if numel == 0 then
     return zerosRaw dtype 0
 
@@ -195,7 +195,7 @@ def runEwiseKernel (name : String) (shader : String) (inputs : Array RawBuffer)
   -- Use 256 threads per threadgroup, 1D dispatch
   -- Note: metalLaunch uses dispatchThreads which takes TOTAL thread count
   let threadsPerGroup : Nat := 256
-  let totalThreads := numel  -- One thread per element
+  let totalThreads := threads.getD numel  -- default: one thread per element
 
   -- Launch kernel (metalLaunch takes total threads, not group count)
   metalLaunch prog metalBufs totalThreads 1 1 threadsPerGroup 1 1

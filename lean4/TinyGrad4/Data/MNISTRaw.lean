@@ -223,16 +223,21 @@ def imagesToTensorF32 (ib : ImageBuffer) (startIdx numImages : Nat) (shape : Sha
     Output shape: [batchSize, numClasses] -/
 def labelsToOneHot (lb : LabelBuffer) (startIdx numLabels : Nat) (numClasses : Nat := 10) : UOpM UOp := do
   let slice := lb.slice startIdx numLabels
-  -- For one-hot, we need to build the encoding
-  -- This is done lazily in the UOp graph
+  -- Build the encoding lazily in the UOp graph (mirrors Tensor.Math.oneHotF32):
+  --   one_hot[i, c] = (labels[i] == c) ? 1.0 : 0.0
   let labelTensor ← toTensorU8 slice [numLabels]
-  -- Cast to int and use for indexing into identity matrix
-  let labelInt ← UOp.cast labelTensor .int32
-  -- Create one-hot via comparison with range
-  -- For each label l, one_hot[i] = (i == l) ? 1.0 : 0.0
-  -- This can be expressed as: eye(numClasses)[labels]
-  -- For now, we'll use a simpler approach: expand and compare
-  sorry  -- TODO: Implement one-hot via UOp graph
+  -- Cast labels to float32 and reshape to a column: [numLabels] -> [numLabels, 1]
+  let labelF32 ← UOp.cast labelTensor .float32
+  let labelCol ← UOp.reshape labelF32 [numLabels, 1]
+  -- Class indices 0, 1, ..., numClasses-1 as a float32 row: [1, numClasses]
+  let classVals ← UOp.vconstF32 ((Array.range numClasses).map fun i => (Float64.ofNat i).toFloat32)
+  let classRow ← UOp.reshape classVals [1, numClasses]
+  -- Broadcasted equality: [numLabels, 1] vs [1, numClasses] -> bool [numLabels, numClasses]
+  let cmp ← UOp.cmpeq labelCol classRow
+  -- Select 1.0 / 0.0 to get the float32 one-hot matrix
+  let one ← UOp.const .float32 1.0
+  let zero ← UOp.const .float32 0.0
+  UOp.where_ cmp one zero
 
 /-! ## Batch Iteration (Zero-Copy) -/
 

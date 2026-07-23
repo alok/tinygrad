@@ -15,6 +15,12 @@ and the inline-codegen elaborator (`Kernel/Inline.lean`) runs step 2 at
 
 Float constants render as C99/MSL hex-float literals (bit-exact round trip,
 no decimal parsing ambiguity).
+
+Caveat: the Metal runtime compiles shaders with fast math (`MTLMathModeFast`
+in `tg4_metal.m`), so on the GPU subnormals may flush to zero and INFINITY/NAN
+propagation through arithmetic is not guaranteed. The C rendering and `fn`
+preserve full IEEE semantics; treat non-finite/subnormal literals as
+best-effort on Metal.
 -/
 
 namespace TinyGrad4.Kernel
@@ -66,24 +72,26 @@ def f32Lit (x : Float32) : String :=
   let sign := if bits >>> 31 == 1 then "-" else ""
   let expo := ((bits >>> 23) &&& 0xFF).toNat
   let mant := (bits &&& 0x7FFFFF).toNat
+  -- negative literals are parenthesized: `x-(-1.0f)` must not lex as `x--1.0f`
   if expo == 0xFF then
-    if mant == 0 then s!"{sign}INFINITY" else "NAN"
+    if mant == 0 then (if sign == "-" then "(-INFINITY)" else "INFINITY") else "NAN"
   else if expo == 0 then
-    if mant == 0 then s!"{sign}0.0f"
-    else s!"{sign}0x0.{mantissaHex mant}p-126f"  -- subnormal
+    if mant == 0 then (if sign == "-" then "(-0.0f)" else "0.0f")
+    else s!"({sign}0x0.{mantissaHex mant}p-126f)"  -- subnormal
   else
     let e : Int := Int.ofNat expo - 127
     let esign := if e < 0 then "-" else "+"
-    s!"{sign}0x1.{mantissaHex mant}p{esign}{e.natAbs}f"
+    s!"({sign}0x1.{mantissaHex mant}p{esign}{e.natAbs}f)"
 
 /-! ## Scalar expression rendering -/
 
 /-- Render the scalar computation of an `Expr`, reading input `i` as `x{i}`.
-    Output is valid in both MSL and C (ternary for select, `fmax`/`metal::max`
-    spelled as a function call `max`). -/
+    Output is valid in both MSL and C. `max` renders as `((a<=b)?b:a)` — the
+    exact semantics of Lean's `Max.max Float32` (`maxOfLe`), including NaN
+    propagation and signed zero, which `fmaxf`/`metal::max` do NOT share. -/
 def Expr.toCode : Expr t → String
   | .input _ idx => s!"x{idx}"
-  | .constBool b => if b then "true" else "false"
+  | .constBool b => if b then "1" else "0"
   | .constF32 v => f32Lit v
   | .neg a => s!"(-{a.toCode})"
   | .sqrt a => s!"sqrt({a.toCode})"
@@ -95,10 +103,35 @@ def Expr.toCode : Expr t → String
   | .sub a b => s!"({a.toCode}-{b.toCode})"
   | .mul a b => s!"({a.toCode}*{b.toCode})"
   | .div a b => s!"({a.toCode}/{b.toCode})"
-  | .max a b => s!"max({a.toCode},{b.toCode})"
+  | .max a b => s!"(({a.toCode}<={b.toCode})?{b.toCode}:{a.toCode})"
   | .cmplt a b => s!"({a.toCode}<{b.toCode})"
   | .where_ c x y => s!"({c.toCode}?{x.toCode}:{y.toCode})"
   | .truthy a => s!"({a.toCode}!=0.0f)"
+
+/-- Vectorized (float4) rendering of the same scalar computation. Differences
+    from `toCode`: comparisons yield `bool4`, so selection uses MSL `select`
+    (componentwise, else-then-cond order) instead of the scalar ternary; `max`
+    becomes `select(a, b, a<=b)` — still exactly `maxOfLe` per lane. Literals
+    broadcast implicitly. Targets the `kernel!` fragment (no `constBool` in
+    condition position). -/
+def Expr.toCodeVec : Expr t → String
+  | .input _ idx => s!"x{idx}"
+  | .constBool b => if b then "1" else "0"
+  | .constF32 v => f32Lit v
+  | .neg a => s!"(-{a.toCodeVec})"
+  | .sqrt a => s!"sqrt({a.toCodeVec})"
+  | .reciprocal a => s!"(1.0f/{a.toCodeVec})"
+  | .exp2 a => s!"exp2({a.toCodeVec})"
+  | .log2 a => s!"log2({a.toCodeVec})"
+  | .sin a => s!"sin({a.toCodeVec})"
+  | .add a b => s!"({a.toCodeVec}+{b.toCodeVec})"
+  | .sub a b => s!"({a.toCodeVec}-{b.toCodeVec})"
+  | .mul a b => s!"({a.toCodeVec}*{b.toCodeVec})"
+  | .div a b => s!"({a.toCodeVec}/{b.toCodeVec})"
+  | .max a b => s!"select({a.toCodeVec},{b.toCodeVec},({a.toCodeVec}<={b.toCodeVec}))"
+  | .cmplt a b => s!"({a.toCodeVec}<{b.toCodeVec})"
+  | .where_ c x y => s!"select({y.toCodeVec},{x.toCodeVec},{c.toCodeVec})"
+  | .truthy a => s!"({a.toCodeVec}!=0.0f)"
 
 /-- Highest float input index + 1 (minimum environment arity). -/
 def Expr.arity : Expr t → Nat
@@ -129,13 +162,37 @@ kernel void {name}(
 }
 "
 
+/-- Vectorized Metal kernel: one thread per FOUR elements via `float4` loads.
+    Launch with `numel / 4` threads; requires `numel % 4 == 0`. -/
+def metalSourceVec (name : String) (arity : Nat) (e : Expr .f32) : String := Id.run do
+  let mut params := ""
+  for i in [:arity] do
+    params := params ++ s!"  device const float4* in{i} [[buffer({i})]],\n"
+  params := params ++ s!"  device float4* out [[buffer({arity})]],\n"
+  params := params ++ "  uint gid [[thread_position_in_grid]]"
+  let mut loads := ""
+  for i in [:arity] do
+    loads := loads ++ s!"  float4 x{i} = in{i}[gid];\n"
+  s!"#include <metal_stdlib>
+using namespace metal;
+
+kernel void {name}(
+{params}
+) \{
+{loads}  out[gid] = {e.toCodeVec};
+}
+"
+
 /-- Full C kernel: sequential loop over `n` elements. -/
 def cSource (name : String) (arity : Nat) (e : Expr .f32) : String := Id.run do
   let mut params := ""
   for i in [:arity] do
     params := params ++ s!"const float* in{i}, "
   s!"#include <math.h>
-#define max(a,b) fmaxf((a),(b))
+#define sqrt(x) sqrtf(x)
+#define exp2(x) exp2f(x)
+#define log2(x) log2f(x)
+#define sin(x) sinf(x)
 
 void {name}({params}float* out, unsigned long n) \{
   for (unsigned long i = 0; i < n; i++) \{
@@ -156,6 +213,7 @@ structure InlineKernel (n : Nat) where
   name : String
   expr : Expr .f32
   metal : String
+  metalVec : String  -- float4 variant (kernel name `{name}_v4`, numel/4 threads)
   cSrc : String
   fn : (Fin n → Float32) → Float32
   denote_eq : ∀ env : Fin n → Float32, denote (n := n) expr env = fn env

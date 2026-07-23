@@ -39,8 +39,10 @@ def ewiseBinary (f : α → α → α) (x y : Tensor s α) : Tensor s α := fun 
 def reindex {s s' : Shape} (h : s = s') (x : Tensor s α) : Tensor s' α :=
   fun idx => x (h ▸ idx)
 
-/-- Broadcast a tensor into a (compatible) larger shape. Indices that do not
-    map back (incompatible shapes) read `default`. -/
+/-- Broadcast a tensor into a shape of equal or higher rank. Indices that do
+    not map back read `default`. Intended for `small.length ≤ big.length` with
+    broadcast-compatible dims; for rank-reducing arguments `broadcastIndex`
+    zero-pads the index rather than failing, so no `default` is observed. -/
 def broadcastTensor (small big : Shape) (x : Tensor small α) [Inhabited α] : Tensor big α :=
   fun idx =>
     match broadcastIndex small big idx with

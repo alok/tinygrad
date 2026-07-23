@@ -104,8 +104,10 @@ private theorem lt_of_lt_contig_rem (n k s i : Nat) (hr : s < n % k) (h : i < n 
     have := Nat.div_lt_self hn (show 1 < k + 2 by omega)
     omega
 
-/-- A local index within a shard is a valid global index: `shardSize` never
-    exceeds the dataset size, in any mode (including degenerate configs). -/
+/-- A shard-local index is itself within dataset bounds (`shardSize n ≤ n` in
+    every mode, including degenerate configs). This is what the `getItem`
+    fallback path needs; the strided-mode global-index bound is
+    `localToGlobal_interleaved_lt` below. -/
 theorem lt_of_lt_shardSize {cfg : ShardConfig} {n i : Nat}
     (h : i < cfg.shardSize n) : i < n := by
   unfold shardSize at h
@@ -117,6 +119,16 @@ theorem lt_of_lt_shardSize {cfg : ShardConfig} {n i : Nat}
       split at h
       · exact lt_of_lt_contig_rem _ _ _ _ ‹_› h
       · exact lt_of_lt_div _ _ _ h
+
+/-- The strong bound for the default configuration (interleaved mode with
+    `dropRemainder`, where `shardSize n = n / numShards`): the strided global
+    index `localToGlobal` produces is in dataset bounds, so the `getItem`
+    fallback is unreachable for valid configs. -/
+theorem localToGlobal_interleaved_lt {k s n i : Nat} (hval : s < k)
+    (h : i < n / k) : i * k + s < n := by
+  have h1 : (i + 1) * k ≤ n := (Nat.le_div_iff_mul_le (by omega)).mp (by omega)
+  have h2 : (i + 1) * k = i * k + k := Nat.succ_mul i k
+  omega
 
 end ShardConfig
 

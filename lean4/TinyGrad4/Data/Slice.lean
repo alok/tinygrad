@@ -154,6 +154,12 @@ def ofRawBuffer (rb : RawBuffer) : RawBufferSlice :=
       simp only [Nat.zero_add]
       exact Nat.div_mul_le_self rb.data.size rb.dtype.itemsize }
 
+private theorem clamped_bound (eo ne isz size : Nat) :
+    (min eo (size / isz) + min ne (size / isz - min eo (size / isz))) * isz ≤ size :=
+  calc (min eo (size / isz) + min ne (size / isz - min eo (size / isz))) * isz
+      ≤ (size / isz) * isz := Nat.mul_le_mul_right _ (by omega)
+    _ ≤ size := Nat.div_mul_le_self ..
+
 /-- Create slice with bounds checking -/
 def mk' (rb : RawBuffer) (elemOffset numElems : Nat) : RawBufferSlice :=
   let maxElems := rb.data.size / rb.dtype.itemsize
@@ -162,9 +168,7 @@ def mk' (rb : RawBuffer) (elemOffset numElems : Nat) : RawBufferSlice :=
   { parent := rb
     elemOffset := actualOffset
     numElems := actualNum
-    h_valid := by
-      sorry  -- Proof that bounds are satisfied
-  }
+    h_valid := clamped_bound elemOffset numElems rb.dtype.itemsize rb.data.size }
 
 /-- DType of this slice -/
 @[inline] def dtype (s : RawBufferSlice) : DType := s.parent.dtype
@@ -199,9 +203,11 @@ def slice (s : RawBufferSlice) (start len : Nat) : RawBufferSlice :=
   { parent := s.parent
     elemOffset := s.elemOffset + actualStart
     numElems := actualLen
-    h_valid := by
-      have := s.h_valid
-      sorry }
+    h_valid :=
+      calc ((s.elemOffset + actualStart) + actualLen) * s.parent.dtype.itemsize
+          ≤ (s.elemOffset + s.numElems) * s.parent.dtype.itemsize :=
+            Nat.mul_le_mul_right _ (by omega)
+        _ ≤ s.parent.data.size := s.h_valid }
 
 /-- Get element at index as Float64 (for float32 dtype) -/
 def getF32 (s : RawBufferSlice) (i : Nat) : Float64 :=

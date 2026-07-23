@@ -77,6 +77,47 @@ def localToGlobal (cfg : ShardConfig) (n : Nat) (localIdx : Nat) : Nat :=
         remainder * (baseSize + 1) + (cfg.shardIndex - remainder) * baseSize
     blockStart + localIdx
 
+private theorem lt_of_lt_div (n k i : Nat) (h : i < n / k) : i < n := by
+  have := Nat.div_le_self n k; omega
+
+private theorem lt_of_lt_interleaved (n k s i : Nat) (h : i < (n + k - 1 - s) / k) : i < n := by
+  have h1 : (n + k - 1 - s) / k ≤ (n + k - 1) / k := Nat.div_le_div_right (by omega)
+  match k with
+  | 0 => simp at h1; omega
+  | k + 1 =>
+    have h2 : (n + (k + 1) - 1) / (k + 1) ≤ n :=
+      (Nat.div_le_iff_le_mul_add_pred (by omega)).mpr (by
+        have : n ≤ (k + 1) * n := Nat.le_mul_of_pos_left n (by omega)
+        omega)
+    omega
+
+private theorem lt_of_lt_contig_rem (n k s i : Nat) (hr : s < n % k) (h : i < n / k + 1) :
+    i < n := by
+  match k with
+  | 0 => simp at h hr; omega
+  | 1 => omega
+  | k + 2 =>
+    have hn : 0 < n := by
+      cases n with
+      | zero => simp at hr
+      | succ m => omega
+    have := Nat.div_lt_self hn (show 1 < k + 2 by omega)
+    omega
+
+/-- A local index within a shard is a valid global index: `shardSize` never
+    exceeds the dataset size, in any mode (including degenerate configs). -/
+theorem lt_of_lt_shardSize {cfg : ShardConfig} {n i : Nat}
+    (h : i < cfg.shardSize n) : i < n := by
+  unfold shardSize at h
+  split at h
+  · exact lt_of_lt_div _ _ _ h
+  · split at h
+    · exact lt_of_lt_interleaved _ _ _ _ h
+    · simp only at h
+      split at h
+      · exact lt_of_lt_contig_rem _ _ _ _ ‹_› h
+      · exact lt_of_lt_div _ _ _ h
+
 end ShardConfig
 
 /-! ## ShardedDataset -/
@@ -99,8 +140,7 @@ instance [Dataset D T] : Dataset (ShardedDataset D T) T where
     else
       -- This shouldn't happen if shardSize/localToGlobal are correct,
       -- but we fallback to a valid access
-      have hLocal : localIdx < Dataset.len ds.inner := by
-        sorry  -- In practice, shardSize ≤ n / numShards ≤ n
+      have hLocal : localIdx < Dataset.len ds.inner := ShardConfig.lt_of_lt_shardSize h
       Dataset.getItem ds.inner localIdx hLocal
 
 /-- Shard a dataset for a specific worker -/

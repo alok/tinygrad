@@ -1,64 +1,122 @@
 import Float64
 import TinyGrad4.Kernel.Spec
 
-namespace TinyGrad4
-
 /-!
-# Kernel Laws (Rewrite Lemmas / Assumptions)
+# Kernel Laws (spec-level tensors and proved rewrite laws)
 
-This file is intentionally "sorry-friendly":
-- We state the algebraic properties we want to use for aggressive rewriting.
-- Many of these are not true for real IEEE floats (NaNs, rounding), so they should be treated as
-  *optimization assumptions* rather than theorems about Lean's native `Float32`.
+Spec tensors are total functions from intrinsically-typed indices
+(`Shape.Index s`: per-dimension `Fin` bounds) to values. Rewrite laws are
+stated extensionally and *proved* — `grind` discharges the equational and
+index-arithmetic reasoning; the intrinsic index types make shape bookkeeping
+part of the type.
 
-The usual workflow is:
-1) Use these laws to justify graph rewrites (fusion, CSE, strength reduction, etc).
-2) Later, either:
-   - restrict rewrites to cases where they are valid for your FP model, or
-   - swap these axioms for a more realistic model.
+Floating-point honesty: laws that are false for IEEE floats (associativity,
+distributivity, …) are stated as *hypotheses* of the rewrites that need them —
+not as axioms about `Float32`. A rewrite justified by `ewise_assoc h` is
+exactly as trustworthy as its `h`.
 -/
 
-namespace Kernel.Laws
+namespace TinyGrad4.Kernel
 
-open Kernel
+/-- Spec-level tensor: a total function from typed indices to values. -/
+abbrev Tensor (s : Shape) (α : Type) : Type := Shape.Index s → α
 
-/-! ## Convenience -/
+/-- Extensional equality of spec tensors. -/
+def TensorEq {s : Shape} {α : Type} (x y : Tensor s α) : Prop := ∀ idx, x idx = y idx
 
-def const {α : Type} (s : Shape) (v : α) : Tensor s α :=
-  fun _ => v
+theorem TensorEq.refl {s : Shape} {α : Type} (x : Tensor s α) : TensorEq x x := fun _ => rfl
 
-/-! ## Scalar algebra (assumptions) -/
+/-! ## Spec-level operations -/
 
-variable {α : Type}
-variable (ops : ScalarOps α)
+def const (s : Shape) (v : α) : Tensor s α := fun _ => v
 
-axiom add_assoc : ∀ a b c : α, ops.add (ops.add a b) c = ops.add a (ops.add b c)
-axiom add_comm : ∀ a b : α, ops.add a b = ops.add b a
-axiom add_zero_left : ∀ a : α, ops.add ops.zero a = a
-axiom add_zero_right : ∀ a : α, ops.add a ops.zero = a
+def ewiseUnary (f : α → α) (x : Tensor s α) : Tensor s α := fun idx => f (x idx)
 
-axiom mul_assoc : ∀ a b c : α, ops.mul (ops.mul a b) c = ops.mul a (ops.mul b c)
-axiom mul_comm : ∀ a b : α, ops.mul a b = ops.mul b a
-axiom mul_one_left : ∃ one : α, (∀ a : α, ops.mul one a = a)
-axiom mul_one_right : ∃ one : α, (∀ a : α, ops.mul a one = a)
+def ewiseBinary (f : α → α → α) (x y : Tensor s α) : Tensor s α := fun idx => f (x idx) (y idx)
 
-axiom left_distrib : ∀ a b c : α, ops.mul a (ops.add b c) = ops.add (ops.mul a b) (ops.mul a c)
-axiom right_distrib : ∀ a b c : α, ops.mul (ops.add a b) c = ops.add (ops.mul a c) (ops.mul b c)
+/-- Transport a tensor along a shape equality (the "type-level equivalence"
+    escape hatch; `reindex rfl` is definitionally the identity). -/
+def reindex {s s' : Shape} (h : s = s') (x : Tensor s α) : Tensor s' α :=
+  fun idx => x (h ▸ idx)
 
-/-! ## Tensor-level rewrite lemmas (usually proven by extensionality) -/
+/-- Broadcast a tensor into a (compatible) larger shape. Indices that do not
+    map back (incompatible shapes) read `default`. -/
+def broadcastTensor (small big : Shape) (x : Tensor small α) [Inhabited α] : Tensor big α :=
+  fun idx =>
+    match broadcastIndex small big idx with
+    | some i => x i
+    | none => default
 
-theorem ewise_add_zero_right {s : Shape} (x : Tensor s α) :
-    TensorEq (ewiseBinary (fun a b => ops.add a b) x (const s ops.zero)) x :=
-  sorry_proof
+/-! ## Index lemmas (intrinsic bounds do the work) -/
 
-theorem broadcast_id {s : Shape} (x : Tensor s α) :
-    TensorEq (broadcastTensor s s x) x :=
-  sorry_proof
+theorem _root_.TinyGrad4.Shape.Index.toList_length {s : Shape} (idx : Shape.Index s) :
+    idx.toList.length = s.length := by
+  induction idx with
+  | nil => rfl
+  | cons i rest ih => simp [Shape.Index.toList, ih]
 
-theorem reduce_keepdim_noop_of_shape {s : Shape} (axes : List Nat) (x : Tensor s α) (h : Shape.reduce s axes true = s) :
-    TensorEq (reduceKeepdim ops .sum (s := s) axes x) (by simpa [h] using x) :=
-  sorry_proof
+/-- `ofList?` inverts `toList`: a typed index round-trips. -/
+theorem _root_.TinyGrad4.Shape.Index.ofList?_toList {s : Shape} (idx : Shape.Index s) :
+    Shape.Index.ofList? s idx.toList = some idx := by
+  induction idx with
+  | nil => rfl
+  | cons i rest ih => simp [Shape.Index.toList, Shape.Index.ofList?, i.isLt, ih]
 
-end Kernel.Laws
+/-- Broadcast index arithmetic is trivial on matching dims: a size-1 dim can
+    only hold index 0 (`Fin 1`), which `grind` sees from `i.isLt`. -/
+private theorem zip_map_broadcast_self {s : Shape} (idx : Shape.Index s) :
+    ((s.zip idx.toList).map fun p => if p.1 = 1 then 0 else p.2) = idx.toList := by
+  induction idx with
+  | nil => rfl
+  | cons i rest ih =>
+    simp only [Shape.Index.toList, List.zip_cons_cons, List.map_cons, ih]
+    have := i.isLt
+    grind
 
-end TinyGrad4
+/-- Broadcasting a shape into itself maps every index to itself. -/
+theorem broadcastIndex_self {s : Shape} (idx : Shape.Index s) :
+    broadcastIndex s s idx = some idx := by
+  unfold broadcastIndex
+  simp [Shape.Index.toList_length, zip_map_broadcast_self, Shape.Index.ofList?_toList]
+
+/-! ## Rewrite laws -/
+
+namespace Laws
+
+variable {α : Type} {s : Shape}
+
+/-- Right identity: `x + 0 = x`, given the scalar law as a hypothesis. -/
+theorem ewise_add_zero_right (ops : ScalarOps α)
+    (h : ∀ a : α, ops.add a ops.zero = a) (x : Tensor s α) :
+    TensorEq (ewiseBinary ops.add x (const s ops.zero)) x := by
+  intro idx; grind [ewiseBinary, const]
+
+/-- Commutativity lifts pointwise. -/
+theorem ewise_comm (f : α → α → α) (h : ∀ a b, f a b = f b a) (x y : Tensor s α) :
+    TensorEq (ewiseBinary f x y) (ewiseBinary f y x) := by
+  intro idx; grind [ewiseBinary]
+
+/-- Associativity lifts pointwise. -/
+theorem ewise_assoc (f : α → α → α) (h : ∀ a b c, f (f a b) c = f a (f b c))
+    (x y z : Tensor s α) :
+    TensorEq (ewiseBinary f (ewiseBinary f x y) z) (ewiseBinary f x (ewiseBinary f y z)) := by
+  intro idx; grind [ewiseBinary]
+
+/-- Fusing two unary maps is a single map of the composition. -/
+theorem ewise_fuse (f g : α → α) (x : Tensor s α) :
+    TensorEq (ewiseUnary f (ewiseUnary g x)) (ewiseUnary (f ∘ g) x) :=
+  fun _ => rfl
+
+/-- Broadcasting a tensor into its own shape is the identity. -/
+theorem broadcast_id [Inhabited α] (x : Tensor s α) :
+    TensorEq (broadcastTensor s s x) x := by
+  intro idx
+  simp [broadcastTensor, broadcastIndex_self]
+
+/-- Transport along `rfl` is the identity (definitionally). -/
+theorem reindex_rfl (x : Tensor s α) : TensorEq (reindex rfl x) x :=
+  fun _ => rfl
+
+end Laws
+
+end TinyGrad4.Kernel

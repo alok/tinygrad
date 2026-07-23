@@ -28,6 +28,10 @@ import TinyGrad4.Backend.FusedMatmulExpr
 import TinyGrad4.Backend.Cost
 import TinyGrad4.Kernel.Spec
 import TinyGrad4.Kernel.Trusted
+import TinyGrad4.Kernel.Laws
+import TinyGrad4.Kernel.Codegen
+import TinyGrad4.Kernel.Inline
+import TinyGrad4.Kernel.InlineMetal
 import TinyGrad4.Gradient.Rules
 import TinyGrad4.Gradient.Autodiff
 import TinyGrad4.Optim.SGD

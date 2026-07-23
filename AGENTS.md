@@ -40,3 +40,9 @@ The goal is to maximize compile-time optimization and minimize runtime branching
 - `ssh ww` should give access to 2 A6000, and an env that can run triton (unlike macos).
 
 It also lets you run `triton`, which MacOS doesn't support. (focus on linux support first).
+
+# Notes
+
+- Run tests with `-n12` for speed (e.g. `python -m pytest test/null/test_dtype.py -x -q -n12`)
+- Run `python -m mypy tinygrad/` to typecheck
+- Run `python -m ruff check .` to lint

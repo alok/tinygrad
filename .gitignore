@@ -72,3 +72,4 @@ tinygrad_all.py
 data/
 dagre/
 graphlib/
+uv.lock

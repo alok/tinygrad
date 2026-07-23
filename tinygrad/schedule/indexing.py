@@ -1,15 +1,15 @@
 from typing import Iterator
 import functools, itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches, broadcast_axes
 from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
-                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.CALL}
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.SLICE,
+                      Ops.CONST, Ops.BIND, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
+                      Ops.LOAD, Ops.CALL, Ops.FUNCTION}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -18,8 +18,8 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
-  # don't realize COPY/BUFFER_VIEW when they are the direct source of STORE+AFTER — the target buffer is the output
-  if src.op in {Ops.COPY, Ops.BUFFER_VIEW} and src in ctx \
+  # don't realize COPY/SLICE when they are the direct source of STORE+AFTER — the target buffer is the output
+  if src.op in {Ops.COPY, Ops.SLICE} and src in ctx \
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx[src]
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
@@ -27,13 +27,11 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
 
 pm_generate_realize_map = PatternMatcher([
   # always realize
-  (UPat({Ops.COPY, Ops.CONTIGUOUS}, name="tr"), realize),
-  # realize AFTER of STORE+AFTER
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE)), allow_any_len=True, name="tr"), realize),
+  (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
-  # sometimes realize/unrealize src of store+after
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))))), realize_store_after_src),
+  # sometimes we need to realize the src of STORE if there's a self-access
+  (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
 
 @dataclass(frozen=True)
@@ -47,22 +45,29 @@ class BufferizeOpts:
 class IndexingContext:
   realize_map: dict[UOp, None|list[int]] = field(default_factory=dict)
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
+  # loads reachable from each UOp memoized across matches
+  buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP) -> UOp:
     if isinstance(s, UOp) and s.op is Ops.RANGE: return s
-    # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
-    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
+    # if a range has a 1 src, it's the same as UOp.const(dtypes.weakint, 0)
+    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.weakint, 0)
 
-def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
+def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  if x.op not in GroupOp.Broadcastable: return rngs
+  baxes, nleft = broadcast_axes(src.shape, x.shape), len(x.shape)-len(src.shape)
+  return tuple(r.const_like(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
+
+def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   new_srcs = []
-  for s in x.src:
+  for i, s in enumerate(x.src):
     new_src = s
-    if s.op in {Ops.PARAM, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or \
-       (s.op is Ops.AFTER and not any(c.op in {Ops.STORE, Ops.END} for c in s.src[1:])):
-      if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
+    src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
+    # shape args of movement ops are at src[1:] and should not be indexed
+    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
+      if x in ctx.range_map and not (x.op in GroupOp.Movement and i > 0): new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
@@ -72,43 +77,62 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
         del ctx.realize_map[s]
       else:
-        # the Bufferize before a COPY is not removable. there should be a better way to do this
-        removable = x.op is not Ops.COPY and s.op not in ALWAYS_CONTIGUOUS
-        # None in the device assigns it a number later
+        # the Bufferize before a COPY is not removable unless it's a view. there should be a better way to do this
+        removable = (x.op is not Ops.COPY or s.has_buffer_identity()) and s.op not in ALWAYS_CONTIGUOUS
+        # LOCAL: None in the device assigns it a number later
         opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
                BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
-        new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts)
-        if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
+        new_src = UOp(Ops.STAGE, src=(new_src,)+closed_ranges, arg=opts)
+        if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(src_rngs) if i in realized_ranges])
     new_srcs.append(new_src)
-  # NOTE: do we need this?
-  return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
+  return new_srcs
+
+def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
+  if x.op in {Ops.STAGE, Ops.INDEX}: return None
+  return x.replace(src=tuple(create_bufferize_and_index_srcs(ctx, x)))
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
-  valid: UOp = UOp.const(dtypes.bool, True).prod(*[r.get_valid() for r in ctx.range_map[x][0]])
-  ret = valid.where(x.src[0], UOp.const(x.dtype, 0))
-  ctx.range_map[ret] = ctx.range_map[x]
-  return ret
+  bx = create_bufferize_and_index_based_on_ranges(ctx, x)
+  valid: UOp = UOp.const(dtypes.bool, True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
+  return valid.where(bx.src[0], UOp.const(x.dtype, 0))
 
-def convert_reduce_axis_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
+def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
+  if x.arg[1] == 0: return None
+  bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   # input ranges
-  new_ranges = [r for i,r in enumerate(ctx.range_map[x][0]) if i in x.arg[1]]
-  ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=x.arg[0])
-  ctx.range_map[ret] = ctx.range_map[x]
+  new_ranges = list(ctx.range_map[x][0][:x.arg[1]])
+  return UOp(Ops.REDUCE, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], 0))
+
+def convert_stack_to_where(ctx:IndexingContext, x:UOp):
+  # only data STACKs: shape tuple STACKs aren't in range_map, the empty shape tuple is void
+  if x not in ctx.range_map or x.dtype == dtypes.void: return None
+  # use the src list directly, a transient STACK of mid-rangeify srcs violates the spec shape rule
+  srcs = create_bufferize_and_index_srcs(ctx, x)
+  r0 = ctx.range_map[x][1][0]
+  ret = srcs[-1]
+  for k in range(len(srcs)-2, -1, -1): ret = r0.eq(k).where(srcs[k], ret)
   return ret
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
 pm_apply_rangeify = PatternMatcher([
-  # REDUCE_AXIS -> REDUCE
-  (UPat(Ops.REDUCE_AXIS, name="x"), convert_reduce_axis_to_reduce_with_ranges),
+  # REDUCE(op, axis) -> REDUCE(op) with ranges
+  (UPat(Ops.REDUCE, name="x"), convert_reduce_to_reduce_with_ranges),
   # PAD -> WHERE
   (UPat(Ops.PAD, name="x"), convert_pad_to_where_to_keep_behavior_local),
+  # STACK -> WHERE select on the leading range
+  (UPat(Ops.STACK, name="x"), convert_stack_to_where),
   # finally, apply_rangeify
   (UPat(GroupOp.All, name="x"), create_bufferize_and_index_based_on_ranges),
   # remove movement op
   (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
+])
+
+pm_fix_deviceless = PatternMatcher([
+  (UPat(Ops.STAGE, name="b"),
+    lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.addrspace is AddrSpace.GLOBAL and b.arg.device is None else None),
 ])
 
 @functools.cache
@@ -118,7 +142,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
   for s,src in list(zip(out_shape, urngs.src))[::-1]:
     axes_in.append(acc*src)
     acc *= s
-  combined_axes = UOp.const(dtypes.index, 0).sum(*axes_in)
+  combined_axes = UOp.const(dtypes.weakint, 0).usum(axes_in)
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)
@@ -130,18 +154,18 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
 @functools.cache
 def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   match op:
-    case Ops.SHRINK:  rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, arg))
+    case Ops.SHRINK:  rngs = tuple(a if off == 0 else a+off for a,(off,_) in zip(rngs, arg))
     case Ops.PERMUTE: rngs = tuple(rngs[p] for p in argsort(arg))
     case Ops.FLIP:    rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, in_shape, arg))
-    case Ops.EXPAND:  rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, in_shape, arg))
+    case Ops.EXPAND:  rngs = rngs[len(arg):]
     case Ops.PAD:
       # NOTE: the .where(r-s, i) is not inside the graph_rewrite so that `convert_pad_to_where_to_keep_behavior_local`
       #       wraps the pad with only the newly added valid
-      rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite((r >= s) & (r < (sh+s)),
-        symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
+      rngs = tuple(r if (sz == sh and off == 0) else (r-off).valid(graph_rewrite((r >= off) & (r < (sh+off)),
+        symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
-      sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
+      sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER, dtype=r.dtype) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
@@ -161,26 +185,30 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
-    if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
-
     # no ranges on kernels, they are internal
-    if x.op in {Ops.CALL, Ops.LINEAR}: continue
+    if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue
 
-    # only STORE+AFTER has range
-    if x.op is Ops.AFTER and all(s.op is not Ops.STORE for s in x.src[1:]): continue
+    # AFTER doesn't have range
+    if x.op is Ops.AFTER: continue
 
     # treat MSTACK/MSELECT like SINK
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
 
-    if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
+    if x.dtype == dtypes.weakint: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
+    # ranges the consumers iterate that this node broadcasts over
+    ended = [rctx.range_map[c][0][i] for c in consumer_map[x] if c in rctx.range_map and c.op in GroupOp.Broadcastable
+             for i in broadcast_axes(x.shape, c.shape)]
+    broadcast_ending_ranges = list(UOp.sink(*ended).ranges)
+    # fusion decision: REDUCE before the broadcast
+    if x.op is Ops.REDUCE: ending_ranges[x] += broadcast_ending_ranges
 
     # *** the ranges on the output are
     #  1. new if this op is realized
     #  2. from the single consumer if this op only has one consumer
     #  3. potentially new if this op has 2+ consumers
 
-    consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
+    consumer_rngs = [broadcast_rngs(c, x, rctx.range_map[c][0]) for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) for s in x.shape)
@@ -211,8 +239,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         # we compare the ranges without their valids
         if all_all_same or (PCONTIG and all_same(local_rngs)):
           # the new valid is the OR of all the children valids
-          minimum_valid = UOp.const(dtypes.bool, False).sum(*valids)
-          _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
+          minimum_valid = UOp.const(dtypes.bool, False).usum(valids)
+          _out_rngs.append(graph_rewrite(local_rngs[0].valid(minimum_valid), symbolic, name="minimum_valid"))
         else:
           _out_rngs.append(rctx.new_range(x.shape[i]))
           _realize_axis.append(i)
@@ -222,7 +250,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       if len(_realize_axis): rctx.realize_map[x] = _realize_axis
 
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
-    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
+    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE}):
       _realize_axis = rctx.realize_map.get(x) or []
       for i,r in enumerate(out_rngs):
         if i in _realize_axis: continue
@@ -232,6 +260,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       if len(_realize_axis):
         rctx.realize_map[x] = _realize_axis
         out_rngs = tuple([(rctx.new_range(x.shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
+    ending_ranges[x] += broadcast_ending_ranges
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \
@@ -239,21 +268,23 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     # *** the ranges on the inputs are
     #  1. swizzled for MovementOps
-    #  2. newly created for REDUCE_AXIS
+    #  2. newly created for REDUCE (tensor graph form with axis)
     #  3. passed through for everything else
 
     rngs = out_rngs  # rngs is the input ranges  # pylint: disable=possibly-used-before-assignment
 
     # apply movement ops
     if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
+    # STACK: the leading range selects the src, srcs get the trailing ranges
+    if x.op is Ops.STACK: rngs = out_rngs[1:]
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
-      ending_ranges[x] += list(UOp.sink(*[ro for ri, ro in zip(rngs, out_rngs) if ri is not ro]).ranges.keys())
+      ending_ranges[x] += list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
 
-    # REDUCE_AXIS creates ranges for the axes it is reducing
-    if x.op is Ops.REDUCE_AXIS:
-      rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if i in x.arg[1] else r for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
+    # REDUCE creates ranges for the axes it is reducing
+    if x.op is Ops.REDUCE and x.arg[1]:
+      rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) for s in x.src[0].shape[:x.arg[1]]) + out_rngs
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)
@@ -267,7 +298,11 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
 
-  tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
+  # NOTE: SPEC=3 is broken here with shape
+  with Context(SPEC=min(SPEC.value, 2)):
+    tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
+  # if a deviceless value must materialize, place it on the sink device
+  tsink = graph_rewrite(tsink, pm_fix_deviceless, ctx=tsink.device, name="add device to deviceless")
   return tsink, rctx
 
 def render_ranges(*rngs_list, realized) -> str:

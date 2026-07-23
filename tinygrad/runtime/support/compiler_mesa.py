@@ -1,7 +1,7 @@
 import base64, ctypes, pathlib, tempfile, hashlib
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, system, data64
-from tinygrad.runtime.autogen import mesa, llvm
+from tinygrad.runtime.autogen import mesa, llvm, libc
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
 
 # NB: compilers assume mesa's glsl type cache is managed externally with mesa.glsl_type_singleton_init_or_ref() and mesa.glsl_type_singleton_decref()
@@ -17,7 +17,7 @@ def deserialize(enc_src, opts):
   return mesa.nir_deserialize(None, ctypes.cast(opts, ctypes.POINTER(mesa.nir_shader_compiler_options)), blobreader)
 
 class LVPCompiler(CPULLVMCompiler):
-  def __init__(self, cache_key="lvp"): CPULLVMCompiler.__init__(self, cache_key=f"compile_{cache_key}")
+  def __init__(self, arch): CPULLVMCompiler.__init__(self, arch.split(","), cache_key="compile_lvp")
 
   def compile(self, src) -> bytes:
     shader, ctx = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext()
@@ -51,15 +51,18 @@ class LVPCompiler(CPULLVMCompiler):
   def disassemble(self, lib: bytes): cpu_objdump(lib)
 
 class NAKCompiler(Compiler):
-  def __init__(self, arch, warps_per_sm, cache_key="nak"):
-    self.arch, self.warps_per_sm = arch, warps_per_sm
-    self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(arch[3:]), max_warps_per_mp=warps_per_sm))
+  # simplified from https://elixir.bootlin.com/mesa/mesa-26.0.3/source/src/nouveau/winsys/nouveau_device.c#L118
+  @staticmethod
+  def warps_per_sm(arch): return 48 if arch in ("sm_86", "sm_87", "sm_89", "sm_120") else 64
+  def __init__(self, arch):
+    self.arch = arch
+    self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(arch[3:]), max_warps_per_mp=self.warps_per_sm(arch)))
     self.nir_options = bytes(mesa.nak_nir_options(self.cc).contents)
-    super().__init__(f"compile_{cache_key}_{arch}")
+    super().__init__(f"compile_nak_{arch}")
 
   def __del__(self): mesa.nak_compiler_destroy(self.cc)
 
-  def __reduce__(self): return NAKCompiler, (self.arch, self.warps_per_sm)
+  def __reduce__(self): return NAKCompiler, (self.arch,)
 
   def compile(self, src) -> bytes:
     shader = deserialize(src, self.nir_options)
@@ -77,29 +80,32 @@ class NAKCompiler(Compiler):
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
 
 def disas_adreno(lib:bytes, gpu_id=630):
-  with tempfile.TemporaryFile('w+', buffering=1) as tf:
+  with tempfile.TemporaryFile('w+') as tf:
+    mesa_fp = ctypes.cast(fp:=libc.fdopen(tf.fileno(), b"w"), ctypes.POINTER(mesa.struct__IO_FILE))
     @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
     def hd(data, n, instr):
       fst, snd = data64(ctypes.cast(instr, ctypes.POINTER(ctypes.c_uint64)).contents.value)
-      print(f"{n:04} [{fst:08x}_{snd:08x}] ", end="", flush=True, file=tf)
+      # print with libc so that output interleaves properly
+      libc.fputs(f"{n:04} [{fst:08x}_{snd:08x}] ".encode(), fp)
 
-    ctypes.CDLL(None).setlinebuf(fp:=ctypes.cast(ctypes.CDLL(None).fdopen(tf.fileno(), b"w"), ctypes.POINTER(mesa.struct__IO_FILE)))
-    mesa.ir3_isa_disasm(lib, len(lib), fp, mesa.struct_isa_decode_options(gpu_id, True, 0, True, pre_instr_cb=hd))
+    mesa.ir3_isa_disasm(lib, len(lib), mesa_fp, mesa.struct_isa_decode_options(gpu_id, True, 0, True, pre_instr_cb=hd))
+    libc.fflush(fp)
     tf.seek(0)
     print(tf.read())
 
 class IR3Compiler(Compiler):
-  def __init__(self, chip_id, cache_key="ir3"):
-    self.dev_id = mesa.struct_fd_dev_id(((chip_id >> 24) & 0xFF) * 100 + ((chip_id >> 16) & 0xFF) * 10 + ((chip_id >>  8) & 0xFF), chip_id)
+  def __init__(self, arch):
+    assert arch.split(',')[0] == "a630", "only a630 supported, for now"
+    self.arch, self.dev_id = arch, mesa.struct_fd_dev_id(630, 0x6030001)
     self.cc = mesa.ir3_compiler_create(None, self.dev_id, mesa.fd_dev_info(self.dev_id),
                                        mesa.struct_ir3_compiler_options(disable_cache=True)).contents
     self.cc.has_preamble = False
     self.nir_options = bytes(mesa.ir3_get_compiler_options(self.cc).contents)
-    super().__init__(f"compile_{cache_key}")
+    super().__init__(f"compile_ir3_{arch}")
 
   def __del__(self): mesa.ir3_compiler_destroy(self.cc)
 
-  def __reduce__(self): return IR3Compiler, (self.dev_id.chip_id,)
+  def __reduce__(self): return IR3Compiler, (self.arch,)
 
   # ir3_shader_variant info: https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_shader.c#L1099
   def compile(self, src) -> bytes:

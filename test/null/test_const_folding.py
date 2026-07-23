@@ -1,14 +1,14 @@
 import unittest, itertools, math
 from tinygrad import Tensor, dtypes, Context
-from tinygrad.dtype import DType, ConstType
+from tinygrad.dtype import DType, ConstType, Invalid
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.codegen import full_rewrite_to_sink
+from test.helpers import full_rewrite
 import numpy as np
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
-  schedule = t.schedule()
-  asts = [s for s in schedule if s.ast.op is Ops.SINK]
+  linear = t.schedule_linear()
+  asts = [s for s in linear.src if s.src[0].op is Ops.SINK]
   len(asts)
   # NOT SUPPORTED ANYMORE
   #assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
@@ -33,6 +33,24 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     x = Tensor.randn(32, 32)
     x = x.clip(0, 1).realize()
     _check_ast_count(1, x.neg())
+
+class TestWeakConstFolding(unittest.TestCase):
+  def test_weakint_math(self):
+    out = (UOp.const(dtypes.weakint, 2**40) + UOp.const(dtypes.weakint, 2**40)).simplify()
+    self.assertEqual((out.op, out.dtype, out.arg), (Ops.CONST, dtypes.weakint, 2**41))
+
+  def test_float_unaries(self):
+    for dtype in (dtypes.weakfloat,):
+      for op in (Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL):
+        out = UOp.const(dtype, 4).alu(op).simplify()
+        self.assertEqual((out.op, out.dtype), (Ops.CONST, dtypes.weakfloat))
+
+  def test_weakfloat_math(self):
+    out = (UOp.const(dtypes.weakfloat, 1.25) + UOp.const(dtypes.weakfloat, 2.5)).simplify()
+    self.assertEqual((out.op, out.dtype, out.arg), (Ops.CONST, dtypes.weakfloat, 3.75))
+
+  def test_invalid_poison(self):
+    self.assertIs(UOp.invalid().alu(Ops.CDIV, UOp.const(dtypes.weakint, 0)).simplify().arg, Invalid)
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
@@ -79,9 +97,9 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_div_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / Tensor.ones(4))
 
-  def test_idiv_literal_one(self):
+  def test_floordiv_literal_one(self):
     _check_ast_count(0, Tensor([1, 2, 3, 4]) // 1)
-  def test_idiv_tensor_one(self):
+  def test_floordiv_tensor_one(self):
     _check_ast_count(0, Tensor([1, 2, 3, 4]) // Tensor.ones(4, dtype=dtypes.int32))
 
   def test_pow_literal_zero(self):
@@ -103,7 +121,7 @@ class TestBitcastConstFolding(unittest.TestCase):
     def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
-          r = full_rewrite_to_sink(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
+          r = full_rewrite(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
           self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
           self.assertEqual(r.dtype, to_dt, msg)
           np.testing.assert_equal(r.arg, to_v, msg)
@@ -127,22 +145,21 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      r = full_rewrite_to_sink(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
-    self.assertEqual(r.op, Ops.VECTORIZE)
-    self.assertEqual(r.dtype, dtypes.uint32.vec(3))
-    self.assertEqual(tuple(x.arg for x in r.src), (2**32-1, 2**31, 75))
+      srcs = full_rewrite(UOp.const(dtypes.int32, (-1, -2**31, 75)).bitcast(dtypes.uint32).sink()).src
+    self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
+    self.assertEqual(tuple(x.arg for x in srcs), (2**32-1, 2**31, 75))
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
-    t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
+    t = Tensor.arange(16).float().reshape(1,1,4,4).clone().realize()
     _check_ast_count(1, t[:,:,Tensor(1),:])
     _check_ast_count(1, t[:,:,Tensor(1)+2,:])
     _check_ast_count(1, t[:,:,Tensor(1),Tensor(0)])
 
   def test_const_tensor_index(self):
     # TODO: these can be 0, implement const tensor folded indexing
-    t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
+    t = Tensor.arange(16).float().reshape(1,1,4,4).clone().realize()
     _check_ast_count(1, t[:,:,Tensor.ones(2,1,dtype=dtypes.int),:])
     _check_ast_count(1, t[:,:,Tensor.ones(1,2,dtype=dtypes.int)+2,:])
     _check_ast_count(1, t[:,:,Tensor.ones(1,1,dtype=dtypes.int),Tensor.zeros(2,1,2,dtype=dtypes.int)])

@@ -1,10 +1,9 @@
 import os, pathlib, tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, DTYPES_DICT
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, OSX, dedup
+from tinygrad.helpers import Timing, fetch, OSX, dedup, Context
 from test.helpers import slow
 
 class TempDirTestCase(unittest.TestCase):
@@ -36,7 +35,6 @@ class TestTorchLoad(TempDirTestCase):
   # pytorch zip format
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # pytorch tar format
@@ -90,15 +88,10 @@ class TestRawDiskBuffer(unittest.TestCase):
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
     with self.assertRaises(RuntimeError):
       # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
-      Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16)
-
-    with self.assertRaises(RuntimeError):
-      # should fail because backprop through bitcast is undefined
-      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+      Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16).shape
 
     pathlib.Path(tmp).unlink()
 
-@unittest.skipUnless(is_dtype_supported(dtypes.uint8), "need uint8")
 class TestSafetensors(TempDirTestCase):
   def test_real_safetensors(self):
     import torch
@@ -187,12 +180,15 @@ class TestSafetensors(TempDirTestCase):
 
   def test_save_all_dtypes(self):
     for dtype in dedup(DTYPES_DICT.values()):
-      if dtype in [dtypes.bfloat16]: continue # not supported in numpy
-      if not is_dtype_supported(dtype): continue
+      if dtype in dtypes.fp8_fnuz: continue # not supported by safetensors
       path = self.tmp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
-      np.testing.assert_equal(ones.numpy(), list(safe_load(path).values())[0].numpy())
+      loaded = list(safe_load(path).values())[0]
+      # numpy has no fp8 or bfloat16, compare the stored bytes
+      if dtype == dtypes.bfloat16 or dtype in dtypes.fp8s:
+        np.testing.assert_equal(ones.bitcast(dtypes.uint8).numpy(), loaded.bitcast(dtypes.uint8).numpy())
+      else: np.testing.assert_equal(ones.numpy(), loaded.numpy())
 
   def test_load_supported_types(self):
     import torch
@@ -211,9 +207,9 @@ class TestSafetensors(TempDirTestCase):
       "weight_I16": torch.tensor([127, 64], dtype=torch.short),
       "weight_BF16": torch.randn((2, 2), dtype=torch.bfloat16),
     }
-    save_file(tensors, self.tmp("dtypes.safetensors"))
+    save_file(tensors, self.tmp("dtypes_torch.safetensors"))
 
-    loaded = safe_load(self.tmp("dtypes.safetensors"))
+    loaded = safe_load(self.tmp("dtypes_torch.safetensors"))
     for k,v in loaded.items():
       if v.dtype != dtypes.bfloat16:
         assert v.numpy().dtype == tensors[k].numpy().dtype
@@ -225,9 +221,9 @@ class TestSafetensors(TempDirTestCase):
       "weight_U32": np.array([1, 2, 3], dtype=np.uint32),
       "weight_U64": np.array([1, 2, 3], dtype=np.uint64),
     }
-    np_save_file(tensors, self.tmp("dtypes.safetensors"))
+    np_save_file(tensors, self.tmp("dtypes_numpy.safetensors"))
 
-    loaded = safe_load(self.tmp("dtypes.safetensors"))
+    loaded = safe_load(self.tmp("dtypes_numpy.safetensors"))
     for k,v in loaded.items():
       assert v.numpy().dtype == tensors[k].dtype
       np.testing.assert_allclose(v.numpy(), tensors[k])
@@ -310,7 +306,7 @@ class TestDiskTensor(TempDirTestCase):
       dt[::2] = Tensor([10, 20, 30])
 
   def test_advanced_setitem_not_supported(self):
-    dt = Tensor.arange(12).reshape(3, 4).to(f"disk:{self.tmp('dt_advanced_setitem')}")
+    dt = Tensor.arange(12).reshape(3, 4).clone().to(f"disk:{self.tmp('dt_advanced_setitem')}")
     with self.assertRaises(RuntimeError, msg="advanced setitem is not supported for DISK tensors"):
       dt[Tensor([0, 2]), Tensor([1, 3])] = 99
 
@@ -387,8 +383,7 @@ class TestDiskTensor(TempDirTestCase):
     ret = t.bitcast(dtypes.uint16).to("CPU") + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
-  @unittest.skipIf(OSX or Device.DEFAULT == "CL", "new LLVM has an issue on OSX, CL=1 gives the wrong output")
-  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
+  @unittest.skipIf(OSX or Device.DEFAULT == "CL", "new LLVM has an issue on OSX, DEV=CL gives the wrong output")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{self.tmp('dt_bf16_disk_write_read_f32')}").realize()
@@ -419,6 +414,13 @@ class TestDiskTensor(TempDirTestCase):
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
+  def test_shard_copy_from_disk_slice(self):
+    fn = pathlib.Path(self.tmp("dt_shard_copy_from_disk_slice"))
+    fn.write_bytes(bytes(range(32)))
+    with Context(CACHELEVEL=0):
+      t = Tensor.empty(8, 4, device=f"disk:{fn}", dtype=dtypes.uint8)[0:4].shard(("CPU:0", "CPU:1"), axis=0).realize()
+      np.testing.assert_equal(t.to("CPU").numpy(), np.arange(16, dtype=np.uint8).reshape(4, 4))
+
   @slow
   def test_copy_from_disk_huge(self):
     fn = pathlib.Path(self.tmp("dt_copy_from_disk_huge"))
@@ -447,13 +449,13 @@ class TestDiskTensor(TempDirTestCase):
     # get the DiskDevice and check internal state
     disk_device = Device[f"DISK:{fn}"]
     assert isinstance(disk_device, DiskDevice)
-    assert disk_device.count == 1
+    assert disk_device.refcount == 1
     assert hasattr(disk_device, "mem")
     first_fd = disk_device.fd
     # create second tensor on same file - should reuse the device, not re-open
     t2 = Tensor.empty(64, device=f"disk:{fn}", dtype=dtypes.uint8)
     t2.to("CPU").realize()
-    assert disk_device.count == 2
+    assert disk_device.refcount == 2
     assert disk_device.fd == first_fd, "file descriptor changed - file was unnecessarily re-opened"
     # verify data is correct
     np.testing.assert_equal(t1.numpy(), np.arange(128, dtype=np.uint8))
@@ -553,7 +555,7 @@ class TestDiskTensorMovement(TempDirTestCase):
   def setUp(self):
     super().setUp()
     self.fn = pathlib.Path(self.tmp("custom_disk_range"))
-    Tensor.arange(100, dtype=dtypes.uint8).to(f"disk:{str(self.fn)}").realize()
+    Tensor.arange(100, dtype=dtypes.uint8).clone().to(f"disk:{str(self.fn)}").realize()
 
   def test_simple_read(self):
     t = Tensor(self.fn)

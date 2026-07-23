@@ -1,9 +1,9 @@
-import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
+import json, math, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
 from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, GlobalCounters, tqdm, round_up, T, strides_for_shape
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, GlobalCounters, tqdm, round_up, T, strides_for_shape, CHUNK_SIZE
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -31,7 +31,8 @@ class TensorIO(io.RawIOBase, BinaryIO):
   def writelines(self, lines: Iterable[Any]): raise io.UnsupportedOperation("TensorIO.writelines not supported")
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
-               "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
+               "I64":dtypes.int64, "U64":dtypes.uint64, "F8_E4M3":dtypes.fp8e4m3, "F8_E5M2":dtypes.fp8e5m2,
+               "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def accept_filename(func: Callable[[Tensor], T]) -> Callable[[Tensor|str|pathlib.Path], T]:
@@ -69,6 +70,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   nn.state.safe_save({'t':t}, "test.safetensor")
   ```
   """
+  if any(v.dtype in dtypes.weaks for v in tensors.values()): raise ValueError("safe_save requires concrete dtypes")
   headers, offset = {}, 0
   if metadata: headers['__metadata__'] = metadata
   for k,v in tensors.items():
@@ -81,6 +83,59 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   t[0:8].bitcast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
+
+# tinyfs
+
+def fs_store(t:Tensor) -> Tensor:
+  """
+  Store a tensor to storage.
+  """
+  # TODO: this should work locally as well
+  data = t.contiguous().flatten().bitcast(dtypes.uint8)
+
+  # pad to a multiple of 1mb
+  if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
+  size = data.shape[0]
+
+  base_chunks = math.ceil(size / CHUNK_SIZE)
+  tree_depth = math.ceil(math.log(base_chunks, CHUNK_SIZE // 16))
+
+  to_device = "CPU" if isinstance(t.device, str) and t.device.startswith("DISK") else t.device
+
+  level_chunks = base_chunks
+  for _ in range(tree_depth + 1):
+    # assign data into tinyfs:store and read back hashes
+    data = Tensor.empty(data.shape[0], dtype=dtypes.uint8, device="tinyfs:store").assign(data)[:level_chunks * 16].to(to_device)
+    if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
+    level_chunks = math.ceil(data.shape[0] / CHUNK_SIZE)
+
+  return data[:16].contiguous()
+
+def fs_load(t:Tensor, size:int) -> Tensor:
+  """
+  Load a tensor from storage.
+
+  t should be a tensor of the hash to load
+  """
+  # TODO: this should work locally as well
+  assert t.dtype == dtypes.uint8, "hash is expected to be uint8"
+  h = t.contiguous().flatten()
+  assert h.shape[0] == 16, "expected hash"
+
+  base_chunks = math.ceil(size / CHUNK_SIZE)
+  tree_depth = math.ceil(math.log(base_chunks, CHUNK_SIZE // 16))
+  data, level_chunks = h, 0
+  for i in reversed(range(tree_depth + 1)):
+    # if not last level, its still hashes
+    if i > 0 or tree_depth == 0:
+      level_chunks = max(1, math.ceil(base_chunks / (CHUNK_SIZE // 16)**(i-1)))
+      out_sz = 16 * level_chunks
+    else: out_sz = CHUNK_SIZE * level_chunks
+    # assign hash into tinyfs:load and read back data
+    (load:=Tensor.empty(out_sz, dtype=dtypes.uint8, device="tinyfs:load"))[:data.shape[0]].assign(data)
+    data = load
+
+  return data.to(t.device)[:size]
 
 # state dict
 
@@ -145,7 +200,7 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
-    for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
+    for k,v in (t := tqdm(model_state_dict.items(), disable=None if verbose else True)):
       t.desc = f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}: "
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
@@ -292,94 +347,3 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
       base_offset += 8 + lens[i]
     fobj.seek(rwd)
     return TorchPickle(fobj).load()
-
-def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
-  """
-  Converts ggml tensor data to a tinygrad tensor.
-
-  Supported native types: float32 (id: 0), float16 (id: 1), int8 (id: 16), int16 (id: 17), int32 (id: 18)
-  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q8_0 (id: 8), Q4_K (id: 12), Q5_K (id: 13), Q6_K (id: 14), MXFP4 (id: 39)
-  """
-  # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
-
-  # native types
-  if (dtype := { 0: dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type)) is not None:
-    return t[:dtype.itemsize * n].contiguous().bitcast(dtype)
-
-  def q_to_uint8(t: Tensor, b: int) -> Tensor:
-    # TODO: rewrite with arange?
-    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
-    return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
-
-  # map to (number of elements, number of bytes)
-  if (nelements_nbytes := { 2:(32,18), 3:(32,20), 8:(32,34), 12:(256,144), 13:(256,176), 14:(256,210), 39:(32,17) }.get(ggml_type)) is not None:
-    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
-    if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
-    if ggml_type == 3:
-      d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
-      return q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
-    if ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
-     # Q4_K: 256 elements per 144-byte block (d:2, dmin:2, scales:12, qs:128)
-     # Q5_K: 256 elements per 176-byte block (d:2, dmin:2, scales:12, qh:32, qs:128)
-    if ggml_type in (12, 13):
-      d, dmin = (blocks[:,i:i+2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1) for i in [0, 2])
-      s = blocks[:,4:16]  # 12 bytes: 6-bit scales[0-3], 6-bit mins[0-3], high bits[4-7]
-      sc = s[:,0:4].bitwise_and(63).cat(s[:,8:12].bitwise_and(0xF).bitwise_or(s[:,0:4].rshift(6).lshift(4)), dim=-1)
-      mn = s[:,4:8].bitwise_and(63).cat(s[:,8:12].rshift(4).bitwise_or(s[:,4:8].rshift(6).lshift(4)), dim=-1)
-      qs_off = 48 if ggml_type == 13 else 16
-      q = Tensor.stack((qs:=blocks[:,qs_off:qs_off+128].reshape(-1,4,32)).bitwise_and(0xF), qs.rshift(4), dim=2).reshape(-1,8,32)
-      if ggml_type == 13: q = q + q_to_uint8(blocks[:,16:48], 1).reshape(-1, 8, 32) * 16
-      return (d * sc.unsqueeze(-1) * q - dmin * mn.unsqueeze(-1)).flatten(-2)
-    if ggml_type == 14:
-      xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
-      scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
-      d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
-      return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
-    if ggml_type == 39:
-      e = blocks[:, 0].cast(dtypes.uint32)
-      small_bits = Tensor([0x00200000, 0x00400000], dtype=dtypes.uint32, device=t.device)[e.clip(0, 1).cast(dtypes.int32)] # e = 0 or e = 1 case
-      d = (e < 2).where(small_bits, ((e - 1) * 0x00800000).cast(dtypes.uint32)).bitcast(dtypes.float32).unsqueeze(-1)
-      codes = q_to_uint8(blocks[:, 1:17], 4)
-      fp4_lut = Tensor([0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0,
-                       -0.0,-1.0,-2.0,-3.0,-4.0,-6.0,-8.0,-12.0],
-                       dtype=dtypes.float32, device=t.device)
-      fp4_val = fp4_lut[codes]
-      return (fp4_val * d).flatten(-2)[:n]
-  raise ValueError(f"GGML type '{ggml_type}' is not supported!")
-
-@accept_filename
-def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
-  """
-  Loads a .gguf file, returning the `kv_data` and `state_dict`.
-
-  ```python
-  gguf_tensor = Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")).to(Device.DEFAULT)
-  kv_data, state_dict = nn.state.gguf_load(gguf_tensor)
-  ```
-
-  NOTE: The provided tensor must be on a device that supports execution.
-  """
-  reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
-  def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
-  def read_str(): return str(reader.read(read_uint64()), "utf-8")
-  def read_arr():
-    reader, n = readers[read_int32()], read_uint64()
-    return [ reader() for _ in range(n) ]
-
-  readers: dict[int, Callable[[], Any]] = { 8: read_str, 9: read_arr, **{ t: functools.partial(read_unpack, "<"+f, nb) for t,f,nb in \
-    [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
-  read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
-
-  magic, version, n_tensors, n_kv = reader.read(4), read_int32(), read_int64(), read_int64()
-  if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
-  for _ in range(n_kv):
-    k, typ = read_str(), read_int32()
-    kv_data[k] = readers[typ]()
-
-  t_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
-  alignment, pos = kv_data.get("general.alignment", 32), reader.tell()
-  data_start = round_up(pos, alignment)
-
-  for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
-
-  return kv_data, state_dict

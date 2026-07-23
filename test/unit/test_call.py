@@ -17,8 +17,8 @@ class TestCall(unittest.TestCase):
     np.testing.assert_equal(c.numpy(), (a+b).numpy())
 
   def test_call_plus_backward(self):
-    a = Tensor.ones(10, 10, requires_grad=True)
-    b = Tensor.ones(10, 10, requires_grad=True)
+    a = Tensor.ones(10, 10)
+    b = Tensor.ones(10, 10)
 
     (a+b).mean().backward()
     gt_a_grad = a.grad.numpy()
@@ -37,8 +37,8 @@ class TestCall(unittest.TestCase):
     np.testing.assert_allclose(b.grad.numpy(), gt_b_grad, rtol=1e-5)
 
   def test_call_plus_backward_auto(self):
-    a = Tensor.ones(10, 10, requires_grad=True)
-    b = Tensor.ones(10, 10, requires_grad=True)
+    a = Tensor.ones(10, 10)
+    b = Tensor.ones(10, 10)
 
     (a+b).mean().backward()
     gt_a_grad = a.grad.numpy()
@@ -60,7 +60,6 @@ class TestCall(unittest.TestCase):
     c = Tensor.call(a, b, fxn=a.as_param(0) @ b.as_param(1))
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
 
-  @unittest.skip("needs GEMM on mixins")
   def test_call_gemm_uop(self):
     M, K, N = 4, 8, 4
     a = Tensor.randn(M, K)
@@ -76,8 +75,8 @@ class TestCall(unittest.TestCase):
 
   def test_call_complex_backward_auto(self):
     # complex chain: (a*b + a).exp2() * b.reciprocal() - tests mul, add, exp2, reciprocal, param reuse
-    a = Tensor.randn(10, 10, requires_grad=True)
-    b = Tensor.randn(10, 10, requires_grad=True) + 2  # avoid div by zero
+    a = Tensor.randn(10, 10)
+    b = Tensor.randn(10, 10) + 2  # avoid div by zero
     Tensor.realize(a, b)
 
     ((a*b + a).exp2() * b.reciprocal()).mean().backward()
@@ -163,9 +162,9 @@ class TestCallSchedule(unittest.TestCase):
     s(s(a).contiguous()).realize()
 
   def test_call_double_gemm(self):
-    a = Tensor.randn(4, 8, requires_grad=True)
-    b = Tensor.randn(8, 12, requires_grad=True)
-    c = Tensor.randn(12, 16, requires_grad=True)
+    a = Tensor.randn(4, 8)
+    b = Tensor.randn(8, 12)
+    c = Tensor.randn(12, 16)
     ref = Tensor.randn(4, 16)
     Tensor.realize(a,b,c,ref)
     @function(precompile=True)
@@ -220,10 +219,10 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    # find the CALL nodes
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL)
-    # the function bodies (src[0]) should have identical keys — unique consts must not leak through
+    # find the FUNCTION nodes
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.FUNCTION)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.FUNCTION)
+    # the function bodies (src[0]) should have identical keys
     self.assertEqual(c0.src[0].key, c1.src[0].key)
 
   def test_precompile_symbolic_2d(self):
@@ -231,7 +230,7 @@ class TestCallSchedule(unittest.TestCase):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x * 2 + 1
     sz = UOp.variable("sz", 1, 16)
-    a = Tensor.arange(16*4).reshape(16, 4).float()[:sz.bind(5)]
+    a = Tensor.arange(16*4).reshape(16, 4).float().clone()[:sz.bind(5)]
     out = f(a)
     # result shape should have the symbolic dim, not the max
     self.assertIsInstance(out.shape[0], UOp)
@@ -241,9 +240,112 @@ class TestCallSchedule(unittest.TestCase):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x + 1
     devs = ("CPU:0", "CPU:1")
-    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
     out = f(a) + 2
     np.testing.assert_allclose(out.numpy(), np.arange(8, dtype=np.float32).reshape(4, 2) + 3)
+
+class TestCallMultiSharded(unittest.TestCase):
+  # TODO: multi-output + sharded needs per-device CALL execution, which requires reworking how MULTI propagates through TUPLE bodies
+  def test_tuple_sharded(self):
+    """multi-output function with sharded input"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor): return (x + 1, x * 2)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
+    t1, t2 = f(a)
+    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref + 1)
+    np.testing.assert_allclose(t2.numpy(), ref * 2)
+
+  def test_tuple_sharded_precompile(self):
+    """multi-output precompiled function with sharded input"""
+    devs = ("CPU:0", "CPU:1")
+    @function(precompile=True)
+    def f(x:Tensor): return (x + 1, x * 2)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
+    t1, t2 = f(a)
+    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref + 1)
+    np.testing.assert_allclose(t2.numpy(), ref * 2)
+
+  def test_tuple_sharded_different_axis(self):
+    """multi-output function where outputs have different sharding: one reduces on sharded axis, one doesn't"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor): return (x.sum(axis=0), x.sum(axis=1))
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
+    t1, t2 = f(a)
+    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref.sum(axis=0))
+    np.testing.assert_allclose(t2.numpy(), ref.sum(axis=1))
+
+  def test_tuple_sharded_different_ops(self):
+    """multi-output function with different operations per output"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor, y:Tensor): return (x + y, x * y)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
+    b = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0) + 1
+    t1, t2 = f(a, b)
+    ref_a = np.arange(8, dtype=np.float32).reshape(4, 2)
+    ref_b = ref_a + 1
+    np.testing.assert_allclose(t1.numpy(), ref_a + ref_b)
+    np.testing.assert_allclose(t2.numpy(), ref_a * ref_b)
+
+  def test_tuple_sharded_mixed_use(self):
+    """multi-output sharded results used in further computation"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor): return (x + 1, x * 2)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
+    t1, t2 = f(a)
+    out = (t1 + t2).sum()
+    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(out.numpy(), ((ref + 1) + (ref * 2)).sum())
+
+  def test_tuple_sharded_outputs_different_axis(self):
+    """multi-output function where the two outputs are sharded on different axes"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor, y:Tensor): return (x + 1, y + 2)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
+    b = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=1)
+    t1, t2 = f(a, b)
+    ref_a = np.arange(8, dtype=np.float32).reshape(4, 2)
+    ref_b = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref_a + 1)
+    np.testing.assert_allclose(t2.numpy(), ref_b + 2)
+
+  def test_call_reduce_sharded(self):
+    devs = ("CPU:0", "CPU:1")
+    a = Tensor.ones(10, 10).shard(devs, axis=0)
+    Tensor.realize(a)
+    c = Tensor.call(a, fxn=a.as_param(0).sum(axis=0))
+    np.testing.assert_equal(c.numpy(), 10 * np.ones(10))
+
+  def test_call_reduce_sharded_mixed_args(self):
+    devs = ("CPU:0", "CPU:1")
+    a = Tensor.ones(10, 10).shard(devs, axis=0)
+    b = Tensor.ones(10).shard(devs, axis=None)
+    Tensor.realize(a, b)
+    c = Tensor.call(a, b, fxn=a.as_param(0).sum(axis=0) + b.as_param(1))
+    np.testing.assert_equal(c.numpy(), 11 * np.ones(10))
+
+  def test_call_reduce_sharded_backward(self):
+    devs = ("CPU:0", "CPU:1")
+    a = Tensor.randn(10, 10).shard(devs, axis=0)
+    b = Tensor.randn(10, 10).shard(devs, axis=0)
+    Tensor.realize(a, b)
+
+    def grad_fxn(grad, call):
+      a_arg, b_arg = call.src[1], call.src[2]
+      return (grad.expand(a_arg.shape) * b_arg, grad.expand(b_arg.shape) * a_arg)
+
+    body = (a.as_param(0) * b.as_param(1)).sum(axis=0)
+    c = Tensor.call(a, b, fxn=body, grad_fxn=grad_fxn)
+    c.sum().backward()
+    np.testing.assert_allclose(a.grad.numpy(), b.numpy(), rtol=1e-5)
+    np.testing.assert_allclose(b.grad.numpy(), a.numpy(), rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()

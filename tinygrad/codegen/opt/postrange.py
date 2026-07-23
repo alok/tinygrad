@@ -2,17 +2,15 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, remove_all_tags
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
-from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
+from tinygrad.dtype import dtypes, Invalid
+from tinygrad.helpers import colored, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
-
-remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
@@ -23,8 +21,9 @@ class Scheduler:
 
   @property
   def rngs(self):
-    # always in order by axistype
-    return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
+    # always in order by axistype. void RANGEs are loops, not opt axes
+    return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.dtype is not dtypes.void and u.vmax > 0],
+                  key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
   @property
   def shape_len(self) -> int: return len(self.rngs)
   @property
@@ -69,7 +68,7 @@ class Scheduler:
     ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.LOOP]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
     for x in self.ast.toposort():
-      if x.op is Ops.BUFFERIZE:
+      if x.op is Ops.STAGE:
         ret = [r for r in ret if r in x.ranges]
     return ret
 
@@ -97,7 +96,7 @@ class Scheduler:
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
     new_rng = UOp.range(amount, next(self.opt_range), new_type) if input_new_rng is None else input_new_rng
-    replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
+    replaced_rng = rng.replace(src=(old_sz,))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
@@ -161,7 +160,7 @@ class Scheduler:
         check(amt <= 32, "don't unroll more than 32")
         check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
       if opt.op is OptOps.UPCAST:
-        check((self.ren is not None and self.ren.device == "DSP") or amt <= 16, "don't upcast more than 16")
+        check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
       if opt.op is OptOps.LOCAL:
         check(not self.dont_use_locals, "can't use locals")
@@ -190,17 +189,16 @@ class Scheduler:
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
       check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}, "cannot pad upcasted") # TODO: why is this wrong?
       check(rng.arg[-1] is not AxisType.THREAD, "cannot pad thread")
-      # ok to pad SUM if all parent ALU ops have f(0) = 0
-      if (r:=self.reduceop) is not None and rng.arg[-1] in (AxisType.GROUP_REDUCE, AxisType.REDUCE):
-        check(r.arg[0] is Ops.ADD and not r.op_in_backward_slice_with_self(*GroupOp.UnsafePad), f"cannot pad {r}")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg)
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
+      store_targets = {s.src[0] for s in self.ast.backward_slice_with_self if s.op is Ops.STORE}
       for b in self.bufs:
         if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
-          replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
+          nb = b.replace(src=(b.src[0], i.valid(valid&b.src[1].get_valid())))
+          replaces[b] = nb if b in store_targets else valid.where(nb, UOp.const(b.dtype, Invalid))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
@@ -211,7 +209,7 @@ class Scheduler:
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
                                       altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)},
                                       name=f"swap {rng.arg[:-1]} {altrng.arg[:-1]}")
-      self.ast = graph_rewrite(self.ast, remove_tags, name="swap remove tags")
+      self.ast = graph_rewrite(self.ast, remove_all_tags, name="swap remove tags")
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
 
@@ -221,7 +219,7 @@ class Scheduler:
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
     if not (reduceops := self.reduceops): raise KernelOptError("no reduce ops for TensorCore")
     reduceop = reduceops[0]
-    if use_tensor_cores and reduceop.arg is Ops.ADD:
+    if use_tensor_cores and reduceop.arg[0] is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
       if mul.op is not Ops.MUL: return None
       in0, in1 = mul.src
@@ -230,8 +228,8 @@ class Scheduler:
       except IndexError:
         raise KernelOptError(f"invalid tensor core choice {tc_select}")
       for tc in tensor_cores:
-        if self.ren.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
-        if tc.dtype_in == in0.dtype.scalar() and tc.dtype_in == in1.dtype.scalar() and tc.dtype_out == reduceop.dtype.scalar():
+        if self.ren.target.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
+        if tc.dtype_in == in0.dtype and tc.dtype_in == in1.dtype and tc.dtype_out == reduceop.dtype:
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0], reverse=True)
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0], reverse=True)
@@ -293,21 +291,23 @@ class Scheduler:
             # axes to range number (was done in lowerer)
             tc_upcast_axes = tuple([tuple([(self.rngs[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
             tc_reduce_axes = tuple([self.rngs[a].arg[0] for a in tc_reduce_axes])
+            def with_missing_tc_axes(arg):
+              ret = list(arg)
+              for rn,_ in tc_upcast_axes[0]+tc_upcast_axes[1]:
+                if rn not in [x[0] for x in ret]: ret.append((rn, 1))
+              return tuple(ret)
+            tc_upcast_axes = tuple(with_missing_tc_axes(v) for v in tc_upcast_axes)
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
             # do the reduce_axes always disappear? i think they don't
             # they need to be moved into the WMMA srcs
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.ren.device, tc.threads, tc_upcast_axes, ()) #, tc_reduce_axes)
-            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
-              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0], tag=1),
-              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1], tag=1),
-              UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg, tag=1)
-            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2], tag=1)
+            tc_uop = UOp.wmma(srcs[0], srcs[1], UOp.const(tc.dtype_out, (0.0,)*tc.elements_per_thread[2]),
+                              tc.dims, self.ren.target.device, tc.threads, tc_upcast_axes=tc_upcast_axes)
 
             # preserve extra reduces
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
-            if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), Ops.ADD)
+            if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, src=(tc_uop,)+tuple(reduce_ranges), arg=(Ops.ADD, 0))
             self.ast = self.ast.substitute({reduceop: tc_uop})
           self.tensor_core = tc
           return axes
@@ -319,7 +319,7 @@ class Scheduler:
   @property
   def reduceop(self) -> UOp|None:
     if not (red := self.reduceops): return None
-    return UOp(Ops.REDUCE_AXIS, red[0].dtype, red[0].src, (red[0].arg, ()))
+    return UOp(Ops.REDUCE, src=red[0].src, arg=red[0].arg)
   @property
   def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
   @property
@@ -331,43 +331,24 @@ class Scheduler:
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
-  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM], key=lambda x: x.arg)
-  return [Buffer(dname, x.ptrdtype.size, x.dtype.base if not isinstance(x.dtype, ImageDType) else x.dtype) for x in glbls]
+  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
+  return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls]
 
-def apply_opts(ast:UOp, ren:Renderer) -> UOp:
+def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.tag is not None: return ast
   k = Scheduler(ast, ren)
   k.convert_loop_to_global()
   if ast.arg is not None and ast.arg.opts_to_apply is not None:
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
-  elif BEAM >= 1:
+  elif beam >= 1:
     from tinygrad.codegen.opt.search import beam_search
-    rawbufs = bufs_from_ast(ast, ren.device)
+    rawbufs = bufs_from_ast(ast, ren.target.device)
     # beam search may open devices
     with Context(ALLOW_DEVICE_USAGE=1):
-      k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+      k = beam_search(k, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
+    if not any(u.op is Ops.STAGE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
-
-def make_image(pa, off, idx):
-  if not isinstance(dt:=pa.dtype, ImageDType) and (idx.tag is None or idx.tag) and (shapes:=ImageDType.valid_dims(dt)):
-    new_pa = pa.replace(dtype=(dtypes.imageh if dt.base==dtypes.half else dtypes.imagef)(shapes[0] + (4,), shapes[0][1] * 4 * dt.itemsize))
-    new_idx = idx.replace(src=(new_pa, off), dtype=dtypes.float if dt.base == dtypes.half else idx.dtype)
-    return new_idx if idx.tag or dt.base == dtypes.float else new_idx.cast(dtypes.half)
-
-pm_make_images = PatternMatcher([
-  # ensure we dont create an unfoldable image store
-  (UPat(Ops.STORE, src=(UPat.var("idx"),), allow_any_len=True, name="st"), lambda idx,st:
-   st.replace(src=(idx.rtag(is_image:=any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD))),
-                   st.src[1].cast(dtypes.float if is_image and ImageDType.valid_dims(idx.src[0].dtype) else idx.dtype.base)))),
-  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"), UPat.var("off")), name="idx"), make_image),
-  # remove double cast from image loads / stores
-  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"),), allow_any_len=True, name="idx").cast(dtypes.half).cast(dtypes.float), lambda idx,pa:
-   idx if isinstance(pa.dtype, ImageDType) else None),
-  (UPat(Ops.STORE, src=(UPat(Ops.PARAM, name="pa").index(UPat()), UPat.var("val").cast(dtypes.half).cast(dtypes.float)), name="st"), lambda st,pa,val:
-   st.replace(src=(st.src[0], val)) if isinstance(pa.dtype, ImageDType) else None),
-])

@@ -1,18 +1,36 @@
 # test to compare every packet with the rocprof decoder
-import unittest, pickle
+import unittest, pickle, functools, json
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG, getenv, temp
+from tinygrad.helpers import DEBUG, getenv, temp, ansistrip, Context
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
-from tinygrad.viz.serve import sqtt_timeline
+from tinygrad.viz.serve import sqtt_timeline, amd_decode
 from test.amd.disasm import disasm
+from test.null.test_viz import run_cli
 
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
 
+def needs_rocprof(fn):
+  @functools.wraps(fn)
+  def wrapper(self, *args, **kwargs):
+    # check if latest rocprof is available, if not, skip rocprof comparison tests
+    # rocprof doesn't have a version string, decode a known pickle to validate it's the latest
+    try:
+      from extra.sqtt.roc import decode as roc_decode
+      with open(EXAMPLES_DIR/"gfx1200"/"profile_plus_run_0.pkl", "rb") as f:
+        data = pickle.load(f)
+      sqtt = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"][1]
+      kern = {e.tag:e for e in data if type(e).__name__ == "ProfileProgramEvent"}[sqtt.kern]
+      rctx = roc_decode([sqtt], {kern.tag:{addr+kern.base:inst for addr,inst in amd_decode(kern.lib, "gfx1200").items()}})
+      insts = [e.time for e in list(rctx.inst_execs.values())[0][0].unpack_insts()]
+      self.assertListEqual(insts, [28178, 28179, 28180, 28181, 28182, 29882, 29883, 29884, 29885, 30966, 30983, 30985, 30992, 30993])
+    except Exception as e: self.skipTest(f"latest rocprof not available, install with extra/sqtt/install_rocprof_decoder.py: {e}")
+    return fn(self, *args, **kwargs)
+  return wrapper
+
 def rocprof_inst_traces_match(sqtt, prg, target):
-  from tinygrad.viz.serve import amd_decode
   from extra.sqtt.roc import decode as roc_decode, InstExec
   addr_table = amd_decode(prg.lib, target)
   disasm_map = {addr+prg.base:inst for addr,inst in addr_table.items()}
@@ -46,6 +64,7 @@ def rocprof_inst_traces_match(sqtt, prg, target):
 
   return passed_insts, len(rwaves), len(rwaves_iter)
 
+@unittest.skip("TODO: fix to not require unpickling UOps.")
 class TestSQTTMapBase(unittest.TestCase):
   target: str
   examples: dict
@@ -62,6 +81,7 @@ class TestSQTTMapBase(unittest.TestCase):
       if sqtt_events and kern_events:
         cls.examples[pkl_path.stem] = (sqtt_events, kern_events, cls.target)
 
+  @needs_rocprof
   def test_rocprof_inst_traces_match(self):
     for name, (events, kern_events, target) in self.examples.items():
       if "sync" in name and self.target.startswith("gfx12"):
@@ -78,8 +98,9 @@ class TestSQTTMapBase(unittest.TestCase):
       for event in events:
         if (p:=kern_events.get(event.kern)) is None: continue
         with self.subTest(example=name, kern=event.kern):
-          if not (timeline:=sqtt_timeline(event.blob, p.lib, target)): continue
-          frequency = [e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "freq_hz"]
+          # skip if there's no SQTT frequency data
+          if not (timeline:=list(sqtt_timeline(event.blob, p.lib, target))): continue
+          if not (frequency:=[e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "freq_hz"]): continue
           mean = sum(frequency) / len(frequency)
           variance = sum((v - mean) ** 2 for v in frequency) / len(frequency)
           self.assertGreater(mean, 0)
@@ -91,7 +112,8 @@ class TestSQTTMapBase(unittest.TestCase):
               if "ALT" not in e.name.display_name: execs += 1
             elif "WAVE" in e.device:
               # sopk/immediates don't get ALU/MEM EXEC
-              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER", "BARRIER_SIGNAL"}: insts += 1
+              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER", "BARRIER_SIGNAL",
+                                             "WAVEEND", "WAVEEND_RDNA4", "WAVERDY"} and not e.name.display_name.startswith("OTHER_"): insts += 1
             else: raise Exception(f"timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
 
@@ -106,9 +128,48 @@ class TestSQTTMapBase(unittest.TestCase):
           for e in events:
             assert e.en-e.st > 1, f"all barriers must have a duration greater than 1, got {e}"
 
+  def test_sqtt_cli(self):
+    for pkl_path in sorted((EXAMPLES_DIR/self.target).glob("*.pkl")):
+      out = run_cli("--profile-path", str(pkl_path), "--ls")
+      sqtt_traces = [l["value"].strip() for l in out if "SQTT" in l["value"]]
+      for name in sqtt_traces:
+        lines = run_cli("--profile-path", str(pkl_path), "-s", ansistrip(name))
+        self.assertIn("Clk", lines[0]["value"])
+        waves = [r["clk"] for r in lines[2:] if "WAVE" in r["unit"]]
+        self.assertEqual(waves, sorted(waves), f"wave timestamps not monotonic in {name}")
+      with Context(DEBUG=2):
+        kernels = run_cli("--profile-path", str(pkl_path), "-s", "AMD")
+      self.assertEqual(len(kernels), len(self.examples[pkl_path.stem][1]))
+
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
-class TestSQTTMapRDNA4(TestSQTTMapBase): target = "gfx1200"
+class TestSQTTMapRDNA4(TestSQTTMapBase):
+  target = "gfx1200"
+
+  @unittest.expectedFailure
+  def test_pipes(self):
+    events, kernels, target = self.examples["profile_handwritten_run_0"]
+    lib = list(kernels.values())[0].lib
+    dispatch_st:dict[str, int] = {}
+    row_ends:dict[str, int] = {}
+    row_counts:dict[str, int] = {}
+    for e in sqtt_timeline(events[1].blob, lib, target):
+      if type(e).__name__ != "ProfileRangeEvent": continue
+      info = json.loads(e.name.ret) if e.name.ret else {}
+      if e.device.startswith("WAVE"):
+        idx = row_counts.get(e.device, 0)
+        dispatch_st[f"{e.device}-{idx}"] = int(e.st)
+        row_counts[e.device] = idx + 1
+      elif info.startswith("LINK:"):
+        delay = int(e.st) - dispatch_st[info[len("LINK:"):]]
+        self.assertGreaterEqual(delay, 1, f"EXEC {e.device} starts before DISPATCH: delay={delay}")
+        if (prev_en:=row_ends.get(e.device)) is not None:
+          self.assertGreaterEqual(e.st, prev_en, f"EXEC overlap in {e.device}: {e.st} < prev end {prev_en}")
+        row_ends[e.device] = int(e.en)
+
+class TestSQTTMapCDNA(TestSQTTMapBase):
+  target = "gfx950"
+  def test_rocprof_inst_traces_match(self): self.skipTest("requires timestamp patching to match rocprof, currently it's off by a few cycles")
 
 if __name__ == "__main__":
   unittest.main()

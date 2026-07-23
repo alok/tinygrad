@@ -72,7 +72,7 @@ As it turns out, 90% of what you need for neural networks are a decent autograd/
 Throw in an optimizer, a data loader, and some compute, and you have all you need.
 
 ```python
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, Context
 
 class LinearNet:
   def __init__(self):
@@ -86,7 +86,7 @@ optim = nn.optim.Adam([model.l1, model.l2], lr=0.001)
 
 x, y = Tensor.rand(4, 1, 28, 28), Tensor([2,4,3,7])  # replace with real mnist dataloader
 
-with Tensor.train():
+with Context(TRAINING=1):
   for i in range(10):
     optim.zero_grad()
     loss = model(x).sparse_categorical_crossentropy(y).backward()
@@ -147,8 +147,8 @@ Documentation along with a quick start guide can be found on the [docs website](
 ```python
 from tinygrad import Tensor
 
-x = Tensor.eye(3, requires_grad=True)
-y = Tensor([[2.0,0,-2.0]], requires_grad=True)
+x = Tensor.eye(3)
+y = Tensor([[2.0,0,-2.0]])
 z = y.matmul(x).sum()
 z.backward()
 
@@ -171,7 +171,9 @@ print(y.grad.tolist())  # dz/dy
 
 ## Contributing
 
-There has been a lot of interest in tinygrad lately. Following these guidelines will help your PR get accepted.
+There has been a lot of interest in tinygrad lately. Following these guidelines will help your PR get accepted. If you do submit a PR, please include a sentence or two about why you want this merged and why you think it will improve the project.
+
+If you are a new contributor with something that looks even close to AI written, it will be closed without feedback and you may be banned from our GitHub. No human should waste time reading AI slop. And for everyone, if you used AI, disclose what you used it for.
 
 We'll start with what will get your PR closed with a pointer to this section:
 
@@ -202,6 +204,8 @@ python3 -m pip install -e '.[testing]'  # install extra deps for testing
 python3 test/backend/test_ops.py        # just the ops tests
 python3 -m pytest test/                 # whole test suite
 ```
+
+For agents, always run tests with `-n12` for speed.
 
 #### Process replay tests
 

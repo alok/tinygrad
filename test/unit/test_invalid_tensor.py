@@ -1,17 +1,19 @@
 import unittest
 from tinygrad import Tensor
+from tinygrad.device import Buffer
 from tinygrad.dtype import Invalid, dtypes
-from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.realize import run_linear
+from tinygrad.uop.ops import Ops, UOp
 
 class TestInvalidTensor(unittest.TestCase):
   def _invalid_test_helper(self, out, expected):
-    sched = out.schedule()
+    linear, var_vals = out.linear_with_vars()
     buf = out.uop.buffer
     buf.allocate()
     sentinel = memoryview(bytearray(b'\x42' * buf.nbytes))
-    buf.copyin(sentinel)
+    buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=sentinel))
     before = buf.as_memoryview().cast(out.dtype.fmt).tolist()
-    run_schedule(sched)
+    run_linear(linear, var_vals)
     ret = buf.as_memoryview().cast(out.dtype.fmt).tolist()
 
     for i,v in enumerate(expected): self.assertEqual(ret[i], before[i] if v is None else v)
@@ -64,6 +66,17 @@ class TestInvalidTensor(unittest.TestCase):
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid) > 1
     self._invalid_test_helper(out, [False, True, None, None])
 
+  def test_where_invalid_condition(self):
+    a, x = Tensor.arange(4), Tensor([0, 1, 2, 3])
+    bad = (a < 2).where(a, Invalid)
+    out = (bad < 1).logical_not().where(x + 10, x + 20)
+    self._invalid_test_helper(out, [20, 11, None, None])
+
+  def test_where_invalid_condition_bare(self):
+    cond = Tensor.full((4,), Invalid, dtype=dtypes.bool, buffer=False)
+    out = cond.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor([10.0, 20.0, 30.0, 40.0]))
+    self._invalid_test_helper(out, [None, None, None, None])
+
   def test_where_unary(self):
     mask = Tensor.arange(4) < 2
     out = mask.where(Tensor([1.0, 4.0, 9.0, 16.0]), Invalid).sqrt()
@@ -82,17 +95,17 @@ class TestInvalidTensor(unittest.TestCase):
 
   def test_invalid_unary(self):
     mask = Tensor.arange(4) < 2
-    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.float).sqrt())
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.float, buffer=False).sqrt())
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
   def test_invalid_binary(self):
     mask = Tensor.arange(4) < 2
-    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.float) + 2)
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.float, buffer=False) + 2)
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
   def test_invalid_binary_left(self):
     mask = Tensor.arange(4) < 2
-    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), 2 + Tensor.full((4,), Invalid, dtype=dtypes.float))
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), 2 + Tensor.full((4,), Invalid, dtype=dtypes.float, buffer=False))
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
   def test_invalid_reshape(self):
@@ -102,25 +115,33 @@ class TestInvalidTensor(unittest.TestCase):
 
   def test_invalid_cast(self):
     mask = Tensor.arange(4) < 2
-    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.int).cast(dtypes.float))
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.int, buffer=False).cast(dtypes.float))
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
   def test_invalid_bitcast(self):
     mask = Tensor.arange(4) < 2
-    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.int).bitcast(dtypes.float))
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.int, buffer=False).bitcast(dtypes.float))
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
   def test_where_bitcast(self):
     mask = Tensor.arange(4) < 2
-    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.int)).bitcast(dtypes.int)
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.int, buffer=False)).bitcast(dtypes.int)
     self._invalid_test_helper(out, [0x3f800000, 0x40000000, None, None])
 
-  # tensor indexing uses reduce, so the entire result becomes invalid
-  @unittest.expectedFailure
   def test_tensor_index(self):
     idx = (Tensor.arange(4) < 2).where(Tensor([0, 1, 2, 3]), Invalid)
     out = Tensor([1.0, 2.0, 3.0, 4.0])[idx]
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
+
+  def test_uop_where_keeps_invalid_bare(self):
+    cond = UOp.const(dtypes.weakint, 0) < UOp.const(dtypes.weakint, 1)
+    idx = UOp(Ops.STACK, src=tuple(UOp.const(dtypes.weakint, x) for x in range(3)))
+    out = cond.where(idx, UOp.invalid())
+    self.assertIs(cond.op, Ops.CMPLT)
+    self.assertIs(idx.op, Ops.STACK)
+    self.assertIs(out.op, Ops.WHERE)
+    self.assertIs(out.src[2].op, Ops.CONST)
+    self.assertIs(out.src[2].arg, Invalid)
 
 if __name__ == '__main__':
   unittest.main()

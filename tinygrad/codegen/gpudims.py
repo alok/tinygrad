@@ -1,7 +1,6 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
-from tinygrad.helpers import dedup, get_contraction
-from tinygrad.dtype import dtypes, AddrSpace, Invalid
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer import Renderer
 
 def _dim_max(d:sint) -> int: return d if isinstance(d, int) else int(d.vmax)
@@ -23,7 +22,7 @@ def _split_dims(dims, max_sizes):
       div = next((d for d in range(2, math.ceil(math.sqrt(_dims[i])) + 1) if (_dims[i] % d) == 0), 1)
       if div == 1: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
       _dims[i], _dims[(i+1)%len(_dims)] = _dims[i]//div, _dims[(i+1)%len(_dims)]*div
-  return tuple(_dims[:2] if _dims[2] == 1 else _dims[0] if _dims[1:3] == [1,1] else _dims)
+  return tuple(_dims[:2] if _dims[2] == 1 else _dims)
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: return get_grouped_dims(prefix, dims[::-1], max_sizes)[::-1]
@@ -35,25 +34,9 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     if len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
     # try to split up dims: (a,) -> (b, c)
     if limited == dims: limited = _split_dims(dims, max_sizes)
-  raw_idxs = [UOp(Ops.SPECIAL, dtypes.index, (sint_to_uop(s),), (f"{prefix}{i}")) for i,s in enumerate(limited)]
-  if len(limited) < len(dims):
-    ret = []
-    if (contraction:=get_contraction(dims, limited)) is None: raise RuntimeError(f"get_contraction should not be None {dims=} {limited=}")
-    for idx, contraction_group in zip(raw_idxs, contraction):
-      for c in contraction_group[:-1]:
-        ret.append(idx % dims[c])
-        idx //= dims[c]
-      ret.append(idx)
-    return ret
-  elif (a:=len(limited)) > (b:=len(dims)):
-    if a == 2 and b == 1: return [raw_idxs[0] * limited[1] + raw_idxs[1]]
-    if a == 3 and b == 1: return [(raw_idxs[0] * limited[1] + raw_idxs[1]) * limited[2] + raw_idxs[2]]
-  if limited != dims:
-    # Convert to 1D
-    flat = raw_idxs[0]*limited[1]+raw_idxs[1] if len(limited) == 2 else raw_idxs[0]*(limited[1]*limited[2])+raw_idxs[1]*limited[2]+raw_idxs[2]
-    # Get back original indices from 1D
-    return [flat//dims[1], flat%dims[1]] if len(dims) == 2 else [flat//(dims[2]*dims[1]), (flat//dims[2])%dims[1], flat%dims[2]]
-  return raw_idxs
+  raw_idxs = [UOp.special(s, f"{prefix}{i}") for i,s in enumerate(limited)]
+  flat = sum(idx * math.prod(limited[i+1:]) for i,idx in enumerate(raw_idxs))
+  return [ssimplify(flat // math.prod(dims[i+1:])) if i == 0 else ssimplify((flat // math.prod(dims[i+1:])) % dims[i]) for i in range(len(dims))]
 
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
@@ -64,35 +47,38 @@ def add_gpudims(ctx:Renderer, s:UOp):
   all_ranges = {x.arg[0:-1]:x for x in s_topo if x.op is Ops.RANGE}
 
   # extract global/local dims
-  global_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.GLOBAL, AxisType.THREAD)]))
-  local_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)]))
+  global_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.GLOBAL, AxisType.THREAD)])
+  local_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
   if not global_dims and not local_dims: return None
 
   # get global and local shape
-  ranges = [all_ranges[r] for r in global_dims+local_dims if r in all_ranges]
-  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0:-1] in global_dims])
-  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0:-1] in local_dims])
+  global_shape = tuple(ssimplify(all_ranges[r].src[0]) for r in global_dims)
+  local_shape = tuple(ssimplify(all_ranges[r].src[0]) for r in local_dims)
 
   # get the idxs
   ki: KernelInfo = s.arg
-  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int).cast(dtypes.index)]
+  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int).cast(dtypes.weakint)]
   elif ki.dont_use_locals:
     assert not local_dims, "can't use locals if there's no local dims"
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
   else:
     # define indexes for GPU-like execution
-    idxs = get_grouped_dims("gidx", global_shape, ctx.global_max, reverse=True) + get_grouped_dims("lidx", local_shape, ctx.local_max)
+    local_idxs = get_grouped_dims("lidx", local_shape, ctx.local_max)
+    hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.SPECIAL]
+    global_max = ctx.global_max if ctx.global_prod_max is None else \
+      tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
+    idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True) + local_idxs
 
   # apply to multiple ranges
   subs = {}
   for r in s_topo:
     # look for local INDEXes that are not used in the GLOBAL store, then add them as an INVALID
-    if r.op is Ops.STORE and (idx := r.src[0]).src[0].ptrdtype.addrspace == AddrSpace.GLOBAL:
+    if r.op is Ops.STORE and (idx := r.src[0]).src[0].addrspace == AddrSpace.GLOBAL:
       missing_locals = [all_ranges[rng] for rng in local_dims if all_ranges[rng] not in idx.ranges]
       if len(missing_locals):
         assert len(idx.src) == 2, "index has 2 sources"
-        mask: UOp = UOp.prod(*[x.eq(0) for x in missing_locals])
-        subs[idx] = idx.replace(src=(idx.src[0], mask.broadcast(idx.src[1].dtype.count).where(idx.src[1], Invalid)))
+        mask: UOp = UOp.uprod(*[x.eq(0) for x in missing_locals])
+        subs[idx] = idx.replace(src=(idx.src[0], idx.src[1].valid(mask)))
     if r.op is not Ops.RANGE: continue
     try:
       ii = (global_dims+local_dims).index(r.arg[0:-1])

@@ -1,9 +1,10 @@
 import ctypes, gzip, unittest, timeit, pickle
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, mv_address, get_contraction, count, all_same
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, mv_address, count, all_same
+from tinygrad.tensor import is_numpy_ndarray
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
-from tinygrad.helpers import ceildiv
-from tinygrad.tensor import Tensor, get_shape
+from tinygrad.helpers import ceildiv, ansistrip, get_shape
+from tinygrad.tensor import Tensor
 import numpy as np
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -209,6 +210,11 @@ class TestFetch(unittest.TestCase):
           headers={"Range": "bytes=0-100"}).read_bytes()
     assert len(x) == 101, f"{len(x) != 101}"
 
+  def test_fetch_sha(self):
+    self.assertRaises(Exception, fetch, "https://ftp.gnu.org/gnu/gzip/gzip-1.13.tar.gz", allow_caching=False, sha256="a")
+    fetch("https://ftp.gnu.org/gnu/gzip/gzip-1.13.tar.gz", allow_caching=False,
+          sha256="20fc818aeebae87cdbf209d35141ad9d3cf312b35a5e6be61bfcfbf9eddd212a")
+
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
     self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])
@@ -267,75 +273,6 @@ class TestMemoryview(unittest.TestCase):
     fmv_us = timeit.timeit(lambda: from_mv(x), number=iters) * 1e6 / iters
     mva_us = timeit.timeit(lambda: mv_address(x), number=iters) * 1e6 / iters
     print(f"from_mv vs mv_address: {fmv_us:8.3f} µs vs {mva_us:8.3f} µs")
-
-class TestGetContraction(unittest.TestCase):
-  def test_contraction(self):
-    r = get_contraction((1,2,3,4), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3]])
-
-    r = get_contraction((2,1,3,4), (2,3,4))
-    self.assertEqual(r, [[0], [1, 2], [3]])
-
-    r = get_contraction((1,2,3,1,4), (1,2,3,4))
-    self.assertEqual(r, [[], [0, 1], [2], [3, 4]])
-
-    r = get_contraction((1,2,3,1,4,1,1), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
-
-    r = get_contraction((1,2,3,4), (1,2,3*4))
-    self.assertEqual(r, [[], [0, 1], [2, 3]])
-
-    r = get_contraction((1,2,3,4), (2,1,3,4))
-    self.assertEqual(r, [[0, 1], [], [2], [3]])
-
-    r = get_contraction((1,2,3,4), (1,1,2*3*4,1))
-    self.assertEqual(r, [[], [], [0,1,2,3], []])
-
-    r = get_contraction((2,1,3,4), (1,2,3,4))
-    self.assertEqual(r, [[], [0], [1, 2], [3]])
-
-    r = get_contraction((1,2,3,4), (2*3*4,1,1,1))
-    self.assertEqual(r, [[0, 1, 2, 3], [], [], []])
-
-    r = get_contraction((4,4,4,4), (16,1,16))
-    self.assertEqual(r, [[0, 1], [], [2, 3]])
-
-    r = get_contraction((1,2,3,4,1,1,1), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
-
-    r = get_contraction((1,2,3,4), (1,2,3,4,1))
-    self.assertEqual(r, [[], [0, 1], [2], [3], []])
-
-    r = get_contraction((14,1,384,14,1,1,1,1), (1,14,384,14))
-    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7]])
-
-    r = get_contraction((14,1,384,1,14,1,1,1,1), (1,14,384,14))
-    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7,8]])
-
-    r = get_contraction((512, 512), (1, 1, 512, 1, 1, 1, 1, 512))
-    self.assertEqual(r, [[], [], [0], [], [], [], [], [1]])
-
-    r = get_contraction((1,2,3,4), (1,2,6,2))
-    self.assertEqual(r, None)
-
-  def test_contraction_ones(self):
-    r = get_contraction((1,), (1,1,1))
-    self.assertEqual(r, [[], [], [0]])
-
-    r = get_contraction((1,1), (1,1,1))
-    self.assertEqual(r, [[], [], [0, 1]])
-
-    r = get_contraction((1,1,1,1), (1,))
-    self.assertEqual(r, [[0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1))
-    self.assertEqual(r, [[], [0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1,1))
-    self.assertEqual(r, [[], [], [0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1,1,1))
-    self.assertEqual(r, [[], [], [], [0,1,2,3]])
 
 class TestGetShape(unittest.TestCase):
   def test_get_shape(self):
@@ -439,6 +376,13 @@ class TestWordWrap(unittest.TestCase):
     st = colored("x"*wrap*2, "red")
     st2 = word_wrap(st, wrap=wrap)
     self.assertEqual(len(st2.splitlines()), 2)
+
+  def test_wrap_colored_at_boundary(self):
+    wrap = 10
+    st = "x"*(wrap-2) + colored("yyy", "red")
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(ansistrip(st2), "x"*(wrap-2)+"yy\ny")
+    self.assertNotIn("\x1b[\n", st2)
 
   def test_wrap_explicit_newline(self):
     wrap = 10

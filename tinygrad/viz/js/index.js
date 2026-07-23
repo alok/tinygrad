@@ -16,7 +16,6 @@ const darkenHex = (h, p = 0) =>
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#ff99ff","#ccffff","#ffffff"];
-const colorsCache = new Map();
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
   ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
@@ -24,6 +23,14 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
                        .style("color", d => d.color).text(d => d.st)).node();
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
+const viewBounds = () => [rect(".ctx-list-parent").right, rect(".metadata-parent").left];
+
+// dims of shapes on the canvas aren't tracked by the browser, we compute it
+const canvasRect = (s, pixelScale) => {
+  const { e } = selectShape(s), t = data.tracks.get(s.split("-")[0]);
+  const x = pixelScale(e.x), w = pixelScale(e.x+e.width)-x, y = t.offsetY+e.y;
+  return {x0:x, x1:x+w, y0:y, y1:y+e.height};
+};
 
 let timeout = null;
 const Status = {STARTED:0, COMPLETE:1, ERR:2}
@@ -50,11 +57,15 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-function addTags(root) {
-  root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5);
-  root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
+function addTags(root, path) {
+  root.selectAll("circle").data(d => d.rect ? [] : [d]).join("circle").attr("r", 5).style("fill", d => d.fill ?? null).style("stroke", d => d.stroke ?? null);
+  root.selectAll("rect").data(d => d.rect ? [d] : []).join("rect").attr("x", d => -d.width/2).attr("y", d => -d.height/2)
+    .attr("width", d => d.width).attr("height", d => d.height).style("fill", d => d.fill ?? null).style("stroke", d => d.stroke ?? null);
+  if (path != null) root.selectAll("path").data(d => [d]).join("path").attr("d", path);
+  else root.selectAll("text").data(d => [d]).join("text").text(d => d.text).attr("dy", "0.35em");
 }
 
+anchor = null;
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
   // draw nodes
@@ -62,11 +73,6 @@ const drawGraph = (data) => {
   const callCount = g.graph().callCount;
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
-      if (d.callNode) {
-        if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
-        if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
-        return setState({});
-      }
       const parents = g.predecessors(d.id);
       const children = g.successors(d.id);
       if (parents == null && children == null) return;
@@ -82,7 +88,7 @@ const drawGraph = (data) => {
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
   const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
-  labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
+  labels.attr("transform", d => `translate(${d.labelX-d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
   const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
     if (Array.isArray(d.label)) return [d.label];
@@ -109,10 +115,27 @@ const drawGraph = (data) => {
     tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
   });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
-    .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
-  addTags(nodes.selectAll("g.type").data(d => d.callNode ? [d] : []).join("g")
-    .attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
-    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => d.collapsed ? "+" : "−"));
+    .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
+  addTags(nodes.selectAll("g.addrspace").data(d => d.addrspace != null ? [d] : []).join("g").attr("class", "tag addrspace")
+    .attr("transform", d => `translate(${d.width/2-8}, ${-d.height/2+8})`).datum(e => ({ rect:true, width:10, height:10, fill:e.addrspace, stroke:"none" })));
+  const CALL_TAG_WIDTH = 14;
+  addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag clickable ${d.collapsed ? 'collapsed' : 'expanded'}`)
+    .attr("transform", d => d.callNode ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
+    .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color,
+      ...(d.callNode && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
+      e.stopPropagation();
+      const t = d3.zoomTransform(document.getElementById("graph-svg"));
+      const [x, y] = t.apply([d.x, d.y]);
+      anchor = {id:d.id, x, y, k:t.k};
+      if (d.callNode) {
+        if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
+        if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
+      } else { if (state.expandedNodes.has(d.id)) state.expandedNodes.delete(d.id); else state.expandedNodes.add(d.id); }
+      return setState({});
+    }));
+  addTags(nodes.selectAll("g.ref").data(d => d.ref != null ? [d] : []).join("g").attr("class", "tag ref")
+    .attr("transform", d => `translate(${d.width/2-2}, ${-d.height/2+2})`).on("click", (e,d) => { e.stopPropagation(); switchCtx(d.ref); }).datum(d => ({ref:d.ref})),
+    "M-1.7 1.7 L1.7 -1.7 M-0.55 -1.7 H1.7 V0.55");
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
@@ -122,6 +145,7 @@ const drawGraph = (data) => {
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
   }).attr("marker-end", "url(#arrowhead)").attr("stroke", e => g.edge(e).color || "#4a4b57");
+  return g;
 }
 
 // ** UOp graph
@@ -146,7 +170,7 @@ function renderDag(layoutSpec, { recenter }) {
     const data = e.data.result;
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
-    drawGraph(data);
+    const g = drawGraph(data);
     addTags(d3.select("#edge-labels").selectAll("g").data(data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = e.value.points.slice(-2);
@@ -161,8 +185,12 @@ function renderDag(layoutSpec, { recenter }) {
       const x = p2.x - ux * offset;
       const y = p2.y - uy * offset;
       return `translate(${x}, ${y})`
-    }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
-    if (recenter) document.getElementById("zoom-to-fit-btn").click();
+    }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => ({ text:e.value.label.text })));
+    if (anchor != null) {
+      const n = g.node(anchor.id);
+      if (n != null) d3.select("#graph-svg").call(svgZoom.transform, d3.zoomIdentity.translate(anchor.x-n.x*anchor.k, anchor.y-n.y*anchor.k).scale(anchor.k));
+    } else if (recenter) document.getElementById("zoom-to-fit-btn").click();
+    anchor = null;
   };
   worker.onerror = (e) => {
     e.preventDefault();
@@ -191,18 +219,16 @@ function formatCycles(cycles) {
 }
 
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
+const skipFmt = new Set(["tb", "pc", "link"]);
+const formatData = (fmt) => Object.entries(fmt ?? {}).filter(([k]) => !skipFmt.has(k)).map(([k, v]) => typeof(v) === "string" ? `${k} ${v}` : formatUnit(v, k));
 
-const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
-  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4", VMEM:"#b2b7c9", LDS:"#9fb4a6"};
 const waveColor = (op) => {
-  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU" : op.includes("VMEM") ? "VMEM"
-            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
-  let ret = WAVE_COLORS[cat] ?? "#ffffff";
+  let ret = data.waveColors.find(([pattern]) => op.includes(pattern))?.[1] ?? "#ffffff";
   if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
 };
-const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
+const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["precompile","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
   GPC:new Map([["NONE","#1a7a2e"],["MEMORY_DEPENDENCY","#8b1a00"],["EXEC_DEPENDENCY","#006b6b"],["INST_FETCH","#7a7a00"],["SYNC","#6b006b"],
@@ -241,6 +267,11 @@ function tabulate(rows) {
 
 var data, focusedDevice, focusedShape, formatTime, canvasZoom, zoomLevel = d3.zoomIdentity;
 
+const canvasDims = () => {
+  const sideRect = rect("#device-list");
+  return [Math.round(document.querySelector("#profiler").clientWidth-sideRect.width), Math.round(sideRect.height)];
+}
+
 function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
@@ -249,14 +280,14 @@ function selectShape(key) {
 }
 
 // scaling function for time to pixels
-const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
+const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, canvasDims()[0]]);
 
 function timeAtCycle(clk) {
-  if (clk < data.instSt || clk > data.instEt) return "-";
+  if (clk < data.instSt || clk > data.instEt || data.tracks.get("Shader Clock") == null) return "-";
   let cur = data.instSt, ns = 0, freq = null;
   // walk through all frequency changes and accumulate time in nanoseconds
   for (const [s, v] of data.tracks.get("Shader Clock").valueMap) {
-    if (freq != null && cur < s) {
+    if (freq != null && freq > 0 && cur < s) {
       const et = Math.min(clk, s);
       ns += (et - cur) * 1e9 / freq;
       cur = et;
@@ -271,12 +302,13 @@ function timeAtCycle(clk) {
 }
 
 function getZoomIdentity() {
+  const xscale = timelineScale(), deviceRight = rect("#device-list").right, [viewLeft, sidebarLeft] = viewBounds();
+  const viewRight = sidebarLeft || rect(".main-container").right;
+  const x0 = Math.max(0, viewLeft-deviceRight), x1 = Math.min(canvasDims()[0], viewRight-deviceRight);
   // for packets, set zoom to the full range of instruction events
-  if (data.instSt != null) {
-    const k = (data.dur - data.first) / (data.instEt - data.instSt), xscale = timelineScale();
-    return d3.zoomIdentity.translate(-xscale(data.instSt) * k, 0).scale(k);
-  }
-  return d3.zoomIdentity;
+  const [st, et] = data.instSt != null ? [data.instSt, data.instEt] : [data.first, data.dur];
+  const k = (x1-x0)/(xscale(et)-xscale(st));
+  return d3.zoomIdentity.translate(x0-xscale(st)*k, 0).scale(k);
 }
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
@@ -292,15 +324,25 @@ function setFocus(key) {
       const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
       if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
     }
+    const link = e?.arg.link ?? data.links.get(key);
+    data.link = link == null ? null : [key, link];
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+    const tooltip = document.getElementById("tooltip");
+    if (tooltip.dataset.key !== key) tooltip.style.display = "none";
   }
   const { eventType, e } = selectShape(key);
   if (metadata.querySelector(".info") == null) d3.select(metadata).html("").append("div").classed("info", true);
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]];
-    if (data.instSt != null) tableData.push(["Timestamp", timeAtCycle(e.x)]);
+    const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)]];
+    if (data.instSt != null) {
+      const p = d3.create("p");
+      p.append("span").text(timeAtCycle(e.x));
+      p.append("span").style("margin-left", "8px").style("color", "#f0f0f566").text(formatTime(e.x));
+      tableData.push(["Cycle", formatTime(e.x-data.instSt)], ["Time", p.node()]);
+    } else tableData.push(["Start Time", formatTime(e.x)]);
+    if (data.link != null) tableData.push(["Delay", `${formatTime(Math.abs(selectShape(data.link[0]).e.x - selectShape(data.link[1]).e.x))} Cycles`]);
     html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
@@ -317,7 +359,7 @@ function setFocus(key) {
       const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Source");
       if (prgSrc !== -1) html.append("a").text("View Source").on("click", () => switchCtx(i, prgSrc));
     }
-    if (e.arg.trace != null) html.append(() => traceBlock(JSON.parse(e.arg.trace.replace("TB:", "")).slice(1).reverse()));
+    if (e.arg.trace != null) html.append(() => traceBlock(e.arg.trace.slice(1).reverse()));
   }
   if (eventType === EventTypes.BUF) {
     const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
@@ -335,34 +377,34 @@ function setFocus(key) {
   }
   // instructions list renderer
   let instList = document.getElementById("insts");
-  if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
+  if (data.pcMap == null) return d3.select(instList?.parentElement).html("");
   if (instList == null) {
     let contents = "";
-    for (const [k, v] of data.pcToShape) {
-      const pcHex = v.pc.toString(16);
-      contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="wave">${v.wave}</span>
-        <span class="pc">${"0x"+pcHex.padStart(Math.max(4, Math.ceil(pcHex.length/4)*4), 0)}</span><span class="label">${data.pcMap[v.pc]}</span></div>`;
+    for (let [pc, label] of Object.entries(data.pcMap)) {
+      pc = parseInt(pc);
+      const pcHex = pc.toString(16);
+      contents += `<div class="line"><span class="left" id="inst-${pc}"><span class="pc">${"0x"+pcHex.padStart(Math.max(4, Math.ceil(pcHex.length/4)*4), 0)}</span><span class="label">${label}</span></span></div>`;
     }
-    instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents)
-      .on("click", e => { const line = e.target.closest(".line"); line && setFocus(line.dataset.k); }).node();
+    instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents).node();
     metadata.insertBefore(instList.parentElement, html.node());
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
-  const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
+  let instLine = document.getElementById(`inst-${e?.arg.pc}`);
+  if (instLine == null && data.link != null) instLine = document.getElementById(`inst-${selectShape(data.link[1]).e.arg.pc}`);
   if (instLine != null) {
+    instLine.classList.add("highlight");
     const r = rect(instLine), c = rect(instList);
-    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
+    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instList.scrollTop = instLine.offsetTop-instList.clientHeight/2+instLine.clientHeight/2;
   }
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
-const GraphConfig = [{ pcolor:"#c9a8ff", unit:"B", fillColor:"#2B1B72"}, { pcolor:"#4fa3cc", unit:"Hz", fillColor:"#4fa3cc"}];
 
 async function renderProfiler(path, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = opts.unit === "ms" ? formatMicroseconds : formatCycles;
-  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, pcToShape:new Map()}; focusedDevice = null; focusedShape = null; }
+  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, links:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
   if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
@@ -378,6 +420,7 @@ async function renderProfiler(path, opts) {
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
   const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
@@ -388,8 +431,8 @@ async function renderProfiler(path, opts) {
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   const ctx = canvas.getContext("2d");
   const canvasTop = rect(canvas).top;
-  // color by key (name/device)
-  const colorMap = new Map();
+  // map event name to shape and label colors
+  const colorMap = new Map(), coloredNames = new Map();
   // map shapes by event key
   const shapeMap = new Map();
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
@@ -403,7 +446,7 @@ async function renderProfiler(path, opts) {
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
-    const [pcolor, scolor] = path.includes("pkts") ? ["#00c72f", "#858b9d"] : ["#9ea2ad", null];
+    const [pcolor, scolor] = path.includes("sqtt") ? ["#00c72f", "#858b9d"] : ["#9ea2ad", null];
     // last row doesn't get a border
     const rowBorderColor = i<layoutsLen-1 ? "#22232a" : null;
     if (rowBorderColor != null) div.style("border-bottom", `1px solid ${rowBorderColor}`);
@@ -413,7 +456,7 @@ async function renderProfiler(path, opts) {
       data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
+        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), fmt:JSON.parse(strings[u32()])};
         // find a free level to put the event
         let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
@@ -428,11 +471,14 @@ async function renderProfiler(path, opts) {
           colorMap.set(colorKey, d3.rgb(color));
         }
         const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
-        const label = parseColors(e.name).flatMap(({ color, st }) => {
-          const parts = [];
-          for (let i=0; i<st.length; i+=4) { const part = st.slice(i, i+4); parts.push({ color, st:part, width:ctx.measureText(part).width }); }
-          return parts;
-        });
+        let label = coloredNames.get(e.name);
+        if (label == null) {
+          label = parseColors(e.name).flatMap(({ color, st }) => {
+            const parts = [];
+            for (let i=0; i<st.length; i+=4) { const part = st.slice(i, i+4); parts.push({ color, st:part, width:ctx.measureText(part).width }); }
+            return parts;
+          }); coloredNames.set(e.name, label);
+        }
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
         else if (ref != null) {
@@ -451,10 +497,9 @@ async function renderProfiler(path, opts) {
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        let info = e.info != null ? "\n"+e.info : "", trace = null
-        if (info.startsWith("\nPC:")) { data.pcToShape.set(key, {wave:dnum, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = ""; }
-        if (info.startsWith("\nTB:")) { trace = info; info = ""; }
-        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, trace, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
+        const trace = e.fmt.tb, pc = e.fmt.pc, link = e.fmt.link;
+        if (link != null) data.links.set(link, key);
+        const arg = { tooltipText:[" N:"+shapes.length, formatTime(e.dur), ...formatData(e.fmt)].join("\n"), label, pc, trace, link, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
@@ -463,7 +508,6 @@ async function renderProfiler(path, opts) {
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
       const linear = u8(), peak = u64();
-      const config = GraphConfig[linear];
       const timestamps = [], valueMap = new Map();
       // start by unpacking the raw events
       const memEvents = [];
@@ -492,7 +536,7 @@ async function renderProfiler(path, opts) {
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       // generic polygon merger
       const base0 = yscale(0);
-      const sum = {x:[], y0:[], y1:[], fillColor:config.fillColor};
+      const sum = {x:[], y0:[], y1:[], fillColor:linear ? null : "#2b1b72"};
       for (let i=0; i<timestamps.length-1; i++) {
         const yv = yscale(valueMap.get(timestamps[i]));
         sum.x.push(timestamps[i], timestamps[i+1]); sum.y1.push(yv, yv); sum.y0.push(base0, base0);
@@ -531,8 +575,8 @@ async function renderProfiler(path, opts) {
         return bufShapes;
       };
       if (timestamps.length > 0) data.first = data.first == null ? timestamps[0] : Math.min(data.first, timestamps[0]);
-      data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:config.pcolor, height, peak, scaleFactor:maxheight*4/height,
-                           get views() { return [[sum], linear ? null : buildBufShapes()]; }, valueMap, rowBorderColor });
+      data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:linear ? "#4fa3cc" : "#c9a8ff", height, peak, scaleFactor:maxheight*4/height,
+                           get views() { return [[sum], linear ? null : buildBufShapes()]; }, valueMap, rowBorderColor, unit:linear ? "Hz" : "B" });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         if (linear) return;
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
@@ -542,7 +586,7 @@ async function renderProfiler(path, opts) {
           if (tid === newFocus) { track.shapes = track.views[1]; offset += rescaleTrack(track, tid, track.scaleFactor); }
           else if (tid === focusedDevice) { track.shapes = track.views[0]; offset += rescaleTrack(track, tid, 1/track.scaleFactor); }
         }
-        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:config.unit } : null;
+        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:t.unit } : null;
         toggleCls(document.getElementById(focusedDevice), document.getElementById(newFocus), "expanded");
         focusedDevice = newFocus;
         return resize();
@@ -550,12 +594,11 @@ async function renderProfiler(path, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
-  if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
+  if (data.pcMap != null) setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
-  for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
-    const first = shapes[0].x, last = shapes.at(-1).x;
+  for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock") && path.includes("sqtt")) {
+    const first = shapes[0].x, last = shapes.at(-1).x+shapes.at(-1).width;
     instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
   }
   if (instRange != null) [data.instSt, data.instEt] = instRange;
@@ -580,7 +623,7 @@ async function renderProfiler(path, opts) {
     const canvasWidth = canvas.clientWidth;
     ctx.clearRect(0, 0, canvasWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain([data.first, dur]).range([0, canvasWidth]);
+    const xscale = timelineScale();
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain([st, et]);
@@ -588,14 +631,13 @@ async function renderProfiler(path, opts) {
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
     ctx.textBaseline = "middle";
     // draw shapes
-    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, rowBorderColor }] of data.tracks) {
+    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor }] of data.tracks) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
-      const addBorder = scolor != null ? (w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(); } } : null;
-      const config = GraphConfig[linear];
-      for (const e of shapes) {
-        if (eventType === EventTypes.BUF) { // generic polygon
+      const link0 = data.link?.[0]; const link1 = data.link?.[1], highlightRect = focusedShape != null || data.link != null, splitRects = scolor != null;
+      if (eventType === EventTypes.BUF) { // generic polygon
+        for (const e of shapes) {
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           ctx.beginPath();
           const x = e.x.map(xscale);
@@ -603,32 +645,46 @@ async function renderProfiler(path, opts) {
           for (let i=1; i<x.length; i++) {
             ctx.lineTo(x[i], offsetY+e.y1[i]);
             let arg = e.arg;
-            if (arg == null && valueMap != null) arg = {tooltipText: formatUnit(valueMap.get(e.x[i-1]), config.unit)}
+            if (arg == null && valueMap != null) arg = {tooltipText: formatUnit(valueMap.get(e.x[i-1]), unit)}
             visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
-          if (linear) { ctx.strokeStyle = e.fillColor; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
+          if (linear) { ctx.strokeStyle = pcolor; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
           // walk the path back and fill the complete shape
           else { for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y0[i]); ctx.closePath(); ctx.fillStyle = e.fillColor; ctx.fill(); }
-        } else { // contiguous rect
+          if (focusedShape != null && e.arg?.key === focusedShape) { ctx.strokeStyle = pcolor; ctx.stroke(); }
+        }
+      } else { // contiguous rect
+        for (const e of shapes) {
           if (e.x>et || e.x+e.width<st) continue;
           const x = xscale(e.x);
           const y = offsetY+e.y;
           const width = xscale(e.x+e.width)-x;
-          ctx.beginPath();
-          ctx.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
-          ctx.fillStyle = e.fillColor; ctx.fill();
-          addBorder?.(width);
+          ctx.fillStyle = e.fillColor;
+          ctx.fillRect(x, y, width, e.height);
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
+          // draw highlights
+          if (highlightRect) {
+            const key = e.arg.key; if (key === focusedShape || key === link0 || key === link1) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); continue; }
+          }
+          if (splitRects && width > 10) { ctx.strokeStyle = scolor; ctx.strokeRect(x, y, width, e.height); }
         }
-        if (focusedShape != null && e.arg?.key === focusedShape) { ctx.strokeStyle = pcolor; ctx.stroke(); }
       }
       // draw row line
       if (rowBorderColor != null) {
         const y = offsetY+trackHeight-padding/2 - 0.5;
         drawLine(ctx, [0, canvasWidth], [y, y], { color:rowBorderColor });
       }
+    }
+    // draw the link
+    if (data.link != null) {
+      const [a, b] = [canvasRect(data.link[0], xscale), canvasRect(data.link[1], xscale)];
+      const [left, right] = a.x0 <= b.x0 ? [a, b] : [b, a];
+      const startX = left.x1, endX = right.x0;
+      const leftY = (left.y0+left.y1)/2, rightY = (right.y0+right.y1)/2;
+      const dx = endX-startX, bend = Math.max(12, Math.min(40, dx/2));
+      ctx.beginPath(); ctx.moveTo(startX, leftY); ctx.bezierCurveTo(startX+bend, leftY, endX-bend, rightY, endX, rightY); ctx.strokeStyle = "#858b9d"; ctx.stroke();
     }
     // draw axes
     ctx.translate(0, baseOffset);
@@ -664,9 +720,12 @@ async function renderProfiler(path, opts) {
     // draw markers
     ctx.translate(0, -baseOffset);
     ctx.textBaseline = "top";
+    let prevX = null;
     for (let i=0; i<markers.length; i++) {
       const m = markers[i];
       const x = xscale(m.ts), tx = x+2;
+      if (tx-prevX < 2) continue;
+      prevX = tx;
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       let maxWidth = canvasWidth-(tx);
       const nextMark = markers[i+1]?.ts;
@@ -676,20 +735,24 @@ async function renderProfiler(path, opts) {
     }
   }
 
+  let lastCanvasRect = null;
   function resize() {
-    const profiler = document.querySelector("#profiler");
-    const sideRect = rect("#device-list");
-    const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
+    const [width, height] = canvasDims();
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
-    zoomLevel = getZoomIdentity();
+    const newRect = rect(canvas);
+    if (lastCanvasRect != null && lastCanvasRect.width > 0) {
+      zoomLevel = d3.zoomIdentity.translate(zoomLevel.x+lastCanvasRect.left-newRect.left, 0).scale(zoomLevel.k*lastCanvasRect.width/width);
+    }
+    lastCanvasRect = { left:newRect.left, width };
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
+  zoomLevel = getZoomIdentity();
   canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
@@ -729,6 +792,7 @@ async function renderProfiler(path, opts) {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
+      tooltip.dataset.key = foundRect.key ?? "";
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
@@ -749,8 +813,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
   svg.call(svgZoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
-  const x0 = rect(".ctx-list-parent").right;
-  const x1 = rect(".metadata-parent").left;
+  const [x0, x1] = viewBounds();
   const pad = 16;
   const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
   const r = rect("#render");
@@ -821,7 +884,7 @@ const evtSources = [];
 // rewrite: a single UOp transformation
 // step: collection of rewrites
 // context: collection of steps
-const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set()};
+const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set(), expandedNodes:new Set()};
 function setState(ns) {
   saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
@@ -947,7 +1010,7 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      const pkts = step.name.includes("PKTS");
+      const pkts = step.query.includes("sqtt");
       return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
     }
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
@@ -997,13 +1060,13 @@ async function main() {
   }
   // ** Graph view
   // if we don't have a complete cache yet we start streaming graphs in this step
-  if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
+  if (!(ckey in cache) || (!cache[ckey].done && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
     const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
-      if (e.data === "[DONE]") return eventSource.close();
+      if (e.data === "[DONE]") { ret.done = true; eventSource.close(); return; }
       const chunk = JSON.parse(e.data);
       ret.push(chunk);
       // if it's the first one render this new rgaph
@@ -1016,12 +1079,13 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
-  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked, callSrcMask:state.callSrcMask });
-  render(getOpts());
-  showIndexing.toggle.onchange = () => render(getOpts());
-  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts()); }
-  showSink.toggle.onchange = () => render(getOpts());
+  const render = (layoutOpts, renderOpts) => renderDag({ data, opts:layoutOpts }, renderOpts);
+  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked,
+    callSrcMask:state.callSrcMask, expandedNodes:state.expandedNodes });
+  render(getOpts(), { recenter:currentRewrite === 0 });
+  showIndexing.toggle.onchange = () => render(getOpts(), { recenter:true });
+  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
+  showSink.toggle.onchange = () => render(getOpts(), { recenter:true });
   // ** right sidebar metadata
   metadata.innerHTML = "";
   if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
@@ -1044,7 +1108,7 @@ async function main() {
       metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
       const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
       for (const line of diff) {
-        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("−") ? "#d14b4b" : "#f0f0f5"}]));
+        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
         diffCode.appendChild(document.createElement("br"));
       }
       diffCode.className = "wrap";
@@ -1148,7 +1212,7 @@ document.addEventListener("keydown", (event) => {
   // r key toggles indexing
   if (event.key === "r") showIndexing.toggle.click();
   // c key toggles CALL src
-  if (event.key === "c") showCallSrc.toggle.click();
+  if (event.key === "c" && !event.ctrlKey && !event.metaKey && !event.altKey) showCallSrc.toggle.click();
   // s key toggles SINK
   if (event.key === "s") showSink.toggle.click();
   // g key toggles graph

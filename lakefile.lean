@@ -496,3 +496,7 @@ lean_exe tg4_essay_docs where
 lean_exe inline_kernel_smoke where
   root := `TinyGrad4.Test.InlineKernelSmoke
   moreLinkArgs := metalLinkArgs
+
+lean_exe inline_kernel_bench where
+  root := `TinyGrad4.Test.InlineKernelBench
+  moreLinkArgs := metalLinkArgs

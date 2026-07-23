@@ -1,4 +1,5 @@
 import VersoManual
+import TinyGrad4.Kernel.Inline
 
 open Verso.Genre Manual
 open Verso.Genre.Manual.InlineLean
@@ -214,9 +215,12 @@ axiom sorryProofAxiom {P : Prop} : P
 macro "sorry_proof" : term => `(sorryProofAxiom)
 ```
 
-This is then used in `TinyGrad4/Kernel/Laws.lean`, which openly presents algebraic rewrite laws for floating-point
-optimization as assumptions rather than proved theorems.
-That is useful scaffolding for graph rewrite work, but it is still scaffolding.
+`TinyGrad4/Kernel/Laws.lean` no longer uses it: the spec-level tensor layer
+(function tensors over intrinsically-typed `Shape.Index`) is now defined for
+real, its rewrite laws are proved (largely by `grind`), and floating-point
+algebra appears as *hypotheses* of the rewrites that need it rather than as
+axioms about `Float32`. The escape hatch remains available but currently has
+no users in the kernel layer.
 
 At the implementation layer, there are placeholder modules with almost no operational content:
 
@@ -237,13 +241,10 @@ def optimizeKeepUids (roots : List TinyGrad4.UOp) : List TinyGrad4.UOp :=
 That is not a hidden bug.
 It is a plainly labeled "this layer exists but has not been filled in yet".
 
-There are also direct `sorry` sites in the data stack:
-
-* `TinyGrad4/Data/Slice.lean`
-* `TinyGrad4/Data/Shard.lean`
-* `TinyGrad4/Data/MNISTRaw.lean`
-
-Those are narrower than the global proof axioms, but they are still unfinished work.
+In the data stack, the slice-bounds proofs (`TinyGrad4/Data/Slice.lean`) and
+the shard-index bound (`TinyGrad4/Data/Shard.lean`, `lt_of_lt_shardSize`) are
+now proved; the one remaining direct `sorry` is the unimplemented one-hot UOp
+path in `TinyGrad4/Data/MNISTRaw.lean`.
 
 # A Structural Problem: Prebuilt-Only Data Modules
 
@@ -262,6 +263,47 @@ This is worse than an ordinary TODO.
 It means part of the source-of-truth has escaped the repository.
 For a project that wants readable, inspectable, minimal code, restoring those modules as checked-in `.lean` sources
 should be near the front of the queue.
+
+# Inline Codegen: `kernel!`
+
+The newest layer cut is `TinyGrad4/Kernel/Inline.lean`: a custom term
+elaborator that compiles an ordinary Lean lambda into a device kernel *at
+elaboration time*. The examples below are typed — Verso elaborates them
+against this checkout, so if the elaborator regresses, this document fails to
+build.
+
+```lean
+open TinyGrad4.Kernel Inline in
+def essaySaxpy :=
+  kernel! "essay_saxpy" fun a x y => a * x + y
+```
+
+One definition produces four things, with no runtime rendering step:
+
+* `essaySaxpy.expr` — the reified spec (`Kernel.Expr`, the typed language
+  from `Kernel/Spec.lean`)
+* `essaySaxpy.metal` and `essaySaxpy.cSrc` — Metal and C source, generated
+  during elaboration and embedded as string literals in the binary
+* `essaySaxpy.fn` — a native Lean implementation
+* `essaySaxpy.denote_eq` — a proof that the spec and the implementation agree,
+  discharged automatically (`rfl` for arithmetic kernels; `simp`/`grind` for
+  conditionals)
+
+The proof is not decorative; it is a real theorem about this kernel:
+
+```lean
+open TinyGrad4.Kernel in
+example (env : Fin 3 → Float32) :
+    denote essaySaxpy.expr env = essaySaxpy.fn env :=
+  essaySaxpy.denote_eq env
+```
+
+`InlineKernel.runMetal` dispatches the embedded source through the existing
+Metal runtime (`runEwiseKernel`), and `lake exe inline_kernel_smoke` checks
+GPU output against `fn` elementwise on-device. This is the staged-specialization
+shape from `AGENTS.md` collapsed to a single stage boundary: the surface
+language is Lean, the optimizer is the elaborator, and the artifact carries
+its own correctness certificate.
 
 # What Actually Feels Solid
 

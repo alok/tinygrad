@@ -492,3 +492,7 @@ lean_lib TinyGrad4EssayDoc where
 lean_exe tg4_essay_docs where
   root := `TinyGrad4.EssayMain
   supportInterpreter := true
+
+lean_exe inline_kernel_smoke where
+  root := `TinyGrad4.Test.InlineKernelSmoke
+  moreLinkArgs := metalLinkArgs
